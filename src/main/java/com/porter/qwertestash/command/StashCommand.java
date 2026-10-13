@@ -252,24 +252,32 @@ public class StashCommand extends Command {
     }
 
     /**
-     * The one chest or barrel touching {@code pos}, including diagonally, or null if there's none or more than one.
+     * The one chest or barrel right next to {@code pos}: sharing a face first, then diagonally. Null if there's none,
+     * or more than one at the same distance.
      */
     private static @Nullable BlockPos onlyContainerNextTo(BlockPos pos) {
-        BlockPos found = null;
-        Stash stash = Stashes.current();
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    BlockPos p = pos.add(dx, dy, dz);
-                    if (!Containers.isContainer(p, true)) continue;
-                    // Both halves of one double chest count once
-                    if (found != null && stash != null && stash.boxAt(found) != null && stash.boxAt(found) == stash.boxAt(p)) continue;
-                    if (found != null) return null;
-                    found = p;
+        for (int pass = 1; pass <= 3; pass++) {
+            BlockPos found = null;
+            boolean ambiguous = false;
+            Stash stash = Stashes.current();
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        // Pass 1: sharing a face, pass 2: sharing an edge, pass 3: corners
+                        if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) != pass) continue;
+                        BlockPos p = pos.add(dx, dy, dz);
+                        if (!Containers.isContainer(p, true)) continue;
+                        // Both halves of one double chest count once
+                        if (found != null && stash != null && stash.boxAt(found) != null && stash.boxAt(found) == stash.boxAt(p)) continue;
+                        if (found != null) ambiguous = true;
+                        found = p;
+                    }
                 }
             }
+            if (ambiguous) return null;
+            if (found != null) return found;
         }
-        return found;
+        return null;
     }
 
     private void search(Embed embed, String query) {
