@@ -1,0 +1,48 @@
+name: Plugin Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Download AquariusProxy API jar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p libs
+          # Compiles against the latest AquariusProxy release. To pin a version, add: --tag <tag>
+          gh release download --repo aquariusnetwork9/AquariusProxy --pattern 'AquariusProxy.jar' --dir libs --clobber
+
+      - name: Elevate wrapper permissions
+        run: chmod +x ./gradlew
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          dependency-graph: generate-and-submit
+
+      - name: Build Plugin
+        run: ./gradlew build
+
+      - name: Upload Plugin Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: plugin
+          path: build/libs/*.jar
+          if-no-files-found: error

@@ -1,7 +1,14 @@
-# Qwerte Stash
+# Stash Sorter
 
-An [AquariusProxy](https://github.com/aquariusnetwork9/AquariusProxy) plugin: the stash sorter from the
-[Qwerte](https://github.com/Qwertze/Qwerte) Meteor addon, running on your proxy bot instead of your client.
+A stash-sorting bot for [AquariusProxy](https://github.com/aquariusnetwork9/AquariusProxy), the 2b2t proxy built on
+ZenithProxy. Point it at a room of chests and it reads them all, sorts every item into the chest whose sign describes
+it, cleans out mixed shulkers, merges partial stacks and empties drop-off chests, then keeps it that way. Anyone you
+trust can whisper the bot to ask where something is.
+
+It's the stash sorter from the [Qwerte](https://github.com/Qwertze/Qwerte) Meteor addon, running on your proxy bot
+instead of your client.
+
+## Features
 
 - Sorts a stash of chests and barrels into **tiers** (filled shulkers, empty shulkers, x64, x16, singles) or by the
   **signs** on them, written in your own words (`Totems`, `Crystals`, `Building Blocks`, `PvP`, `Misc`...).
@@ -9,7 +16,10 @@ An [AquariusProxy](https://github.com/aquariusnetwork9/AquariusProxy) plugin: th
 - **Repacks shulkers** (signs mode): items that belong elsewhere are taken out of mixed shulkers, and loose items are
   packed into shulkers that already hold only that item, before everything is put away. See below.
 - Scans the stash once and saves it. After that, opening a container through the proxy keeps it up to date.
-- Excluded and drop-off containers, stay-on mode, carry and keep slots.
+- **Drop-offs** are emptied completely: anything without a home, or whose chest is full, goes to a `Misc` chest, then
+  anywhere with room. With stay-on mode, the bot checks them every few seconds and keeps the stash sorted.
+- **Downstacks**: partial stacks of the same item in a chest are merged.
+- Excluded containers, and carry and keep slots so it never touches your own items.
 - Search from the terminal, Discord or in-game (`stash search <item>`), or let whitelisted players whisper the bot
   `find <item>`. It replies `/whisper <player> <Item> Can be Found At <x, y, z> @ <stash>`.
 
@@ -21,9 +31,10 @@ repacking.
 - AquariusProxy on a **`java`** release channel (the native build can't load plugins), Minecraft 1.21.4.
 
 ## Install
-1. Stop the proxy.
-2. Put `QwerteStash-<version>.jar` in the proxy's `plugins` folder.
-3. Start the proxy. `plugins` in the console should list `qwerte-stash`.
+1. Download `StashSorter-<version>.jar` from [Releases](https://github.com/DustinFoes/Stash-Sorter/releases).
+2. Stop the proxy.
+3. Put the jar in the proxy's `plugins` folder, removing any older Stash Sorter or `QwerteStash` jar.
+4. Start the proxy. `plugins` in the console should list `qwerte-stash`.
 
 Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qwerte-stash/stashes/`.
 
@@ -81,6 +92,20 @@ anywhere else, and doesn't stop repacking.
 Once everything is in place, partial stacks of the same item in each container are merged ("downstacked"), so a
 chest with three stacks of 20 cobblestone ends up with one of 60.
 
+## Signs
+Write signs the way you'd talk, on the side of a chest or standing on top of it. Each line is read on its own and all
+the lines together, and lists like `Logs, Planks & Wood` are split up.
+
+- Item names and nicknames: `Totems`, `Crystals`, `Rockets`, `Obby`, `Gaps`, `Pearls`, `XP`, `Echests`, `Diamonds`.
+- Categories: `PvP`, `Tools`, `Armor`, `Food`, `Building Blocks`, `Redstone`, `Wood`, `Stone`, `Mob Drops`,
+  `Potions`, `Enchanted Books`, `Nether`, `Decor`, `Valuables` and hundreds more.
+- Enchantments and potions: `Mending Books`, `Protection`, `Strength Potions`.
+- Catch-alls for leftovers: `Misc`, `Other`, `Overflow`, `Random`, `*`.
+- `Kits` or `Mixed Shulkers` to keep mixed shulkers whole.
+
 ## Building
 Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in
 `build/libs/`.
+
+## License
+GPL-3.0, the same as [Qwerte](https://github.com/Qwertze/Qwerte), which this is ported from.

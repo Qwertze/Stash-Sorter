@@ -11,8 +11,8 @@ import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 @Plugin(
     id = BuildConstants.PLUGIN_ID,
     version = BuildConstants.VERSION,
-    description = "Qwerte stash sorter: sorts a saved stash by tier or by sign, keeps it sorted, and lets you search it.",
-    url = "https://github.com/Qwertze/Qwerte",
+    description = "Stash Sorter: sorts a stash of chests by tier or by sign, repacks shulkers, keeps it sorted, and lets you search it.",
+    url = "https://github.com/DustinFoes/Stash-Sorter",
     authors = {"Qwertze"},
     mcVersions = {BuildConstants.MC_VERSION}
 )
