@@ -371,7 +371,9 @@ public class StashSorter extends AbstractFieldModule {
             if (place != null) return start(Job.Deposit, place);
 
             // Nowhere it belongs has room: put it down anywhere with space rather than walk around holding it
-            Box spare = nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && b.free() > 0 && !stalled.contains(b)).toList());
+            List<Box> roomy = stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && b.free() > 0 && !stalled.contains(b)).toList();
+            Box spare = nearest(roomy.stream().filter(this::isMisc).toList());
+            if (spare == null) spare = nearest(roomy);
             if (spare != null) return start(Job.Dump, spare);
 
             warn("Found nowhere with room for what I'm carrying, stopping. {} stacks from the stash are in the bot's inventory.", carried.size());
@@ -846,6 +848,8 @@ public class StashSorter extends AbstractFieldModule {
 
         long unreachable = stash.boxes.stream().filter(b -> b.unreachable).count();
         String extra = unreachable > 0 ? String.format(" Couldn't open %d containers, they were left alone.", unreachable) : "";
+        long leftInDropOffs = stash.boxes.stream().filter(b -> b.dropOff && b.known() && !b.unreachable).mapToLong(b -> b.contents.length - b.free()).sum();
+        if (leftInDropOffs > 0) extra += String.format(" %d stacks are still in drop-offs, there's no room left in the stash.", leftInDropOffs);
 
         if (CONFIG.stayOn) {
             if (moved > 0 || !idle) info("Sorted, moved {} stacks.{} Waiting for more to sort.", moved, extra);
@@ -1010,10 +1014,15 @@ public class StashSorter extends AbstractFieldModule {
             }
         }
 
+        // Drop-offs are emptied even when nowhere particular has room: whatever doesn't fit goes to a misc chest,
+        // or any container with space
+        int spare = source.dropOff ? spareRoom(source) : 0;
+
         for (int i = 0; i < source.contents.length; i++) {
             Item item = source.contents[i];
             if (item == null || !misplaced(item, source)) continue;
             if (destinationsFor(item).stream().anyMatch(b -> room.getOrDefault(b, 0) > 0)) return i;
+            if (spare > 0) return i;
         }
 
         return -1;
@@ -1184,8 +1193,27 @@ public class StashSorter extends AbstractFieldModule {
      * belong in.
      */
     private boolean misplaced(Item item, Box box) {
+        // Nothing stays in a drop-off
+        if (box.dropOff) return true;
+
         List<Box> places = destinationsFor(item);
         return !places.isEmpty() && !places.contains(box);
+    }
+
+    /**
+     * A container signed for anything: misc, other, overflow and the like.
+     */
+    private boolean isMisc(Box box) {
+        return box.labels.stream().anyMatch(Categories::isCatchAll);
+    }
+
+    /**
+     * Free slots across the stash, outside drop-offs and {@code except}, less what we're already carrying.
+     */
+    private int spareRoom(Box except) {
+        int free = 0;
+        for (Box box : stash.boxes) if (box != except && box.sortable() && !box.dropOff) free += box.free();
+        return free - carriedSlots().size();
     }
 
     private int misplacedCount(Box box) {

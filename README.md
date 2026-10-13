@@ -41,7 +41,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash name <name>` | Which stash to use. Each name on each server is its own stash |
 | `stash mode tiers` / `signs` | How to sort |
 | `stash exclude [x y z]` | Never sort into or out of this container. Toggles. With no position, the container you last right-clicked while connected |
-| `stash dropoff [x y z]` | Empty this container into the stash, for others to drop items in. Toggles |
+| `stash dropoff [x y z]` | Empty this container into the stash, for others to drop items in. Toggles. Always emptied completely: anything without a home, or whose chest is full, goes to a `Misc` chest, then anywhere with room |
 | `stash radius <blocks>` / `height <blocks>` | How far around the bot to look for new containers (8 / 3) |
 | `stash barrels on/off` | Include barrels (on) |
 | `stash delay <ticks>` | Ticks between inventory clicks (3). Raise it if the server rejects clicks |

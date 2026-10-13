@@ -47,6 +47,16 @@ public final class Categories {
 
     private static final int CATCH_ALL_SCORE = 1;
 
+    /**
+     * A sign line saying "anything goes here": misc, other, overflow and the like.
+     */
+    public static boolean isCatchAll(String line) {
+        for (String part : splitList(line)) {
+            if (CATCH_ALL.contains(stripFiller(normalize(part)))) return true;
+        }
+        return false;
+    }
+
     private static int partScore(String part, Item item) {
         String label = stripFiller(normalize(part));
         if (label.isEmpty()) return 0;
