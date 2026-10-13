@@ -12,7 +12,7 @@ import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
     id = BuildConstants.PLUGIN_ID,
     version = BuildConstants.VERSION,
     description = "Stash Sorter: sorts a stash of chests by tier or by sign, repacks shulkers, keeps it sorted, and lets you search it.",
-    url = "https://github.com/DustinFoes/Stash-Sorter",
+    url = "https://github.com/Qwertze/Stash-Sorter",
     authors = {"Qwertze"},
     mcVersions = {BuildConstants.MC_VERSION}
 )

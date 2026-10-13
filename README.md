@@ -31,7 +31,7 @@ repacking.
 - AquariusProxy on a **`java`** release channel (the native build can't load plugins), Minecraft 1.21.4.
 
 ## Install
-1. Download `StashSorter-<version>.jar` from [Releases](https://github.com/DustinFoes/Stash-Sorter/releases).
+1. Download `StashSorter-<version>.jar` from [Releases](https://github.com/Qwertze/Stash-Sorter/releases).
 2. Stop the proxy.
 3. Put the jar in the proxy's `plugins` folder, removing any older Stash Sorter or `QwerteStash` jar.
 4. Start the proxy. `plugins` in the console should list `qwerte-stash`.
