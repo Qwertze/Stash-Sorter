@@ -72,8 +72,16 @@ public class StashCommand extends Command {
     public LiteralArgumentBuilder<CommandContext> register() {
         return command("stash")
             .then(argument("toggle", toggle()).executes(c -> {
-                CONFIG.sorting = getToggle(c, "toggle");
-                MODULE.get(StashSorter.class).syncEnabledFromConfig();
+                boolean on = getToggle(c, "toggle");
+                StashSorter sorter = MODULE.get(StashSorter.class);
+                sorter.clearProblem();
+                CONFIG.sorting = on;
+                sorter.syncEnabledFromConfig();
+
+                if (on && !CONFIG.sorting) {
+                    c.getSource().getEmbed().title("Stash Sorter Couldn't Start").description(sorter.problem() != null ? sorter.problem() : "See the terminal for why.").errorColor();
+                    return;
+                }
                 c.getSource().getEmbed().title("Stash Sorter " + toggleStrCaps(CONFIG.sorting));
             }))
             .then(literal("search").then(argument("query", greedyString()).executes(c -> {

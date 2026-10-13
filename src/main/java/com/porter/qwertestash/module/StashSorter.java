@@ -145,10 +145,7 @@ public class StashSorter extends AbstractFieldModule {
             return;
         }
 
-        if (!pickCarrySlots()) {
-            stop();
-            return;
-        }
+        if (!pickCarrySlots()) return;
 
         boolean existed = Stashes.current() != null;
         stash = Stashes.currentOrNew();
@@ -162,14 +159,12 @@ public class StashSorter extends AbstractFieldModule {
 
         long sortable = stash.boxes.stream().filter(b -> !b.excluded && !b.dropOff).count();
         if (sortable < 2) {
-            error("Found {} container(s) to sort within {} blocks, need at least 2.", sortable, CONFIG.radius);
-            stop();
+            fail(String.format("Found %d container(s) to sort within %d blocks of the bot, need at least 2.", sortable, CONFIG.radius));
             return;
         }
 
         if (CONFIG.mode == Mode.Signs && stash.boxes.stream().allMatch(b -> b.labels.isEmpty())) {
-            error("None of the containers have signs on them. Put signs on them, or use tiers mode.");
-            stop();
+            fail("None of the containers have signs on them. Put signs on them, or use tiers mode.");
             return;
         }
 
@@ -207,6 +202,29 @@ public class StashSorter extends AbstractFieldModule {
         syncEnabledFromConfig();
     }
 
+    private @Nullable String problem;
+
+    /**
+     * Why sorting last stopped before it could start, for the command to report. Null if it didn't.
+     */
+    public @Nullable String problem() {
+        return problem;
+    }
+
+    public void clearProblem() {
+        problem = null;
+    }
+
+    /**
+     * Stops with a reason, shown in the terminal, in-game and in the command's reply.
+     */
+    private void fail(String reason) {
+        problem = reason;
+        error(reason);
+        inGameAlertActivePlayer("<red>" + reason);
+        stop();
+    }
+
     /**
      * Works out which slots to carry stash items in, from the config or, by default, every empty slot.
      */
@@ -227,7 +245,11 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         if (carry.isEmpty()) {
-            error(designated ? "The carry slots are all full. Empty at least one of them." : "Empty at least one inventory slot to carry items in.");
+            int filled = 0;
+            for (int i = 0; i < 36; i++) if (inventoryItem(i) != null) filled++;
+            String slots = String.format(" The bot has %d of 36 inventory slots filled%s.", filled,
+                keep.isEmpty() ? "" : ", and " + keep.size() + " are keep slots");
+            fail((designated ? "The carry slots are all full or kept. Empty at least one of them." : "No empty inventory slot to carry items in.") + slots);
             return false;
         }
         return true;
