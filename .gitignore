@@ -1,0 +1,15 @@
+/.idea/*
+!/.idea/runConfigurations
+*.iml
+/run/
+/build/
+/.gradle/
+*.class
+/out/
+.DS_Store
+# Local AquariusProxy API jar — provide your own, see README
+/libs/
+# any json-like file in the top directory (configs, auth cache, etc.)
+/*.json*
+*.tmp
+/.vscode
