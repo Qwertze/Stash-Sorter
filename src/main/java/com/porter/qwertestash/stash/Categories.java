@@ -47,6 +47,19 @@ public final class Categories {
 
     private static final int CATCH_ALL_SCORE = 1;
 
+    private static final Set<String> KEEP_WHOLE = Set.of("kit", "pvp kit", "kit shulker", "mixed shulker", "whole shulker",
+        "keep whole", "loot shulker", "unsorted shulker");
+
+    /**
+     * A sign line asking for mixed shulkers whole, like "kits", instead of having them repacked.
+     */
+    public static boolean isKeepWhole(String line) {
+        for (String part : splitList(line)) {
+            if (KEEP_WHOLE.contains(singularPhrase(stripFiller(normalize(part))))) return true;
+        }
+        return false;
+    }
+
     /**
      * A sign line saying "anything goes here": misc, other, overflow and the like.
      */

@@ -74,8 +74,12 @@ In signs mode, the bot sorts what's inside shulkers too:
 To do this the bot puts the shulker down beside itself, opens it, moves the items, then breaks it and picks it back
 up. It needs a free spot beside it on solid ground with air above, and a pickaxe makes breaking quicker.
 
-Left as they are: named shulkers, and any shulker when a sign asks for shulkers whole, like `Kits` or `Full
-Shulkers`. If you keep kits, give them a `Kits` chest so they aren't taken apart.
+Named shulkers are never taken apart. To keep kits whole, sign a chest `Kits` (or `Mixed Shulkers`): mixed shulkers
+then go there as they are instead of being repacked. A chest signed `Shulkers` is just for shulkers that don't belong
+anywhere else, and doesn't stop repacking.
+
+Once everything is in place, partial stacks of the same item in each container are merged ("downstacked"), so a
+chest with three stacks of 20 cobblestone ends up with one of 60.
 
 ## Building
 Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in
