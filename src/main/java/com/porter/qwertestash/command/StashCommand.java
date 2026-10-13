@@ -215,9 +215,17 @@ public class StashCommand extends Command {
             embed.title("Which Container?").description("Give its position, or right-click it while connected to the proxy first.").errorColor();
             return;
         }
+        String note = "";
         if (Containers.isLoaded(pos) && !Containers.isContainer(pos, true)) {
-            embed.title("Not a Container").description(pos.x() + ", " + pos.y() + ", " + pos.z() + " isn't a chest or barrel.").errorColor();
-            return;
+            // Easy to be a block off, especially with negative coordinates: use the one container right next to it
+            BlockPos near = onlyContainerNextTo(pos);
+            if (near == null) {
+                embed.title("Not a Container").description(pos.x() + ", " + pos.y() + ", " + pos.z()
+                    + " isn't a chest or barrel, and there isn't exactly one right next to it. With negative coordinates, round down: -5.3 is block -6.").errorColor();
+                return;
+            }
+            note = String.format(" (%d, %d, %d isn't a container, so I used the one next to it.)", pos.x(), pos.y(), pos.z());
+            pos = near;
         }
 
         Stash stash = Stashes.currentOrNew();
@@ -231,16 +239,37 @@ public class StashCommand extends Command {
         if (exclude) {
             box.excluded = !box.excluded;
             box.dropOff = false;
-            embed.title(box.excluded ? "Excluded" : "No Longer Excluded").description(at + (box.excluded ? " won't be sorted." : " will be sorted again."));
+            embed.title(box.excluded ? "Excluded" : "No Longer Excluded").description(at + (box.excluded ? " won't be sorted." : " will be sorted again.") + note);
         }
         else {
             box.dropOff = !box.dropOff;
             box.excluded = false;
-            embed.title(box.dropOff ? "Drop-off Set" : "Drop-off Removed").description(at + (box.dropOff ? " will be emptied into the stash." : " is a normal container again."));
+            embed.title(box.dropOff ? "Drop-off Set" : "Drop-off Removed").description(at + (box.dropOff ? " will be emptied into the stash." : " is a normal container again.") + note);
         }
 
         stash.save();
         Stashes.version++;
+    }
+
+    /**
+     * The one chest or barrel touching {@code pos}, including diagonally, or null if there's none or more than one.
+     */
+    private static @Nullable BlockPos onlyContainerNextTo(BlockPos pos) {
+        BlockPos found = null;
+        Stash stash = Stashes.current();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    BlockPos p = pos.add(dx, dy, dz);
+                    if (!Containers.isContainer(p, true)) continue;
+                    // Both halves of one double chest count once
+                    if (found != null && stash != null && stash.boxAt(found) != null && stash.boxAt(found) == stash.boxAt(p)) continue;
+                    if (found != null) return null;
+                    found = p;
+                }
+            }
+        }
+        return found;
     }
 
     private void search(Embed embed, String query) {
