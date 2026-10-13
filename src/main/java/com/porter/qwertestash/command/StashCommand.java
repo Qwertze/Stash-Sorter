@@ -54,6 +54,8 @@ public class StashCommand extends Command {
                 "delay <ticks>",
                 "stayOn on/off",
                 "recheck <seconds>",
+                "repack on/off",
+                "newBulkAt <stacks>",
                 "carry <slots>/clear",
                 "keep <slots>/clear",
                 "rescan",
@@ -122,6 +124,14 @@ public class StashCommand extends Command {
             .then(literal("recheck").then(argument("seconds", integer(5, 3600)).executes(c -> {
                 CONFIG.recheckSeconds = getInteger(c, "seconds");
                 c.getSource().getEmbed().title("Recheck Set");
+            })))
+            .then(literal("repack").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.repack = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Repack " + toggleStrCaps(CONFIG.repack));
+            })))
+            .then(literal("newBulkAt").then(argument("stacks", integer(0, 27)).executes(c -> {
+                CONFIG.newBulkAt = getInteger(c, "stacks");
+                c.getSource().getEmbed().title("New Bulk Shulker Threshold Set");
             })))
             .then(literal("carry")
                 .then(literal("clear").executes(c -> {
@@ -271,6 +281,7 @@ public class StashCommand extends Command {
             .addField("Stash", "\"" + CONFIG.stashName + "\": " + stashLine)
             .addField("Mode", CONFIG.mode.name())
             .addField("Area", "radius " + CONFIG.radius + ", height " + CONFIG.height + ", barrels " + toggleStr(CONFIG.barrels))
+            .addField("Repack Shulkers", toggleStr(CONFIG.repack) + " (signs mode, new bulk at " + CONFIG.newBulkAt + " stacks)")
             .addField("Stay On", toggleStr(CONFIG.stayOn) + " (recheck " + CONFIG.recheckSeconds + "s)")
             .addField("Carry / Keep Slots", (CONFIG.carrySlots.isBlank() ? "every empty slot" : CONFIG.carrySlots) + " / " + (CONFIG.keepSlots.isBlank() ? "none" : CONFIG.keepSlots))
             .addField("Delay", CONFIG.delayTicks + " ticks")

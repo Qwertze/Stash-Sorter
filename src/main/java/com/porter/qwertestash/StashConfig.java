@@ -31,6 +31,15 @@ public class StashConfig {
     /** Seconds between drop-off checks in stay-on mode. */
     public int recheckSeconds = 30;
 
+    /**
+     * Signs mode: take items that belong elsewhere out of mixed shulkers, and pack loose items into shulkers that
+     * already hold only that item. Named shulkers, and shulkers when a sign asks for them whole (like "kits"), are
+     * left as they are.
+     */
+    public boolean repack = true;
+    /** Start a new bulk shulker from an empty one once carrying this many stacks of one item. 0 only tops up existing ones. */
+    public int newBulkAt = 9;
+
     /** Slots to carry stash items in, like "28-36". 1-9 hotbar, 10-36 inventory from the top left. Blank uses every empty slot. */
     public String carrySlots = "";
     /** Slots never to touch. */
