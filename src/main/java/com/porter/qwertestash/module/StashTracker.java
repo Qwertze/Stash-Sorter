@@ -174,7 +174,7 @@ public class StashTracker extends Module {
                             editorOpened = true;
                         }
                         else if (awaited != null) {
-                            LOG.info("Qwerte Stash: a sign editor opened at {} {} {} (front: {}), not the one awaited at {}.",
+                            LOG.debug("Qwerte Stash: a sign editor opened at {} {} {} (front: {}), not the one awaited at {}.",
                                 packet.getX(), packet.getY(), packet.getZ(), packet.isFrontText(), awaited);
                         }
                     } catch (RuntimeException e) {

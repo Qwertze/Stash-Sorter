@@ -1390,7 +1390,7 @@ public class StashSorter extends AbstractFieldModule {
         BlockPos at = tracker.editorAt();
         if (at == null || !Containers.signSpots(target).contains(at) || !signThere(at)) return false;
 
-        info("The sign editor opened at {}, not {}: writing there, it is on the chest at {}.", at, labelFace.sign(), target.pos);
+        debug("The sign editor opened at {}, not {}: writing there, it is on the chest at {}.", at, labelFace.sign(), target.pos);
         labelFace = new Containers.Face(at, labelFace.dir(), labelFace.part(), labelFace.stand());
         editorFront = tracker.editorFront();
         return true;
@@ -1472,7 +1472,7 @@ public class StashSorter extends AbstractFieldModule {
         MODULE.get(StashTracker.class).stopAwaitingEditor();
         activity.releaseOurPathing();
         sendClientPacketAsync(new ServerboundSignUpdatePacket(spot.x(), spot.y(), spot.z(), labelLines, editorFront));
-        info("Writing \"{}\" on the sign at {} ({} side).", labelText, spot, editorFront ? "front" : "back");
+        debug("Writing \"{}\" on the sign at {} ({} side).", labelText, spot, editorFront ? "front" : "back");
         ownSignUntil.put(target, tickCount + 20 * 120L);
         labelStep = LabelStep.Verify;
         labelTicks = 0;
@@ -2768,10 +2768,6 @@ public class StashSorter extends AbstractFieldModule {
     private final Map<Box, Long> signRecheck = new HashMap<>();
 
     private void clearStalled() {
-        if (!stalled.isEmpty() && passJobs >= 3) {
-            StackTraceElement at = new Throwable().getStackTrace()[1];
-            info("Stalled containers ({}) forgotten at {}:{}.", stalled.size(), at.getMethodName(), at.getLineNumber());
-        }
         stalled.clear();
         stalled.addAll(signHeld);
     }
@@ -2886,7 +2882,7 @@ public class StashSorter extends AbstractFieldModule {
         if (actions > 0 && target != null) signAbortRuns.remove(target);
         int visits = target == null ? 0 : boxVisits.getOrDefault(target, 0);
         if (visits >= 3 && job != Job.Survey && loopReported.add(target)) {
-            info("Container at {} has been the target of {} jobs without the backlog shrinking: last job {}, {} actions, {}, {}, {}, carrying {} stacks.",
+            debug("Container at {} has been the target of {} jobs without the backlog shrinking: last job {}, {} actions, {}, {}, {}, carrying {} stacks.",
                 target.pos, visits, job, actions, confirmed ? "confirmed" : "unconfirmed", progressed ? "changed something" : "changed nothing",
                 signAbort ? "ended by a pending sign" : "not a sign abort", carriedSlots().size());
         }
@@ -3056,7 +3052,7 @@ public class StashSorter extends AbstractFieldModule {
             // Not the container's fault: it is looked at again once its sign has settled, so it is not stalled
             signAbort = true;
             signAborted.add(target);
-            if (signAbortReported.add(target)) info("Sign at {} reported changing, waiting for it to settle.", target.pos);
+            if (signAbortReported.add(target)) debug("Sign at {} reported changing, waiting for it to settle.", target.pos);
             // The same container aborted again and again without a click: held until its sign text really changes
             if (actions == 0 && signAbortRuns.merge(target, 1, Integer::sum) >= 2) {
                 signHeld.add(target);
@@ -3127,7 +3123,7 @@ public class StashSorter extends AbstractFieldModule {
             if (actions == 0 && !signAbort && noOpReported.add(futileKey(target, job))) {
                 String held = job == Job.Fetch && wantSlot >= 0 && wantSlot < target.contents.length
                     ? (target.contents[wantSlot] == null ? "empty" : target.contents[wantSlot].id) : "-";
-                info("{} at {} did nothing: {} free carry slots, {} carried, slot {} holds {}.",
+                debug("{} at {} did nothing: {} free carry slots, {} carried, slot {} holds {}.",
                     job, target.pos, freeCarryCount(), carriedSlots().size(), wantSlot, held);
             }
             finishJob();

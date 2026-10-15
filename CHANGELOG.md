@@ -32,10 +32,9 @@ All notable changes to Stash Sorter are documented here. The format follows
 - The `End Blocks` sign category is narrower: shulker boxes and elytra no longer match it, only end blocks do.
 - Sorting waits for other modules rather than fighting them, and the log says so ("Waiting for another module
   (pathing)", then "Resuming.").
-- Extra diagnostic INFO lines in the log to help track down problems, for example "Container at ... has been the
-  target of N jobs without the backlog shrinking", "... did nothing", "Stalled containers (N) forgotten at ...", and
-  "Sign at ... reported changing, waiting for it to settle". Also new warnings for stopped runs and blocked shulker
-  placement.
+- Extra diagnostic lines at debug level, kept out of the normal log, to help track down problems: for example
+  "Container at ... has been the target of N jobs without the backlog shrinking", "... did nothing" and "Sign at ...
+  reported changing, waiting for it to settle". Also new warnings for stopped runs and blocked shulker placement.
 - The `stash` status and help now list the new settings.
 
 ### Fixed
