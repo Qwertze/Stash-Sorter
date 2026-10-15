@@ -3,6 +3,20 @@
 All notable changes to Stash Sorter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-10-15
+
+Everything from 1.2.0-dev.1 below, plus these fixes found while testing it:
+
+### Fixed
+- A PearlPlus pearl pull could be taken over by sorting (most visibly the full re-read after coming online): the
+  sorter re-requested pathing in the same tick the pull started. Another module's pathing or interaction now always
+  wins straight away ("Giving way to ..."), the sorter never requests over anyone, and it waits a moment after its own
+  request fails before trying again.
+- Auto drop could recognise whose item it picked up but not find it in the inventory to give back ("couldn't find
+  the ... to give back"). It now finds the slot the item landed in, including the hand and offhand, waits for the
+  inventory to update, and ignores pickups made while a player is controlling the account.
+- The README now states the plugin needs AquariusProxy 5.13.0+ (java.1.21.4) and does not load on stock ZenithProxy.
+
 ## [1.2.0-dev.1] - 2026-10-15
 
 ### Added

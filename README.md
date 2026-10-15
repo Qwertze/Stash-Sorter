@@ -30,7 +30,11 @@ leave. It never breaks or places blocks to reach a container; the only blocks it
 repacking, and signs it writes for new categories (`stash autoLabel`).
 
 ## Requirements
-- AquariusProxy on a **`java`** release channel (the native build can't load plugins), Minecraft 1.21.4.
+- [AquariusProxy](https://github.com/aquariusnetwork9/AquariusProxy) **5.13.0** or newer on the **`java.1.21.4`** release
+  channel (the native `linux` build can't load plugins), Minecraft 1.21.4.
+- It does **not** load on stock ZenithProxy: AquariusProxy and ZenithProxy use different plugin APIs, and each refuses
+  the other's plugins.
+- Nothing else to install. The jar has no extra dependencies, and its settings file is created on first start.
 
 ## Install
 1. Download `StashSorter-<version>.jar` from [Releases](https://github.com/Qwertze/Stash-Sorter/releases).

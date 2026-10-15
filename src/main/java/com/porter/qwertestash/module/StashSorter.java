@@ -1882,6 +1882,7 @@ public class StashSorter extends AbstractFieldModule {
      * Another module started something. Everything of ours is let go of first: the path, the clicks, the window.
      */
     private void beginYield(Activity.Reason reason) {
+        if (reason == Activity.Reason.Pathing && waitStart < 0) info("Giving way to {}.", activity.foreignWho != null ? activity.foreignWho : "another module's pathing");
         lastForeignTick = tickCount;
         lastReason = reason;
         gate = Gate.Yielding;
@@ -3273,6 +3274,7 @@ public class StashSorter extends AbstractFieldModule {
         }
         // On the way back to where one went down before
         if (standRetries > 0 && activity.ownPathing()) return;
+        if (!activity.mayRequest()) return;
         placed = safeSpot(null);
         if (placed == null) {
             // Walk to where one went down before and look again; failing that, pause a while instead of giving up
@@ -3281,7 +3283,7 @@ public class StashSorter extends AbstractFieldModule {
                 return;
             }
             BlockPos stand = lastGoodStand;
-            if (stand != null && !playerFeet().equals(stand) && standRetries < 2) {
+            if (stand != null && !playerFeet().equals(stand) && standRetries < 2 && activity.mayRequest()) {
                 standRetries++;
                 debug("No room beside the bot at {}, walking back to {} where a shulker went down before.", playerFeet(), stand);
                 requestWalk(stand);
@@ -3322,7 +3324,7 @@ public class StashSorter extends AbstractFieldModule {
 
         // The place request failed by itself (an entity in the way, nothing to place against): let go of it, so it is
         // not taken for another module, and try the next spot; after three, repacking waits a while
-        if (activity.superseded() && !activity.replacedByOther() && handleTicks > 2) {
+        if (activity.ownFailureSettled() && handleTicks > 2) {
             BlockPos failed = placed;
             failedSpots.add(failed);
             activity.releaseOurPathing();
@@ -3410,7 +3412,7 @@ public class StashSorter extends AbstractFieldModule {
             return;
         }
 
-        if ((handleTicks == 1 || handleTicks % 20 == 0) && !activity.ownPathing()) {
+        if ((handleTicks == 1 || handleTicks % 20 == 0) && activity.mayRequest()) {
             if (!placed(placed)) {
                 endHandling();
                 return;
@@ -3871,8 +3873,8 @@ public class StashSorter extends AbstractFieldModule {
             return;
         }
 
-        // The last click is still on its way to the container: asking again would start it over
-        if (activity.ownPathing()) return;
+        // The last click is still on its way to the container: asking again would start it over. Nor over anyone else's
+        if (activity.ownPathing() || !activity.mayRequest()) return;
 
         tries++;
         BlockPos pos = nearestPart(target);

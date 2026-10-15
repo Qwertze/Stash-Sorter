@@ -7,6 +7,8 @@ import com.aquarius.feature.player.InputRequestFuture;
 import com.aquarius.util.RequestFuture;
 import org.jspecify.annotations.Nullable;
 
+import java.util.List;
+
 import static com.aquarius.Globals.BARITONE;
 import static com.aquarius.Globals.INPUTS;
 import static com.aquarius.Globals.INVENTORY;
@@ -124,6 +126,10 @@ final class Activity {
      * Remembers a request of ours to Baritone. Asking again replaces the earlier one, as it does in Baritone.
      */
     void notePath(PathingRequestFuture future, IBaritoneProcess process, @Nullable Goal goal, long tick) {
+        if (ourProcess != null && ourProcess != process) {
+            recent = ourProcess;
+            recentUntil = tick + 5;
+        }
         ourPath = future;
         ourProcess = process;
         ourGoal = goal;
@@ -158,11 +164,47 @@ final class Activity {
      * place, no path, nothing to click), where the process is idle and still the last one in control.
      */
     /**
+     * Another process (not the one our request went to) that has a request right now. Each process knows its own state
+     * the moment it is asked, while Baritone's own list of active ones is a tick behind, so this is what catches a
+     * module that asked for something earlier this very tick.
+     */
+    @Nullable IBaritoneProcess otherProcessActive() {
+        IBaritoneProcess mine = ourProcess;
+        for (IBaritoneProcess process : List.<IBaritoneProcess>of(BARITONE.getCustomGoalProcess(), BARITONE.getInteractWithProcess(),
+            BARITONE.getFollowProcess(), BARITONE.getGetToBlockProcess(), BARITONE.getMineProcess(), BARITONE.getClearAreaProcess())) {
+            if (process != mine && !(process == recent && now <= recentUntil) && process.isActive()) return process;
+        }
+        return null;
+    }
+
+    // The process of ours that was just let go of or replaced: it takes a tick or two to stop, which is not another module
+    private @Nullable IBaritoneProcess recent;
+    private long recentUntil = LONG_AGO;
+
+    /** What we last gave way to, for the log. */
+    volatile @Nullable String foreignWho;
+
+    // Our request failed this many ticks ago, when it was first noticed: before this long has passed it isn't known whether
+    // it failed by itself or was replaced by another module's, which only shows on the next tick or two
+    private static final int FAILURE_LOOKBACK = 4;
+    private static final int REREQUEST_GAP = 10;
+    private long failedAt = LONG_AGO;
+
+    /**
+     * Our request failed by itself, and long enough ago that nothing else has shown up since.
+     */
+    boolean ownFailureSettled() {
+        return superseded() && !replacedByOther() && otherProcessActive() == null && now - failedAt >= FAILURE_LOOKBACK;
+    }
+
+    /**
      * A new Baritone request of ours may be made: none of ours is outstanding, nothing else is running, and our last one
      * wasn't just taken over by another module (whose request would be replaced by ours).
      */
     boolean mayRequest() {
-        return !ownPathing() && !BARITONE.isActive() && !(superseded() && replacedByOther());
+        if (ownPathing() || BARITONE.isActive() || otherProcessActive() != null) return false;
+        // Right after our request failed, nothing is asked for until the cause is clear and a few ticks have passed
+        return !(superseded() && (replacedByOther() || now - failedAt < REREQUEST_GAP));
     }
 
     boolean replacedByOther() {
@@ -187,6 +229,10 @@ final class Activity {
             else if (ourPath != null && !ourPath.isDone()) {
                 process.stop();
             }
+        }
+        if (ourProcess != null) {
+            recent = ourProcess;
+            recentUntil = now + 5;
         }
         ourPath = null;
         ourProcess = null;
@@ -227,14 +273,25 @@ final class Activity {
         // request replaced it (a new request completes the one before it as failed). That is theirs, and no grace
         // applies: nothing of ours is asked again until we've given way and they've been quiet. A request that
         // failed with Baritone idle was just a path not found, and is ours to try again
+        IBaritoneProcess other = otherProcessActive();
+        if (other != null) {
+            foreignWho = other.displayName();
+            return Reason.Pathing;
+        }
+
         if (superseded()) {
-            if (replacedByOther()) return Reason.Pathing;
+            if (replacedByOther()) {
+                foreignWho = "another module's request";
+                return Reason.Pathing;
+            }
             // It failed by itself: still ours, and the sorter deals with it. Baritone's active list is a tick late, so
             // for now it is not held against anyone, once for each failed request
             if (ourPath != notedFailure) {
                 notedFailure = ourPath;
+                failedAt = tick;
                 lastOwnTick = tick;
             }
+            // Not known yet whether it failed by itself: still being watched. Nothing here is held against anyone
         }
 
         boolean own = ownPathing();

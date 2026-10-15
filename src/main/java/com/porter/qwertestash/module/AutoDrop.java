@@ -130,6 +130,9 @@ public class AutoDrop extends Module {
         // The inventory as it was when the pickup happened, to see which slot it changed
         final int[] beforeId = new int[46], beforeAmount = new int[46];
         int gained;
+        // Whether the slot found holds the very same components, and when looking for it began
+        boolean exact = true;
+        long findStart;
         final long at = System.currentTimeMillis();
         Stage stage = Stage.Find;
         int slot = -1, countBefore, ticks, aims;
@@ -164,6 +167,9 @@ public class AutoDrop extends Module {
     public List<EventConsumer<?>> registerEvents() {
         return List.of(
             of(ClientBotTick.class, -500, this::onTick),
+            // A player taking the account over, or giving it back, leaves what was picked up meanwhile to them
+            of(ClientBotTick.Starting.class, e -> returns.clear()),
+            of(ClientBotTick.Stopped.class, e -> returns.clear()),
             of(ClientDisconnectEvent.class, e -> clear())
         );
     }
@@ -352,6 +358,9 @@ public class AutoDrop extends Module {
         Attribution who = attributions.remove(packet.getCollectedEntityId());
         if (who == null) return;
 
+        // Someone is playing the account: what it picks up is theirs to decide
+        if (System.currentTimeMillis() - lastBotTick > 500) return;
+
         // Picked up on purpose: a shulker being collected, or anything Baritone was sent to fetch
         StashSorter sorter = sorter();
         if (sorter.isCollecting() || BARITONE.getFollowProcess().isActive()) return;
@@ -396,7 +405,10 @@ public class AutoDrop extends Module {
 
     // Giving it back
 
+    private volatile long lastBotTick;
+
     private void onTick(ClientBotTick event) {
+        lastBotTick = System.currentTimeMillis();
         // Learn what each attributed item is while it is still around
         for (Map.Entry<Integer, Attribution> entry : attributions.entrySet()) {
             if (entry.getValue().stack == null) entry.getValue().stack = stackOf(CACHE.getEntityCache().get(entry.getKey()));
@@ -431,11 +443,13 @@ public class AutoDrop extends Module {
 
         switch (r.stage) {
             case Find -> {
+                if (r.findStart == 0) r.findStart = now;
                 r.slot = find(r);
                 if (r.slot < 0) {
-                    if (now - r.at > 4_000) {
+                    if (now - r.findStart > 4_000) {
                         returns.poll();
                         LOG.info("Qwerte Stash: couldn't find the {} to give back to {}.", what, r.name);
+                        LOG.debug("Qwerte Stash: looked for {} x{} among: {}", what, r.amount, describeSlots(r));
                     }
                     return;
                 }
@@ -473,7 +487,7 @@ public class AutoDrop extends Module {
                 // Still what the pickup left in that very slot, or nothing is thrown
                 ItemStack there = CACHE.getPlayerCache().getPlayerInventory().get(r.slot);
                 if (there == null || there.getAmount() != r.countBefore || there.getId() != r.template.getId()
-                    || !Objects.equals(r.template.getDataComponentsOrEmpty(), there.getDataComponentsOrEmpty())) {
+                    || (r.exact && !Objects.equals(r.template.getDataComponentsOrEmpty(), there.getDataComponentsOrEmpty()))) {
                     returns.poll();
                     LOG.info("Qwerte Stash: the {} for {} moved before it could be given back, keeping it.", what, r.name);
                     return;
@@ -514,22 +528,76 @@ public class AutoDrop extends Module {
      */
     private int find(Return r) {
         List<ItemStack> inventory = CACHE.getPlayerCache().getPlayerInventory();
-        int best = -1;
-        int bestGain = 0;
-        for (int i = 9; i <= 44 && i < inventory.size(); i++) {
+        int id = r.template.getId();
+
+        // The slot the pickup changed: the same item, with the same components, that has more in it than before. The
+        // main inventory, the hotbar (the hand included) and the offhand
+        int best = -1, bestGain = 0;
+        List<Integer> sameId = new ArrayList<>();
+        for (int i = 9; i <= 45 && i < inventory.size(); i++) {
             ItemStack stack = inventory.get(i);
-            if (stack == null || stack.getAmount() <= 0 || stack.getId() != r.template.getId()) continue;
-            if (!Objects.equals(r.template.getDataComponentsOrEmpty(), stack.getDataComponentsOrEmpty())) continue;
-            // Only the slot the pickup changed, and by how much
-            int was = r.beforeId[i] == stack.getId() + 1 ? r.beforeAmount[i] : 0;
-            int gain = stack.getAmount() - was;
-            if (gain <= 0) continue;
+            if (stack == null || stack.getAmount() <= 0 || stack.getId() != id) continue;
+            int gain = stack.getAmount() - (r.beforeId[i] == id + 1 ? r.beforeAmount[i] : 0);
+            if (gain > 0) sameId.add(i);
+            if (gain <= 0 || !Objects.equals(r.template.getDataComponentsOrEmpty(), stack.getDataComponentsOrEmpty())) continue;
             if (best == -1 || (gain == r.amount && bestGain != r.amount)) {
                 best = i;
                 bestGain = gain;
             }
         }
-        r.gained = bestGain;
-        return best;
+        if (best >= 0) {
+            r.exact = true;
+            r.gained = bestGain;
+            return best;
+        }
+
+        // The components may read differently on the ground and in a slot: then the one slot of that item that grew
+        if (sameId.size() == 1) {
+            int i = sameId.get(0);
+            ItemStack stack = inventory.get(i);
+            r.exact = false;
+            r.gained = stack.getAmount() - (r.beforeId[i] == id + 1 ? r.beforeAmount[i] : 0);
+            return i;
+        }
+
+        // The inventory may already have been updated when the pickup was seen: if the bot had none of this item before,
+        // the one slot that holds it is the pickup
+        int before = 0;
+        for (int i = 0; i < 46; i++) if (r.beforeId[i] == id + 1) before += r.beforeAmount[i];
+        if (before == 0) {
+            int only = -1, count = 0;
+            for (int i = 9; i <= 45 && i < inventory.size(); i++) {
+                ItemStack stack = inventory.get(i);
+                if (stack != null && stack.getAmount() > 0 && stack.getId() == id) {
+                    only = i;
+                    count++;
+                }
+            }
+            if (count == 1) {
+                r.exact = Objects.equals(r.template.getDataComponentsOrEmpty(), inventory.get(only).getDataComponentsOrEmpty());
+                r.gained = Math.min(r.amount, inventory.get(only).getAmount());
+                return only;
+            }
+        }
+        r.gained = 0;
+        return -1;
+    }
+
+    /**
+     * For the log when nothing was found: every slot holding the item, now and before the pickup.
+     */
+    private String describeSlots(Return r) {
+        List<ItemStack> inventory = CACHE.getPlayerCache().getPlayerInventory();
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < inventory.size() && i < 46; i++) {
+            ItemStack stack = inventory.get(i);
+            boolean there = stack != null && stack.getAmount() > 0 && stack.getId() == r.template.getId();
+            boolean was = r.beforeId[i] == r.template.getId() + 1;
+            if (!there && !was) continue;
+            out.append("slot ").append(i).append(": now ").append(there ? stack.getAmount() : 0).append(", before ").append(was ? r.beforeAmount[i] : 0)
+                .append(there ? (Objects.equals(r.template.getDataComponentsOrEmpty(), stack.getDataComponentsOrEmpty()) ? ", same components" : ", different components") : "")
+                .append("; ");
+        }
+        return out.isEmpty() ? "no slot holds it" : out.toString();
     }
 }
