@@ -22,6 +22,9 @@ public final class Stashes {
     /** Goes up whenever a container's contents or marks change, so stay-on sorting knows to look again. */
     public static volatile int version;
 
+    /** Goes up when the perimeter changes or everything is to be read again, so the sorter explores and looks afresh. */
+    public static volatile int exploreVersion;
+
     /**
      * The stash named in the config, or null if there isn't one saved on this server yet.
      */

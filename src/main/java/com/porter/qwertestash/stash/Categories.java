@@ -213,9 +213,69 @@ public final class Categories {
     private static int partScore(Part part, Described described) {
         if (part.label().isEmpty()) return 0;
 
+        // An enchantment with a level, like "Protection IV" or "Efficiency 5"
+        String[] leveled = enchantWithLevel(part.full());
+        if (leveled != null) return levelScore(leveled[0], Integer.parseInt(leveled[1]), described.item);
+
+        // An enchantment on its own, like "Mending": the books with it, any level. Gear with it only below the gear categories
+        if (enchantNames().contains(part.full())) return enchantScore(part.full(), described.item);
+
         // As written first ("ender chests"); only without its filler words when that means nothing
         boolean whole = wholeKnown(part);
         return whole ? score(part.full(), part.fullKeys(), described, false) : score(part.label(), part.labelKeys(), described, true);
+    }
+
+    private static final Map<String, Integer> ROMAN = Map.of("i", 1, "ii", 2, "iii", 3, "iv", 4, "v", 5, "vi", 6, "vii", 7, "viii", 8, "ix", 9, "x", 10);
+    private static volatile Set<String> enchantNames;
+
+    private static Set<String> enchantNames() {
+        Set<String> names = enchantNames;
+        if (names == null) {
+            names = new HashSet<>();
+            for (EnchantmentData enchant : EnchantmentRegistry.REGISTRY.getDefaultRegistry().getKeyMap().values()) names.add(normalize(enchant.name()));
+            enchantNames = names;
+        }
+        return names;
+    }
+
+    /**
+     * The enchantment and level a sign names, like "protection iv" or "efficiency 5": {name, level}, or null if the text
+     * isn't an enchantment followed by a level (I to X, or 1 to 10).
+     */
+    private static String @org.jspecify.annotations.Nullable [] enchantWithLevel(String full) {
+        int space = full.lastIndexOf(' ');
+        if (space <= 0) return null;
+        String last = full.substring(space + 1);
+        Integer level = ROMAN.get(last);
+        if (level == null && last.length() <= 2 && last.chars().allMatch(Character::isDigit)) {
+            int n = Integer.parseInt(last);
+            if (n >= 1 && n <= 10) level = n;
+        }
+        if (level == null) return null;
+        String name = full.substring(0, space);
+        return enchantNames().contains(name) ? new String[] {name, String.valueOf(level)} : null;
+    }
+
+    /**
+     * An enchanted book with that enchantment at that level is exactly what the sign asks for. Gear with it matches too,
+     * but below the gear categories, so it only ends up here when there is no chest for the gear itself.
+     */
+    private static int enchantScore(String name, Item item) {
+        for (String enchant : item.enchants) {
+            if (normalize(enchant).equals(name)) return item.id.equals("enchanted_book") ? 50 : 20;
+        }
+        return 0;
+    }
+
+    private static int levelScore(String name, int level, Item item) {
+        if (item.enchantLevels == null) return 0;
+        for (String entry : item.enchantLevels) {
+            int colon = entry.lastIndexOf(':');
+            if (colon < 0 || !normalize(entry.substring(0, colon)).equals(name)) continue;
+            if (!entry.substring(colon + 1).equals(String.valueOf(level))) return 0;
+            return item.id.equals("enchanted_book") ? 50 : 20;
+        }
+        return 0;
     }
 
     private static int score(String label, List<String> keys, Described described, boolean loose) {
@@ -225,6 +285,15 @@ public final class Categories {
         // Nicknames are the whole sign text, never part of a word
         Set<String> nicknamed = lookup(SHORTHANDS, keys);
         if (nicknamed != null && nicknamed.contains(item.id)) return 60;
+
+        // "Nether Blocks" is the nether's blocks, not everything of the nether
+        String[] words = label.split(" ");
+        if (words.length >= 2 && singular(words[words.length - 1]).equals("block")) {
+            String prefix = String.join(" ", java.util.Arrays.copyOf(words, words.length - 1));
+            Predicate<Item> of = lookup(CATEGORIES, Part.keys(prefix));
+            Predicate<Item> blocks = CATEGORIES.get("block");
+            if (of != null && blocks != null) return of.test(item) && blocks.test(item) ? 40 : 0;
+        }
 
         if (allIn(label, described.words())) return 50;
 
@@ -247,7 +316,31 @@ public final class Categories {
     // Text
 
     public static String normalize(String text) {
-        return text.toLowerCase(Locale.ROOT).replace('_', ' ').replace('-', ' ').replaceAll("[^a-z0-9*& ]", "").replaceAll("\\s+", " ").trim();
+        return fold(text).toLowerCase(Locale.ROOT).replace('_', ' ').replace('-', ' ').replaceAll("[^a-z0-9*& ]", "").replaceAll("\\s+", " ").trim();
+    }
+
+    // Small capitals, which have no compatibility mapping: the Latin ones of U+1D00 and the IPA/Latin Extended ones
+    private static final String SMALL_CAPS = "\u1D00a\u0299b\u1D04c\u1D05d\u1D07e\uA730f\u0262g\u029Ch\u026Ai\u1D0Aj\u1D0Bk\u029Fl"
+        + "\u1D0Dm\u0274n\u1D0Fo\u1D18p\u01EBq\u0280r\uA731s\u1D1Bt\u1D1Cu\u1D20v\u1D21w\u028Fy\u1D22z";
+    private static final Map<Character, Character> SMALL_CAP_MAP = new HashMap<>();
+
+    static {
+        for (int i = 0; i + 1 < SMALL_CAPS.length(); i += 2) SMALL_CAP_MAP.put(SMALL_CAPS.charAt(i), SMALL_CAPS.charAt(i + 1));
+    }
+
+    /**
+     * Sign and search text as plain letters: "font" letters (mathematical bold, sans-serif, monospace, fullwidth, circled
+     * and the like) become ASCII by compatibility normalisation, small capitals are mapped by hand, and accents and other
+     * combining marks are dropped. Item names are never matched this way, only what people write.
+     */
+    public static String fold(String text) {
+        String s = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC);
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            Character mapped = SMALL_CAP_MAP.get(s.charAt(i));
+            out.append(mapped != null ? mapped : s.charAt(i));
+        }
+        return java.text.Normalizer.normalize(out, java.text.Normalizer.Form.NFD).replaceAll("\\p{M}+", "");
     }
 
     /**
@@ -255,7 +348,7 @@ public final class Categories {
      */
     private static List<String> splitList(String line) {
         List<String> parts = new ArrayList<>();
-        for (String part : line.toLowerCase(Locale.ROOT).split("[,&/+|;]| and | n ")) {
+        for (String part : fold(line).toLowerCase(Locale.ROOT).split("[,&/+|;]| and | n ")) {
             if (!part.isBlank()) parts.add(part);
         }
         if (parts.isEmpty()) parts.add(line);
@@ -656,16 +749,18 @@ public final class Categories {
         Predicate<Item> workstations = exact("crafting_table", "furnace", "blast_furnace", "smoker", "anvil", "chipped_anvil",
             "damaged_anvil", "enchanting_table", "grindstone", "stonecutter", "smithing_table", "loom", "cartography_table",
             "fletching_table", "brewing_stand", "cauldron", "composter", "barrel", "lectern", "beehive", "bee_nest", "crafter");
-        Predicate<Item> containers = exact("chest", "trapped_chest", "barrel", "ender_chest", "hopper", "dropper", "dispenser", "bundle").or(shulker);
+        Predicate<Item> containers = exact("chest", "trapped_chest", "barrel", "ender_chest", "hopper", "dropper", "dispenser").or(shulker).or(Item::isBundle);
         Predicate<Item> building = s -> fullBlock(s) || suffix("_stairs", "_slab", "_wall").test(s);
         Predicate<Item> templates = ids("smithing_template", "armor_trim");
         Predicate<Item> stackable64 = s -> s.maxStack == 64;
         Predicate<Item> stackable16 = s -> s.maxStack == 16;
         Predicate<Item> singles = s -> s.maxStack == 1;
 
+        // Every colour of bundle, with or without something in it
+        add(Item::isBundle, "bundle", "bundles");
         add(shulker, "shulker", "shulker box", "shulk", "shulkers box", "sb");
         add(Categories::shulkerWithItems, "full shulker", "filled shulker", "packed shulker", "kit", "loaded shulker", "stocked shulker");
-        add(shulker.and(s -> !shulkerWithItems(s)), "empty shulker", "empty box", "spare shulker");
+        add(shulker.and(s -> !shulkerWithItems(s)), "empty shulker", "empty box", "spare shulker", "empty shulk", "empty sb");
         add(food, "food", "eat", "eats", "snack", "grub", "ration", "meal", "edible", "consumable", "nom");
         add(meat, "meat", "raw meat", "cooked meat", "steak", "protein");
         add(fish, "fish", "seafood");
@@ -906,6 +1001,7 @@ public final class Categories {
     private static boolean partRecognised(Part part) {
         String label = part.label();
         if (label.isEmpty()) return false;
+        if (enchantWithLevel(part.full()) != null) return true;
         if (wholeKnown(part) || CATCH_ALL.contains(label) || KEEP_WHOLE.contains(part.labelKeys().getFirst())) return true;
         if (nicknames(part) != null || lookup(CATEGORIES, part.labelKeys()) != null) return true;
         for (String word : label.split(" ")) {

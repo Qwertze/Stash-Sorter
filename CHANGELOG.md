@@ -3,6 +3,40 @@
 All notable changes to Stash Sorter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.0-dev.1] - 2026-10-15
+
+### Added
+- **Stash perimeter** (`stash area <x1> <y1> <z1> <x2> <y2> <z2>`, `stash area here1` / `here2` / `clear`, `stash area`):
+  an inclusive block box (at most 256×128×256) saved with the stash. When set it replaces the radius and height: the
+  containers inside it belong to the stash, none outside is ever added, and the ones outside a new perimeter are
+  dropped. The bot explores it first (on `stash on`, when it changes and on `stash rescan`), walking to the middle of
+  each 16×16 column it hasn't seen, nearest first, since it only knows loaded chunks; columns it can't reach are skipped
+  and counted. Ground items are collected relative to the perimeter. It is shown in the `stash` status, and is only used
+  in the dimension it was set in. One exploration run is capped at 30 minutes.
+
+- **Safe walking** (`stash safewalk on/off`, on): while the sorter has a walk outstanding the pathfinder is set to never
+  parkour (`allowParkour`, `allowParkourAscend`, `allowParkourPlace`), never diagonal-descend (`allowDiagonalDescend`),
+  never take a fall of two blocks or more (`maxFallHeightNoWater` 1, `allowLongFall` off), and the settings are put back
+  afterwards. Standing within 0.3 blocks of the edge of a drop of two blocks or more, the bot sneaks (only when no other
+  module is moving it).
+- New containers in the perimeter are looked for every 5 seconds while resting, and a walk that leaves the perimeter
+  (plus 2 blocks) is given up.
+
+- **Bundles**: a bundle with something in it, in a chest, a drop-off, a shulker, on the ground or carried, is emptied
+  into free carry slots ("Emptied a bundle: N stacks taken out.") and what comes out is sorted like everything else.
+  The empty bundle goes to a chest signed for bundles or containers, else the one signed for shulkers, else the
+  catch-alls. Nothing is ever packed into a bundle.
+
+### Fixed
+- A repack no longer fails with a proxy error when a bundle is on the cursor: a left click that would put a bundle down
+  on an empty slot (which the proxy's inventory code can't do) is never sent, bundles are moved with shift-clicks, and a
+  container whose clicks never complete is given up on after a few seconds instead of stopping the sorter.
+
+### Changed
+- A container that can't be reached is now reported as "Can't reach the chest at [x, y, z] without breaking or placing
+  blocks, skipping it." (and "Couldn't open the chest at [x, y, z], skipping it." when it can't be opened). Every walk the sorter asks Baritone for already had
+  breaking and placing switched off; that is now checked for all of them.
+
 ## [1.3.0] - 2026-10-15
 
 ### Added

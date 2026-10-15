@@ -59,6 +59,8 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash mode tiers` / `signs` | How to sort |
 | `stash exclude [x y z]` | Never sort into or out of this container. Toggles. With no position, the container you last right-clicked while connected |
 | `stash dropoff [x y z]` | Empty this container into the stash, for others to drop items in. Toggles. Always emptied completely: anything without a home, or whose chest is full, goes to a `Misc` chest, then anywhere with room |
+| `stash safewalk on/off` | Safe walking (on): while walking the bot never parkours, jumps off or falls more than one block, and it sneaks when it stands at the edge of a drop of two blocks or more |
+| `stash area <x1> <y1> <z1> <x2> <y2> <z2>` | Set the stash's perimeter, an inclusive block box (at most 256×128×256), saved with the stash. `stash area here1` / `here2` use the bot's own block as a corner, `stash area clear` removes it, `stash area` shows it |
 | `stash radius <blocks>` / `height <blocks>` | How far around the bot to look for new containers (8 / 3) |
 | `stash barrels on/off` | Include barrels (on) |
 | `stash delay <ticks>` | Ticks between inventory clicks (3). Raise it if the server rejects clicks |
@@ -94,6 +96,27 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash prefix <word>` / `clear` | Whispers starting with this are searches (`find`) |
 
 Slots: 1-9 is the hotbar, 10-36 the inventory from the top left.
+
+## Stash area (perimeter)
+Instead of looking around the bot (`radius` / `height`), you can give the stash a perimeter with `stash area`. It is
+saved in the stash file, so each stash name on each server has its own.
+
+- Every chest, trapped chest and barrel (if `barrels` is on; double chests as always one container) inside the box
+  belongs to the stash, and none outside it is ever added. Setting a perimeter drops the containers outside it, with
+  what was saved for them. `stash area clear` goes back to looking around the bot.
+- The bot only knows chunks that are loaded, so on `stash on`, when the perimeter changes and on `stash rescan` it first
+  explores: it walks to the middle of each 16×16 column of the box it hasn't seen yet, nearest first, reading each
+  column for containers as it comes into view, then reads the containers and sorts as usual. A column it can't get to
+  is skipped (and counted in "Explored the stash area: found N containers (M chunks couldn't be reached)."). The
+  log says "Exploring the stash area: N chunks to look at." when it starts.
+- While resting (stay-on), the loaded part of the box is looked at again every 5 seconds, so a chest put up later is found.
+- A walk that began inside the box (and 2 blocks around it) and takes the bot out of it is given up: the container is
+  skipped ("Skipping the chest at [x, y, z]: the way there leaves the stash area.").
+- Ground items are collected from the perimeter, widened by `collectRange` sideways and 4 up and down.
+- The bot never breaks or places blocks to get anywhere (exploring, walking to containers, signs, shulkers or ground
+  items; putting down and picking up its own shulkers and putting up signs are things it does on purpose). A container
+  it can't get to that way is skipped and said once ("Can't reach the chest at [x, y, z] without breaking or placing
+  blocks, skipping it."), and tried again after a new perimeter or `stash rescan`.
 
 ## Ground items
 With `collect` on (the default) the bot also picks up items that lie on the ground in the stash area: the bounding box

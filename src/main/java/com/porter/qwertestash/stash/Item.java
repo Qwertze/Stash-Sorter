@@ -37,6 +37,8 @@ public final class Item {
     public boolean damaged;
     public List<String> tags = new ArrayList<>();
     public List<String> enchants = new ArrayList<>();
+    /** The same enchantments with their levels, as "name:level". */
+    public List<String> enchantLevels = new ArrayList<>();
     public @Nullable String potion;
     /**
      * For items whose id doesn't say what they are (potions, tipped arrows, enchanted books, suspicious stew, rockets,
@@ -48,6 +50,10 @@ public final class Item {
 
     /** The stack this was read from, while it's still in front of us. Not saved. */
     public transient @Nullable ItemStack raw;
+    /** How many stacks a bundle holds (0 for anything else). */
+    public int bundleStacks;
+    /** Has the bundles tag. Not saved: a saved stash is told by the id (see {@link #isBundle()}). */
+    public transient boolean bundle;
 
     /**
      * The item for a stack, or null for an empty slot.
@@ -80,6 +86,7 @@ public final class Item {
         item.damaged = damage != null && damage > 0;
 
         if (data.itemTags() != null) for (ItemTags tag : data.itemTags()) item.tags.add(tag.name());
+        item.bundle = data.itemTags() != null && data.itemTags().contains(ItemTags.BUNDLES);
 
         addEnchants(item, components.get(DataComponentTypes.ENCHANTMENTS));
         addEnchants(item, components.get(DataComponentTypes.STORED_ENCHANTMENTS));
@@ -88,6 +95,11 @@ public final class Item {
         if (potion != null && potion.getPotionId() >= 0 && potion.getPotionId() < POTIONS.length) item.potion = POTIONS[potion.getPotionId()];
 
         item.typeData = typeDataOf(data.name(), components);
+
+        if (item.bundle) {
+            List<ItemStack> packed = components.get(DataComponentTypes.BUNDLE_CONTENTS);
+            item.bundleStacks = packed == null ? 0 : packed.size();
+        }
 
         List<ItemStack> inside = components.get(DataComponentTypes.CONTAINER);
         if (inside != null) {
@@ -167,7 +179,7 @@ public final class Item {
      * and a stack of such an item saved before its type was kept (it gets one when its container is read again).
      */
     public @Nullable String bulkKey() {
-        if (isShulker() || !contents.isEmpty()) return null;
+        if (isShulker() || !contents.isEmpty() || bundleStacks > 0) return null;
         if (typeDefined(id)) return typeData == null ? null : id + "|" + typeData;
         return id;
     }
@@ -180,8 +192,25 @@ public final class Item {
         if (enchants == null) return;
         for (int id : enchants.getEnchantments().keySet()) {
             EnchantmentData data = EnchantmentRegistry.REGISTRY.get(id);
-            if (data != null) item.enchants.add(data.name());
+            if (data != null) {
+                item.enchants.add(data.name());
+                item.enchantLevels.add(data.name() + ":" + enchants.getEnchantments().get(id));
+            }
         }
+    }
+
+    /**
+     * A bundle. The proxy's ClickItem cannot put one down on an empty slot (see StashSorter.bundleHazard).
+     */
+    public boolean isBundle() {
+        return bundle || id.equals("bundle") || id.endsWith("_bundle");
+    }
+
+    /**
+     * A bundle with something in it: it is emptied (see StashSorter), never put away as it is.
+     */
+    public boolean isFilledBundle() {
+        return isBundle() && bundleStacks > 0;
     }
 
     public boolean isShulker() {

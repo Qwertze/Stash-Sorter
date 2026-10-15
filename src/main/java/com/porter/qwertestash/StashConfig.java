@@ -120,6 +120,12 @@ public class StashConfig {
      */
     public boolean sortItems = true;
 
+    /**
+     * Safe walking: while the sorter walks it never parkours, jumps off or falls more than one block (an ordinary step
+     * down is fine), and it holds sneak when standing at the edge of a drop of two blocks or more.
+     */
+    public boolean safeWalk = true;
+
     public boolean whisperSearch = false;
     public List<String> whitelist = new ArrayList<>();
     /** Whispers starting with this are searches. Blank treats every whitelisted whisper as a search. */

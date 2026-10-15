@@ -20,6 +20,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
+import static com.aquarius.Globals.CACHE;
 import static com.aquarius.Globals.MODULE;
 import static com.aquarius.command.brigadier.ToggleArgumentType.getToggle;
 import static com.aquarius.command.brigadier.ToggleArgumentType.toggle;
@@ -53,6 +54,9 @@ public class StashCommand extends Command {
                 "mode <tiers/signs>",
                 "exclude [x y z]",
                 "dropoff [x y z]",
+                "area <x1> <y1> <z1> <x2> <y2> <z2>",
+                "area here1/here2/clear",
+                "area",
                 "radius <blocks>",
                 "height <blocks>",
                 "barrels on/off",
@@ -80,6 +84,7 @@ public class StashCommand extends Command {
                 "index",
                 "forget",
                 "tracking on/off",
+                "safewalk on/off",
                 "collect on/off",
                 "collectRange <blocks>",
                 "autoDrop on/off",
@@ -111,6 +116,10 @@ public class StashCommand extends Command {
                 CONFIG.sortItems = getToggle(c, "toggle");
                 c.getSource().getEmbed().title("Sorting Items " + toggleStrCaps(CONFIG.sortItems))
                     .description(CONFIG.sortItems ? "Items are moved again." : "Scan only: containers are read and kept up to date, nothing is moved.");
+            })))
+            .then(literal("safewalk").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.safeWalk = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Safe Walking " + toggleStrCaps(CONFIG.safeWalk));
             })))
             .then(literal("collect").then(argument("toggle", toggle()).executes(c -> {
                 CONFIG.collectGround = getToggle(c, "toggle");
@@ -174,6 +183,34 @@ public class StashCommand extends Command {
                 .then(literal("list").executes(c -> {
                     c.getSource().getEmbed().title("Never Compacted").description(CONFIG.compactExclude.isEmpty() ? "Nothing is excluded." : String.join(", ", CONFIG.compactExclude)).primaryColor();
                 })))
+            .then(literal("area")
+                .executes(c -> {
+                    showArea(c.getSource().getEmbed());
+                })
+                .then(literal("clear").executes(c -> {
+                    Stash stash = Stashes.currentOrNew();
+                    if (stash.area == null && stash.cornerA == null && stash.cornerB == null) {
+                        c.getSource().getEmbed().title("No Stash Area").description("There is no stash area set.").primaryColor();
+                        return;
+                    }
+                    stash.area = null;
+                    stash.cornerA = stash.cornerB = null;
+                    areaChanged(stash);
+                    c.getSource().getEmbed().title("Stash Area Cleared").description("Stash area cleared, finding containers around the bot again.");
+                }))
+                .then(literal("here1").executes(c -> {
+                    setCorner(c.getSource().getEmbed(), true);
+                }))
+                .then(literal("here2").executes(c -> {
+                    setCorner(c.getSource().getEmbed(), false);
+                }))
+                .then(argument("x1", integer()).then(argument("y1", integer()).then(argument("z1", integer())
+                    .then(argument("x2", integer()).then(argument("y2", integer()).then(argument("z2", integer()).executes(c -> {
+                        Stash stash = Stashes.currentOrNew();
+                        applyArea(c.getSource().getEmbed(), stash,
+                            new int[] {getInteger(c, "x1"), getInteger(c, "y1"), getInteger(c, "z1")},
+                            new int[] {getInteger(c, "x2"), getInteger(c, "y2"), getInteger(c, "z2")});
+                    }))))))))
             .then(literal("radius").then(argument("blocks", integer(1, 64)).executes(c -> {
                 CONFIG.radius = getInteger(c, "blocks");
                 c.getSource().getEmbed().title("Radius Set");
@@ -281,6 +318,7 @@ public class StashCommand extends Command {
                 for (Box box : stash.boxes) box.contents = null;
                 stash.save();
                 Stashes.version++;
+                Stashes.exploreVersion++;
                 c.getSource().getEmbed().title("Stash Will Be Read Again").description("Every container is read again the next time sorting runs.");
             }))
             .then(literal("forget").executes(c -> {
@@ -416,6 +454,72 @@ public class StashCommand extends Command {
         return null;
     }
 
+    /**
+     * Shows the perimeter and its size.
+     */
+    private static void showArea(Embed embed) {
+        Stash stash = Stashes.current();
+        int[] b = stash == null || stash.area == null ? null : Stash.boundsOf(stash.area);
+        if (b != null) {
+            embed.title("Stash Area").description("Stash area: " + Stash.describe(b) + (stash.hasArea() ? "" : ", in another dimension (" + stash.area.dimension + "), so not used here") + ".").primaryColor();
+        }
+        else if (stash != null && (stash.cornerA != null || stash.cornerB != null)) {
+            embed.title("Stash Area").description("Only one corner is set ("
+                + corner(stash.cornerA != null ? stash.cornerA : stash.cornerB) + "). Set the other with `stash area here" + (stash.cornerA != null ? 2 : 1) + "`.").primaryColor();
+        }
+        else embed.title("No Stash Area").description("No stash area set: containers within radius " + CONFIG.radius + " and height " + CONFIG.height + " of the bot are used.").primaryColor();
+    }
+
+    private static String corner(int[] c) {
+        return "[" + c[0] + ", " + c[1] + ", " + c[2] + "]";
+    }
+
+    /**
+     * The bot's own block as one corner of the perimeter.
+     */
+    private static void setCorner(Embed embed, boolean first) {
+        int[] here = {(int) Math.floor(CACHE.getPlayerCache().getX()), (int) Math.floor(CACHE.getPlayerCache().getY()), (int) Math.floor(CACHE.getPlayerCache().getZ())};
+        Stash stash = Stashes.currentOrNew();
+        int[] other = first ? stash.cornerB : stash.cornerA;
+        if (other != null) {
+            applyArea(embed, stash, first ? here : other, first ? other : here);
+            return;
+        }
+        if (first) stash.cornerA = here;
+        else stash.cornerB = here;
+        stash.markDirty();
+        stash.save();
+        embed.title("Corner " + (first ? 1 : 2) + " Set").description("Corner " + (first ? 1 : 2) + " set at " + corner(here) + ". Set corner " + (first ? 2 : 1) + " to finish the stash area.").primaryColor();
+    }
+
+    /**
+     * Sets both corners, if the box is not too large.
+     */
+    private static void applyArea(Embed embed, Stash stash, int[] a, int[] b) {
+        int[] bounds = {Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2])};
+        int[] size = Stash.sizeOf(bounds);
+        if (size[0] > Stash.MAX_WIDTH || size[1] > Stash.MAX_HEIGHT || size[2] > Stash.MAX_DEPTH) {
+            embed.title("Stash Area Too Large").description("That area is " + size[0] + "×" + size[1] + "×" + size[2] + ", the largest allowed is "
+                + Stash.MAX_WIDTH + "×" + Stash.MAX_HEIGHT + "×" + Stash.MAX_DEPTH + " (width × height × depth).").errorColor();
+            return;
+        }
+        stash.area = new Stash.Area(a, b, Stash.currentDimension());
+        stash.cornerA = stash.cornerB = null;
+        areaChanged(stash);
+        embed.title("Stash Area Set").description("Stash area set: " + Stash.describe(bounds) + ".").primaryColor();
+    }
+
+    /**
+     * The perimeter changed: the sorter explores it afresh. With the sorter off, the containers outside it go right away.
+     */
+    private static void areaChanged(Stash stash) {
+        if (!MODULE.get(StashSorter.class).isEnabled()) stash.dropOutsideArea();
+        Stashes.exploreVersion++;
+        Stashes.version++;
+        stash.markDirty();
+        stash.save();
+    }
+
     private void search(Embed embed, String query) {
         Stash stash = Stashes.current();
         if (stash == null) {
@@ -456,6 +560,12 @@ public class StashCommand extends Command {
         return out.toString();
     }
 
+    private static String stashAreaLine() {
+        Stash stash = Stashes.current();
+        int[] b = stash == null || stash.area == null ? null : Stash.boundsOf(stash.area);
+        return b == null ? "none (containers within the radius and height are used)" : Stash.describe(b);
+    }
+
     @Override
     public void defaultEmbed(Embed embed) {
         Stash stash = Stashes.current();
@@ -476,6 +586,8 @@ public class StashCommand extends Command {
                 + " (items the bot didn't drop or break, " + CONFIG.collectRange + " blocks around the stash, only while no other player is in render distance)")
             .addField("Stash", "\"" + CONFIG.stashName + "\": " + stashLine)
             .addField("Mode", CONFIG.mode.name())
+            .addField("Stash Area", stashAreaLine())
+            .addField("Safe Walking", toggleStr(CONFIG.safeWalk) + " (no parkour, jumping off or falling more than a block; sneaks at ledges)")
             .addField("Area", "radius " + CONFIG.radius + ", height " + CONFIG.height + ", barrels " + toggleStr(CONFIG.barrels))
             .addField("Repack Shulkers", toggleStr(CONFIG.repack) + " (signs mode" + (CONFIG.compact ? "" : ", new bulk at " + CONFIG.newBulkAt + " stacks") + ")")
             .addField("Compact Shulkers", toggleStr(CONFIG.compact) + " - " + MODULE.get(StashSorter.class).compactStatus()

@@ -88,6 +88,102 @@ public class Stash {
     }
 
     public List<Orphan> orphans = new ArrayList<>();
+
+    /**
+     * The perimeter: two corners (any order) and the dimension they were set in. One immutable object, so both corners
+     * always change together.
+     */
+    public static final class Area {
+        public final int x1, y1, z1, x2, y2, z2;
+        public final @Nullable String dimension;
+
+        public Area(int[] a, int[] b, @Nullable String dimension) {
+            this.x1 = a[0];
+            this.y1 = a[1];
+            this.z1 = a[2];
+            this.x2 = b[0];
+            this.y2 = b[1];
+            this.z2 = b[2];
+            this.dimension = dimension;
+        }
+    }
+
+    public @Nullable Area area;
+    /** A corner set on its own with {@code area here1} / {@code here2}, waiting for the other. */
+    public int @Nullable [] cornerA, cornerB;
+
+    /** The dimension the bot is in, or null if that isn't known right now. */
+    public static @Nullable String currentDimension() {
+        try {
+            return com.aquarius.feature.player.World.getCurrentDimension().name();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** A perimeter is set, in whatever dimension. */
+    public boolean areaSet() {
+        return area != null;
+    }
+
+    /** A perimeter is set and applies here: the bot is in the dimension it was set in. */
+    public boolean hasArea() {
+        Area a = area;
+        if (a == null) return false;
+        String now = currentDimension();
+        return a.dimension == null || now == null || a.dimension.equals(now);
+    }
+    /** The largest perimeter: width, height, depth. */
+    public static final int MAX_WIDTH = 256, MAX_HEIGHT = 128, MAX_DEPTH = 256;
+
+    /**
+     * The perimeter as minX, minY, minZ, maxX, maxY, maxZ (inclusive blocks), or null if there is none.
+     */
+    public int @Nullable [] bounds() {
+        Area a = area;
+        if (a == null || !hasArea()) return null;
+        return boundsOf(a);
+    }
+
+    /** minX, minY, minZ, maxX, maxY, maxZ of a perimeter. */
+    public static int[] boundsOf(Area a) {
+        return new int[] {Math.min(a.x1, a.x2), Math.min(a.y1, a.y2), Math.min(a.z1, a.z2), Math.max(a.x1, a.x2), Math.max(a.y1, a.y2), Math.max(a.z1, a.z2)};
+    }
+
+    /** Width, height and depth of the perimeter. */
+    public static int[] sizeOf(int[] b) {
+        return new int[] {b[3] - b[0] + 1, b[4] - b[1] + 1, b[5] - b[2] + 1};
+    }
+
+    /** "[x1, y1, z1] to [x2, y2, z2] (W×H×D)" */
+    public static String describe(int[] b) {
+        int[] size = sizeOf(b);
+        return "[" + b[0] + ", " + b[1] + ", " + b[2] + "] to [" + b[3] + ", " + b[4] + ", " + b[5] + "] (" + size[0] + "×" + size[1] + "×" + size[2] + ")";
+    }
+
+    /** Whether the block is inside the perimeter widened by {@code margin} blocks. True if there is no perimeter. */
+    public boolean inArea(BlockPos pos, int margin) {
+        int[] b = bounds();
+        return b == null || (pos.x() >= b[0] - margin && pos.x() <= b[3] + margin && pos.y() >= b[1] - margin && pos.y() <= b[4] + margin
+            && pos.z() >= b[2] - margin && pos.z() <= b[5] + margin);
+    }
+
+    /** A container belongs to the perimeter if any block of it is inside. */
+    public boolean boxInArea(Box box) {
+        for (BlockPos part : box.parts) if (inArea(part, 0)) return true;
+        return false;
+    }
+
+    /**
+     * Drops the containers outside the perimeter, with what is saved for them.
+     * @return how many
+     */
+    public int dropOutsideArea() {
+        if (!hasArea()) return 0;
+        int before = boxes.size();
+        if (boxes.removeIf(box -> !boxInArea(box))) markDirty();
+        return before - boxes.size();
+    }
     public String name;
     public String server;
     // Copy-on-write: searches and commands iterate it from other threads while the sorter adds and drops boxes
