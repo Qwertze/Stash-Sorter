@@ -38,7 +38,9 @@ public class StashCommand extends Command {
                 Qwerte stash sorter: sorts a saved stash of chests and barrels by tier or by sign, keeps it sorted,
                 and lets you search it here or by whisper.
                 Stand the bot among the containers and turn it on. The first run reads every container and saves the
-                stash, later runs go straight to sorting. Sorting pauses while you're connected to the proxy.
+                stash, later runs go straight to sorting. Sorting pauses while you're connected to the proxy, and gives
+                way to other modules (like PearlPlus): it lets go of its container, waits until they have been quiet for
+                `quiet` seconds, then carries on.
                 Slots: 1-9 is the hotbar, 10-36 the inventory from the top left.
                 """)
             .usageLines(
@@ -52,6 +54,15 @@ public class StashCommand extends Command {
                 "height <blocks>",
                 "barrels on/off",
                 "delay <ticks>",
+                "quiet <0-60>",
+                "pearlSlot on/off",
+                "watch on/off (needs tracking on)",
+                "watchDelay <0-60>",
+                "watchSigns on/off",
+                "signDelay <0-60>",
+                "autoLabel on/off",
+                "unsignedOverflow on/off",
+                "labels",
                 "stayOn on/off",
                 "recheck <seconds>",
                 "repack on/off",
@@ -125,6 +136,41 @@ public class StashCommand extends Command {
                 CONFIG.delayTicks = getInteger(c, "ticks");
                 c.getSource().getEmbed().title("Delay Set");
             })))
+            .then(literal("quiet").then(argument("seconds", integer(0, 60)).executes(c -> {
+                CONFIG.quietSeconds = getInteger(c, "seconds");
+                c.getSource().getEmbed().title("Quiet Time Set");
+            })))
+            .then(literal("pearlSlot").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.reservePearlSlot = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Pearl Slot Reserved " + toggleStrCaps(CONFIG.reservePearlSlot));
+            })))
+            .then(literal("watch").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.watchAccess = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Watching Chests " + toggleStrCaps(CONFIG.watchAccess));
+            })))
+            .then(literal("watchDelay").then(argument("seconds", integer(0, 60)).executes(c -> {
+                CONFIG.accessRescanSeconds = getInteger(c, "seconds");
+                c.getSource().getEmbed().title("Watch Delay Set");
+            })))
+            .then(literal("watchSigns").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.watchSigns = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Watching Signs " + toggleStrCaps(CONFIG.watchSigns));
+            })))
+            .then(literal("signDelay").then(argument("seconds", integer(0, 60)).executes(c -> {
+                CONFIG.signSettleSeconds = getInteger(c, "seconds");
+                c.getSource().getEmbed().title("Sign Delay Set");
+            })))
+            .then(literal("autoLabel").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.autoLabel = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Auto Labelling " + toggleStrCaps(CONFIG.autoLabel));
+            })))
+            .then(literal("unsignedOverflow").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.unsignedOverflow = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Unsigned Overflow " + toggleStrCaps(CONFIG.unsignedOverflow));
+            })))
+            .then(literal("labels").executes(c -> {
+                c.getSource().getEmbed().title("Labels").description(MODULE.get(StashSorter.class).labelsReport()).primaryColor();
+            }))
             .then(literal("stayOn").then(argument("toggle", toggle()).executes(c -> {
                 CONFIG.stayOn = getToggle(c, "toggle");
                 c.getSource().getEmbed().title("Stay On " + toggleStrCaps(CONFIG.stayOn));
@@ -299,7 +345,7 @@ public class StashCommand extends Command {
             BlockPos pos = best.box().pos;
             int more = result.spots.size() - 1;
 
-            out.append(String.format("%s x%,d @ %d, %d, %d%s%s", result.sample.name, result.total, pos.x(), pos.y(), pos.z(),
+            out.append(String.format("%s x%,d @ %d, %d, %d%s%s", result.sample.label(), result.total, pos.x(), pos.y(), pos.z(),
                 best.inShulker() ? " (shulker)" : "", more > 0 ? String.format(" +%d more", more) : ""));
             if (!result.sample.enchants.isEmpty()) out.append(" [").append(String.join(", ", result.sample.enchants)).append(']');
             if (result.sample.potion != null) out.append(" [").append(result.sample.potion).append(']');
@@ -330,6 +376,11 @@ public class StashCommand extends Command {
             .addField("Stay On", toggleStr(CONFIG.stayOn) + " (recheck " + CONFIG.recheckSeconds + "s)")
             .addField("Carry / Keep Slots", (CONFIG.carrySlots.isBlank() ? "every empty slot" : CONFIG.carrySlots) + " / " + (CONFIG.keepSlots.isBlank() ? "none" : CONFIG.keepSlots))
             .addField("Delay", CONFIG.delayTicks + " ticks")
+            .addField("Gives Way To Other Modules", "waits " + CONFIG.quietSeconds + "s after they stop, pearl slot (hotbar 1) kept for PearlPlus " + toggleStr(CONFIG.reservePearlSlot))
+            .addField("Watch Chests", toggleStr(CONFIG.watchAccess) + " (re-read " + CONFIG.accessRescanSeconds + "s after another player closes one; needs tracking on)")
+            .addField("Auto Label", toggleStr(CONFIG.autoLabel) + " (signs mode, a sign every " + CONFIG.labelGapSeconds + "s at most, see `stash labels`)")
+            .addField("Unsigned Overflow", toggleStr(CONFIG.unsignedOverflow) + " (signs mode, stacks with no room go in unsigned containers after misc/other/overflow ones)")
+            .addField("Watch Signs", toggleStr(CONFIG.watchSigns) + " (changes used after " + CONFIG.signSettleSeconds + "s, a sign gone or blank for 60s; needs tracking on)")
             .addField("Tracking", toggleStr(CONFIG.tracking))
             .addField("Whisper Search", toggleStr(CONFIG.whisperSearch) + ", prefix \"" + CONFIG.prefix + "\", whitelist " + (CONFIG.whitelist.isEmpty() ? "empty" : String.join(", ", CONFIG.whitelist)));
     }

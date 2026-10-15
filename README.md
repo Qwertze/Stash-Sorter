@@ -25,7 +25,7 @@ instead of your client.
 
 Sorting only runs while nobody is connected to the proxy, so it pauses while you play and picks up again when you
 leave. It never breaks or places blocks to reach a container; the only blocks it places and breaks are shulkers it's
-repacking.
+repacking, and signs it writes for new categories (`stash autoLabel`).
 
 ## Requirements
 - AquariusProxy on a **`java`** release channel (the native build can't load plugins), Minecraft 1.21.4.
@@ -56,6 +56,15 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash radius <blocks>` / `height <blocks>` | How far around the bot to look for new containers (8 / 3) |
 | `stash barrels on/off` | Include barrels (on) |
 | `stash delay <ticks>` | Ticks between inventory clicks (3). Raise it if the server rejects clicks |
+| `stash quiet <seconds>` | Seconds other modules (like PearlPlus) must be idle before sorting carries on (3). Doubles for repeated interruptions, up to a minute |
+| `stash pearlSlot on/off` | Keep the first hotbar slot free of stash items and shulkers, for PearlPlus's pearls (on) |
+| `stash watch on/off` | Re-read a chest after another player has opened and closed it (on). Needs tracking on |
+| `stash watchDelay <seconds>` | How long a chest must stay closed before it's re-read (5) |
+| `stash watchSigns on/off` | Sort by a sign's new text when it's changed (on). Needs tracking on |
+| `stash signDelay <seconds>` | How long a changed sign is left alone before sorting by it (10) |
+| `stash autoLabel on/off` | Signs mode: when an item has no sign, put up a sign for a new category on an empty unsigned chest next to the signed ones (on) |
+| `stash unsignedOverflow on/off` | Signs mode: stacks with no room in their own chest go to `Misc`/`Other`/`Overflow` chests, then unsigned chests (on) |
+| `stash labels` | Show the signs the bot has put up, and any it gave up on |
 | `stash stayOn on/off` | Keep running after sorting, sorting again whenever a container changes |
 | `stash recheck <seconds>` | How often stay-on checks drop-offs (30) |
 | `stash repack on/off` | Clean mixed shulkers and pack loose items into bulk shulkers, in signs mode (on) |
@@ -102,6 +111,10 @@ the lines together, and lists like `Logs, Planks & Wood` are split up.
 - Enchantments and potions: `Mending Books`, `Protection`, `Strength Potions`.
 - Catch-alls for leftovers: `Misc`, `Other`, `Overflow`, `Random`, `*`.
 - `Kits` or `Mixed Shulkers` to keep mixed shulkers whole.
+
+With `autoLabel` on, an item that no sign describes can get a sign of its own: when there's an empty unsigned chest
+next to the signed ones, the bot writes a new category on a sign there and sorts the item into it. It only writes
+signs, never chests.
 
 ## Building
 Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in

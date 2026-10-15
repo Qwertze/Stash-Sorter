@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static com.aquarius.Globals.CONFIG;
 
@@ -31,7 +32,12 @@ public class Stash {
         public Item @Nullable [] contents;
         public boolean excluded;
         public boolean dropOff;
+        /** The text the sorter itself wrote on this container's sign, and where; null for a sign a player put up. */
+        public @Nullable String autoLabel;
+        public @Nullable BlockPos autoSignPos;
 
+        /** The sorter couldn't put a sign on this container this run. */
+        public transient boolean labelFailed;
         public transient boolean unreachable;
         public transient int order;
 
@@ -64,7 +70,8 @@ public class Stash {
 
     public String name;
     public String server;
-    public List<Box> boxes = new ArrayList<>();
+    // Copy-on-write: searches and commands iterate it from other threads while the sorter adds and drops boxes
+    public List<Box> boxes = new CopyOnWriteArrayList<>();
     private transient boolean dirty;
 
     public Stash(String name, String server) {
@@ -219,14 +226,15 @@ public class Stash {
         try {
             Stash stash = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Stash.class);
             if (stash == null) return null;
-            if (stash.boxes == null) stash.boxes = new ArrayList<>();
-            stash.boxes.removeIf(box -> box.parts == null || box.parts.isEmpty());
+            stash.boxes = stash.boxes == null ? new CopyOnWriteArrayList<>() : new CopyOnWriteArrayList<>(stash.boxes);
+            stash.boxes.removeIf(box -> box == null || box.parts == null || box.parts.isEmpty());
             for (Box box : stash.boxes) {
                 if (box.labels == null) box.labels = new ArrayList<>();
                 if (box.contents != null) {
                     for (Item item : box.contents) {
                         if (item == null) continue;
                         if (item.contents == null) item.contents = new ArrayList<>();
+                        item.normalizeName();
                         if (item.tags == null) item.tags = new ArrayList<>();
                         if (item.enchants == null) item.enchants = new ArrayList<>();
                     }

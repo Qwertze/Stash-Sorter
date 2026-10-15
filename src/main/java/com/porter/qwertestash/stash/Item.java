@@ -25,8 +25,10 @@ import java.util.Objects;
 public final class Item {
     public String id;
     public int count;
+    /** The name the registry id gives it. Never the anvil name: that is only kept in {@link #customText}, for display. */
     public String name;
     public boolean customName;
+    public @Nullable String customText;
     public int maxStack;
     public boolean food;
     public boolean music;
@@ -58,7 +60,8 @@ public final class Item {
         var components = stack.getDataComponentsOrEmpty();
         var customName = components.get(DataComponentTypes.CUSTOM_NAME);
         item.customName = customName != null;
-        item.name = customName != null ? ComponentSerializer.serializePlain(customName) : prettyName(data.name());
+        item.name = prettyName(data.name());
+        if (customName != null) item.customText = ComponentSerializer.serializePlain(customName);
 
         Integer max = components.get(DataComponentTypes.MAX_STACK_SIZE);
         item.maxStack = max != null ? max : data.stackSize();
@@ -112,7 +115,24 @@ public final class Item {
     public boolean sameAs(Item other) {
         if (!id.equals(other.id)) return false;
         if (raw != null && other.raw != null) return Objects.equals(raw.getDataComponents(), other.raw.getDataComponents());
-        return name.equals(other.name) && enchants.equals(other.enchants) && Objects.equals(potion, other.potion) && contents.size() == other.contents.size();
+        return Objects.equals(customText, other.customText) && enchants.equals(other.enchants) && Objects.equals(potion, other.potion) && contents.size() == other.contents.size();
+    }
+
+    /**
+     * For messages: the item's own name, and the player's name for it if it has one. Not used for matching.
+     */
+    public String label() {
+        if (!customName) return name;
+        return customText == null || customText.isBlank() ? name + " (named)" : name + " (named " + customText + ")";
+    }
+
+    /**
+     * Stashes saved before names were kept apart have the anvil name in {@code name}: back to the registry's name.
+     */
+    void normalizeName() {
+        if (customName && customText == null) customText = name;
+        name = prettyName(id);
+        if (contents != null) for (Item inside : contents) if (inside != null) inside.normalizeName();
     }
 
     /**
@@ -127,6 +147,11 @@ public final class Item {
             out.append(small ? word : word.substring(0, 1).toUpperCase(Locale.ROOT) + word.substring(1));
         }
         return out.toString();
+    }
+
+    /** The potion names, for telling what words a sign can use. */
+    static List<String> potionNames() {
+        return List.of(POTIONS);
     }
 
     /** Potions in registry order, for Minecraft 1.21.4. */
