@@ -12,8 +12,8 @@ All notable changes to Stash Sorter are documented here. The format follows
   in progress is dropped the moment one appears), only items that have lain still for 3 seconds, only between jobs with
   a free carry slot, and it gives way to other modules as always. An item that can't be reached or isn't picked up
   within about 20 seconds is left alone for 5 minutes. What it picks up counts as stash cargo, so picked-up tools and
-  food are put away and not mistaken for the bot's own. The status line shows `on`, `off` or `waiting: <player> is
-  nearby`.
+  food are put away and not mistaken for the bot's own. The status line shows `off`, `off (scan only)`, `nothing on the ground`,
+  `waiting for <player> to leave (N items)`, `picking up N <item>` or `no free carry slot`.
 - **Scan only** (`stash sort on/off`, on): with sorting off, `stash on` still reads unknown and stale containers, the
   full re-read on login, the chest and sign watching, the index and search, but never moves an item: no taking,
   depositing, dumping, repacking, compacting, labelling or ground collection, and it only opens a container to read it.
