@@ -1,5 +1,6 @@
 package com.porter.qwertestash.module;
 
+import com.aquarius.cache.data.entity.EntityLiving;
 import com.aquarius.cache.data.inventory.Container;
 import com.aquarius.event.client.ClientBotTick;
 import com.aquarius.event.client.ClientDisconnectEvent;
@@ -32,7 +33,9 @@ import com.porter.qwertestash.stash.Containers;
 import com.porter.qwertestash.stash.Item;
 import com.porter.qwertestash.stash.Stash;
 import com.porter.qwertestash.stash.Stash.Box;
+import com.porter.qwertestash.stash.StashIndex;
 import com.porter.qwertestash.stash.Stashes;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerType;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.MoveToHotbarAction;
@@ -61,6 +64,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 import static com.aquarius.Globals.BARITONE;
 import static com.aquarius.Globals.CACHE;
@@ -112,20 +116,20 @@ public class StashSorter extends AbstractFieldModule {
     private static final int OWN_WINDOW_GRACE_MS = 10_000;
     private static final int REREAD_COOLDOWN_MS = 60_000;
 
-    private enum Job { Survey, Take, Deposit, Dump, Fetch, Clean, Fill, Compact, FetchSigns, Label }
+    private enum Job { Survey, Take, Deposit, Dump, Fetch, Clean, Fill, Compact, FetchSigns, Label, Gather }
 
     private enum Step { Walking, Opening, Working }
 
     // Repacking a shulker in the world: put it down, open it, move items, break it, pick it back up. Return is the
     // walk back to it after giving way
-    private enum Handle { Hold, Place, Open, Work, Break, Collect, Return }
+    private enum Handle { Hold, Place, Open, Work, Break, Collect, Return, Leave }
 
     // Running: sorting. Yielding: someone else started something, we're letting go of our window, path and clicks.
     // Waiting: letting go is done, waiting for them to finish and be quiet for a while
     private enum Gate { Running, Yielding, Waiting }
 
     private static final int HANDLE_TIMEOUT = 20 * 10;
-    private static final int COLLECT_TIMEOUT = 20 * 15;
+    private static final int COLLECT_TIMEOUT = 20 * 120;
 
     private int wantSlot = -1;
     private int handledSlot;
@@ -139,6 +143,14 @@ public class StashSorter extends AbstractFieldModule {
     private final Set<Integer> shulkerSlotsBefore = new HashSet<>();
     private boolean repackFailed;
     private final Set<String> packTried = new HashSet<>();
+    // What the shulker being fetched has to be, checked against the live window before it is taken
+    private Predicate<Item> fetchWants = it -> it.isShulker() && !it.customName;
+    // How many more stacks the gathering trip in hand may take
+    private int gatherLeft;
+    private @Nullable ItemData placedItem;
+    // Carry slots whose items we put there ourselves from the stash. Anything the bot owns that looks like gear, food,
+    // totems or pearls and wasn't put there by us is the bot's own, never carried, packed or put away
+    private final Map<Integer, String> stashHeld = new HashMap<>();
 
     private @Nullable Stash stash;
     private final Set<Integer> carry = new LinkedHashSet<>();
@@ -243,6 +255,28 @@ public class StashSorter extends AbstractFieldModule {
      * Opening and reading containers, so the tracker leaves them to us. Not while we're giving way or waiting, or
      * while only walking to a container: then it reads whatever window is open, unless that's one of ours.
      */
+    private @Nullable AutoDrop autoDropModule;
+
+    private AutoDrop autoDrop() {
+        AutoDrop found = autoDropModule;
+        if (found == null) autoDropModule = found = MODULE.get(AutoDrop.class);
+        return found;
+    }
+
+    /**
+     * In the middle of a job, so nothing else should take the inventory or the bot's aim.
+     */
+    public boolean busyWithJob() {
+        return job != null || handle != null;
+    }
+
+    /**
+     * A shulker is being picked up off the ground on purpose.
+     */
+    public boolean isCollecting() {
+        return handle == Handle.Collect;
+    }
+
     public boolean isWorking() {
         if (!isEnabled()) return false;
         if (gate == Gate.Running && job != null && job != Job.Label && (step != Step.Walking || handle != null)) return true;
@@ -263,6 +297,8 @@ public class StashSorter extends AbstractFieldModule {
      * Starts over from the current state: when turned on, and when the bot (re)connects.
      */
     private void restart() {
+        // A shulker of ours standing in the world is said loudly before anything is forgotten
+        if (compact != null || handle != null) reportPlacedShulker("Lost track of");
         // This also runs every tick while the bot isn't in game: only the first time has anything to let go of
         if (stash != null || job != null || gate != Gate.Running || waitStart >= 0) resetGiveWay();
         job = null;
@@ -270,6 +306,8 @@ public class StashSorter extends AbstractFieldModule {
         moved = 0;
         passJobs = 0;
         passMin = Integer.MAX_VALUE;
+        lastSummary = null;
+        lastCompactWhy = "";
         failedSurvey.clear();
         unconfirmedRuns.clear();
         closedEarlyReported.clear();
@@ -311,6 +349,11 @@ public class StashSorter extends AbstractFieldModule {
         handle = null;
         repackFailed = false;
         packTried.clear();
+        compact = null;
+        compactCooldown.clear();
+        gatherLeft = 0;
+        failedSpots.clear();
+        dropLost = false;
         resetJobState();
         cursorReported = false;
 
@@ -330,6 +373,9 @@ public class StashSorter extends AbstractFieldModule {
             Containers.readSigns(box);
         }
         orderBoxes();
+        // Players may have changed things while the bot was away: every container is read again before anything is
+        // sorted or packed. What was saved stays in use for searching until each one is read
+        for (Box box : stash.boxes) if (!box.excluded) box.stale = true;
         tiesReported.clear();
         strayReported.clear();
         unrecognisedReported.clear();
@@ -348,7 +394,8 @@ public class StashSorter extends AbstractFieldModule {
 
         int unknown = stash.boxes.size() - stash.knownCount();
         if (!existed) info("New stash \"{}\": scanning {} containers, then sorting.", stash.name, stash.boxes.size());
-        else if (unknown > 0) info("Stash \"{}\": {} containers, scanning {} new ones first.", stash.name, stash.boxes.size(), unknown);
+        else if (unknown > 0) info("Stash \"{}\": {} containers, scanning {} new ones first and reading the rest again.", stash.name, stash.boxes.size(), unknown);
+        else if (!stash.boxes.isEmpty()) info("Stash \"{}\": {} containers, reading all of them again before sorting, as the bot was away.", stash.name, stash.boxes.size());
         else info("Stash \"{}\": {} containers, sorting by {}.", stash.name, stash.boxes.size(), CONFIG.mode == Mode.Tiers ? "tier" : "sign");
 
         if (added > 0 || !existed) stash.save();
@@ -402,6 +449,10 @@ public class StashSorter extends AbstractFieldModule {
         labelStep = null;
         reservedSigns.clear();
         if (handle != null && placed != null && placed(placed)) warn("Stopped while repacking, there's a shulker left at {}.", placed);
+        CompactPlan inFlight = compact;
+        reportPlacedShulker("Stopped with");
+        if (inFlight != null && inFlight.placedPos == null && findPlanShulker() >= 0) warn("Stopped while compacting, a part-filled shulker of {} is in the bot's inventory.", inFlight.reference.name);
+        compact = null;
         handle = null;
 
         // Containers used by others that were waiting to be read again are marked, to be read on the next run
@@ -504,7 +555,10 @@ public class StashSorter extends AbstractFieldModule {
         for (int i = 0; i < 36; i++) {
             if (keep.contains(i)) continue;
             if (designated && !chosen.contains(i)) continue;
-            if (inventoryItem(i) == null) carry.add(i);
+            Item there = inventoryItem(i);
+            // Stacks from the stash still in the inventory from before (a reconnect, or sorting turned off and on) are
+            // carried again, so they are put away and not left behind as if they were the bot's own
+            if (there == null || there.id.equals(stashHeld.get(i))) carry.add(i);
         }
 
         if (designated && carry.size() < chosen.size()) {
@@ -609,6 +663,7 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         if (job == null) {
+            pruneHeld();
             restoreHand();
             if (!deferredAccess.isEmpty()) releaseDeferred();
             if (!staleBoxes.isEmpty()) applyStale();
@@ -891,6 +946,7 @@ public class StashSorter extends AbstractFieldModule {
             Item item = Item.of(c.getItemStack(i));
             if (item == null || !Containers.isSignItem(item.id)) continue;
             clicks(c, i, toWindow(into, c));
+            stashHeld.put(into, item.id);
             reservedSigns.add(into);
             return true;
         }
@@ -1235,7 +1291,7 @@ public class StashSorter extends AbstractFieldModule {
             labelFailed("Couldn't get to where the sign at " + labelFace.sign() + " can be put up from (" + cell + ").");
             return;
         }
-        if (!activity.ownPathing() && !BARITONE.isActive()) {
+        if (activity.mayRequest()) {
             rules(false, false);
             GoalBlock goal = new GoalBlock(cell);
             PathingRequestFuture future = BARITONE.pathTo(goal);
@@ -2020,6 +2076,7 @@ public class StashSorter extends AbstractFieldModule {
             case Break -> Handle.Break;
             case Collect -> Handle.Collect;
             case Return -> returnTo != null ? returnTo : Handle.Open;
+            case Leave -> Handle.Leave;
         };
 
         boolean needsShulker = next == Handle.Open || next == Handle.Break;
@@ -2124,7 +2181,7 @@ public class StashSorter extends AbstractFieldModule {
     private @Nullable Map<Box, Integer> misplacedCache;
 
     private boolean pickJob() {
-        Box unread = nearest(stash.boxes.stream().filter(b -> !b.known() && !b.unreachable && !failedSurvey.contains(b) && !signPending(b)).toList());
+        Box unread = nearest(stash.boxes.stream().filter(b -> (!b.known() || b.stale) && !b.unreachable && !failedSurvey.contains(b) && !signPending(b)).toList());
         if (unread != null) return start(Job.Survey, unread);
 
         plan();
@@ -2133,7 +2190,7 @@ public class StashSorter extends AbstractFieldModule {
 
         // Jobs started since the backlog (stacks out of place, and carried) last reached a new low: a pass that keeps
         // starting jobs without getting anywhere is going in circles, so say so and stop rather than reopen forever
-        int backlog = carriedSlots().size();
+        int backlog = looseCarried().size();
         for (Box box : stash.boxes) if (box.sortable()) backlog += misplacedCount(box);
         if (backlog < passMin) {
             passMin = backlog;
@@ -2145,10 +2202,13 @@ public class StashSorter extends AbstractFieldModule {
         }
         if (passJobs > 6 * stash.boxes.size() + 60) {
             warn("Sorting went in circles ({} jobs without getting closer to done), stopping this pass. {} stacks out of place, carrying {}.",
-                passJobs, backlog - carriedSlots().size(), carriedSlots().size());
+                passJobs, backlog - looseCarried().size(), looseCarried().size());
             finishSorting();
             return false;
         }
+
+        // Compacting carries on until it is done or given up on: nothing else is started meanwhile
+        if (compact != null && continueCompaction()) return true;
 
         // A homeless item gets a new category before it is put in the catch-all: this comes before putting things away
         if (nextLabelJob()) return true;
@@ -2220,8 +2280,705 @@ public class StashSorter extends AbstractFieldModule {
         // A sign that is being changed decides what is left to do: wait for it before calling it done
         if (CONFIG.watchSigns && !signDirtyAt.isEmpty()) return false;
 
+        // Everything is where it belongs: full shulkers' worth of anything are packed, which frees chest slots
+        if (startCompaction() && continueCompaction()) return true;
+
         finishSorting();
         return false;
+    }
+
+
+    // Compacting: a full shulker's worth of an item is packed into one shulker, so it takes one slot instead of 27
+
+    private static final int COMPACT_COOLDOWN = 20 * 60 * 10;
+    private static final int COMPACT_DONE_COOLDOWN = 20 * 10;
+    private static final int PLACE_GAP_TICKS = 20 * 5;
+
+    private static final class CompactPlan {
+        final String key;
+        final Item reference;
+        final boolean topUp;
+        // Stacks the shulker held when this began, and should hold when it is done
+        final int startSize, target;
+        // Where the part-full shulker to top up is kept
+        @Nullable Box sourceBox;
+        int sourceSlot = -1;
+        // The shulker standing in the world between batches, and what it held when last worked on
+        @Nullable BlockPos placedPos;
+        int placedSize;
+        int jobs, acquireTries, slotHint = -1;
+        boolean aborting;
+
+        CompactPlan(String key, Item reference, boolean topUp, int startSize, int target) {
+            this.key = key;
+            this.reference = reference;
+            this.topUp = topUp;
+            this.startSize = startSize;
+            this.target = target;
+        }
+    }
+
+    private record Partial(Box box, int slot, int size) {
+    }
+
+    private @Nullable CompactPlan compact;
+    private final Map<String, Long> compactCooldown = new HashMap<>();
+    private volatile int compactedShulkers, slotsFreed;
+    private int runPacked, runFreed;
+    private volatile String compactBlocker = "";
+    private long lastPlaceTick = Long.MIN_VALUE / 4;
+    // A shulker could not be taken back: no more are put down
+    private boolean dropLost;
+
+    /**
+     * A shulker of ours standing in the world (compacting between rounds, or repacking) when sorting stops or starts
+     * over: said loudly with what is in it and where, and kept in the stash file and the status until it is picked up.
+     */
+    private void reportPlacedShulker(String lead) {
+        CompactPlan plan = compact;
+        BlockPos at = null;
+        String what = "stacks";
+        int stacks = 0;
+        if (plan != null && plan.placedPos != null) {
+            at = plan.placedPos;
+            what = plan.reference.name;
+            stacks = plan.placedSize;
+        }
+        else if (handle != null && placed != null && placed(placed)) {
+            at = placed;
+            what = fillId != null ? fillId : "items";
+            stacks = -1;
+        }
+        if (at == null) return;
+
+        error("{} a shulker holding {} of {} at {}. Pick it up by hand.", lead, stacks >= 0 ? stacks + " stacks" : "some stacks", what, at);
+        inGameAlertActivePlayer("<red>A shulker with " + what + " is standing at " + at + ".");
+        recordOrphan(at, what, Math.max(stacks, 0));
+    }
+
+    private void recordOrphan(BlockPos at, String item, int stacks) {
+        Stash current = stash != null ? stash : Stashes.current();
+        if (current == null) return;
+        current.orphans.removeIf(o -> o.pos.equals(at));
+        current.orphans.add(new Stash.Orphan(at, item, stacks, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(java.time.LocalDateTime.now())));
+        current.markDirty();
+        current.save();
+    }
+
+    private void clearOrphan(@Nullable BlockPos at) {
+        Stash current = stash != null ? stash : Stashes.current();
+        if (current == null || at == null) return;
+        if (current.orphans.removeIf(o -> o.pos.equals(at))) {
+            current.markDirty();
+            current.save();
+        }
+    }
+
+    private boolean compactOn() {
+        return CONFIG.compact && CONFIG.mode == Mode.Signs && !repackFailed && !dropLost && tickCount >= repackPausedUntil;
+    }
+
+    /**
+     * For the command: what compacting has done and what is holding it back.
+     */
+    public String compactStatus() {
+        String blocker = compactBlocker;
+        CompactPlan plan = compact;
+        return compactedShulkers + " shulkers packed, " + slotsFreed + " slots freed"
+            + (plan != null ? ", packing " + plan.reference.name : blocker.isEmpty() ? "" : ", last blocker: " + blocker)
+            + (dropLost ? ", stopped: a shulker could not be picked up" : "");
+    }
+
+    private boolean compactExcluded(Item item) {
+        return CONFIG.compactExclude.contains(item.id);
+    }
+
+    /**
+     * A container its stacks and shulkers may be taken from: not a drop-off, a kit chest, one marked compactSkip, or
+     * one whose sign is changing.
+     */
+    private boolean compactSource(Box b) {
+        return b.sortable() && !b.dropOff && !b.noCompact && !signPending(b) && b.labels.stream().noneMatch(Categories::isKeepWhole);
+    }
+
+    /**
+     * Compacting only touches what has a real category to go back to.
+     */
+    private boolean hasHome(Item item) {
+        List<Box> homes = destinationsFor(item);
+        return !homes.isEmpty() && homes.stream().noneMatch(this::isMisc);
+    }
+
+    private @Nullable String offhandId() {
+        Item offhand = Item.of(CACHE.getPlayerCache().getPlayerInventory().get(45));
+        return offhand == null ? null : offhand.id;
+    }
+
+    /**
+     * An unnamed shulker that is empty, or holds only this plan's item.
+     */
+    private boolean isPlanShulker(@Nullable Item s, CompactPlan plan) {
+        if (s == null || !s.isShulker() || s.customName) return false;
+        if (s.contents.isEmpty()) return !plan.topUp;
+        for (Item inside : s.contents) if (!plan.key.equals(inside.bulkKey())) return false;
+        return true;
+    }
+
+    private boolean matchesPlan(@Nullable Item item) {
+        CompactPlan plan = compact;
+        return plan != null && item != null && item.isFullStack() && plan.key.equals(item.bulkKey());
+    }
+
+    /**
+     * The carry slot holding the plan's shulker, by what is in it and not where it is: slots change when a shulker is
+     * moved to the hotbar or picked up again. -1 if there is none.
+     */
+    private int findPlanShulker() {
+        CompactPlan plan = compact;
+        if (plan == null) return -1;
+        if (plan.slotHint >= 0 && carry.contains(plan.slotHint) && isPlanShulker(inventoryItem(plan.slotHint), plan)) return plan.slotHint;
+
+        int found = -1;
+        for (int slot : carriedSlots()) {
+            Item item = inventoryItem(slot);
+            if (!isPlanShulker(item, plan)) continue;
+            if (found == -1 || !item.contents.isEmpty()) found = slot;
+        }
+        plan.slotHint = found;
+        return found;
+    }
+
+    /**
+     * Carry slots set aside for compacting: its shulker and the full stacks it is gathering. Nothing else touches them.
+     */
+    private Set<Integer> reservedSlots() {
+        if (compact == null) return Set.of();
+        Set<Integer> reserved = new HashSet<>();
+        int shulker = findPlanShulker();
+        if (shulker >= 0) reserved.add(shulker);
+        for (int slot : carriedSlots()) if (matchesPlan(inventoryItem(slot))) reserved.add(slot);
+        return reserved;
+    }
+
+    /**
+     * What is carried and free to be put away: everything but what compacting has set aside.
+     */
+    private List<Integer> looseCarried() {
+        Set<Integer> setAside = reservedSlots();
+        List<Integer> slots = new ArrayList<>();
+        for (int slot : carriedSlots()) if (!setAside.contains(slot)) slots.add(slot);
+        return slots;
+    }
+
+    /**
+     * Known not to be a shulker any more: the chunk is loaded and the block is something else. Not loaded is not known.
+     */
+    private boolean goneAt(BlockPos pos) {
+        return Containers.isLoaded(pos) && !World.getBlock(pos.x(), pos.y(), pos.z()).name().endsWith("shulker_box");
+    }
+
+    private boolean hasFull(Box box, String key) {
+        for (Item item : box.contents) if (item != null && item.isFullStack() && key.equals(item.bulkKey())) return true;
+        return false;
+    }
+
+    private @Nullable Box compactSourceBox(CompactPlan plan) {
+        return nearest(stash.boxes.stream().filter(b -> compactSource(b) && !blocked(b, Job.Gather) && hasFull(b, plan.key)).toList());
+    }
+
+    private @Nullable Partial partialOf(Box box, int slot, Item shulker) {
+        if (shulker.customName || shulker.contents.isEmpty() || shulker.contents.size() >= 27) return null;
+        String key = shulker.contents.get(0).bulkKey();
+        if (key == null) return null;
+        for (Item inside : shulker.contents) if (!key.equals(inside.bulkKey())) return null;
+        return new Partial(box, slot, shulker.contents.size());
+    }
+
+    /**
+     * Looks for something to compact: first topping up a shulker of an item that is part full, else 27 full stacks of
+     * an item with an empty shulker to put them in. Only with the stash otherwise settled and nothing carried.
+     * @return true when a plan was made
+     */
+    private boolean startCompaction() {
+        if (!CONFIG.compact) return false;
+        if (CONFIG.mode != Mode.Signs) {
+            compactWhy("it needs signs mode");
+            return false;
+        }
+        if (!compactOn()) {
+            compactWhy(dropLost ? "stopped, a shulker could not be picked up" : "paused for a few minutes after a shulker problem");
+            return false;
+        }
+        if (!activeCarried().isEmpty()) {
+            compactWhy("still carrying " + activeCarried().size() + " stacks to put away");
+            return false;
+        }
+
+        Map<String, Integer> full = new LinkedHashMap<>();
+        Map<String, Map<Box, Integer>> where = new HashMap<>();
+        Map<String, Item> sample = new HashMap<>();
+        Map<String, Partial> partials = new HashMap<>();
+        Map<String, Boolean> homed = new HashMap<>();
+        for (Box box : stash.boxes) {
+            if (!compactSource(box)) continue;
+            for (int i = 0; i < box.contents.length; i++) {
+                Item item = box.contents[i];
+                if (item == null) continue;
+                if (item.isShulker()) {
+                    Partial part = partialOf(box, i, item);
+                    if (part == null) continue;
+                    Item first = item.contents.get(0);
+                    String key = first.bulkKey();
+                    if (compactExcluded(first) || !homed.computeIfAbsent(key, k -> hasHome(first))) continue;
+                    Partial had = partials.get(key);
+                    if (had == null || part.size() < had.size()) partials.put(key, part);
+                    sample.putIfAbsent(key, first);
+                    continue;
+                }
+                String key = item.bulkKey();
+                if (key == null || !item.isFullStack() || compactExcluded(item)) continue;
+                if (!homed.computeIfAbsent(key, k -> hasHome(item))) continue;
+                full.merge(key, 1, Integer::sum);
+                where.computeIfAbsent(key, k -> new HashMap<>()).merge(box, 1, Integer::sum);
+                sample.putIfAbsent(key, item);
+            }
+        }
+
+        CompactPlan best = null;
+        int bestScore = 0;
+        String blocker = "";
+        for (var entry : full.entrySet()) {
+            String key = entry.getKey();
+            int stacks = entry.getValue();
+            Long cool = compactCooldown.get(key);
+            if (cool != null && tickCount < cool) {
+                blocker = "cooling down for " + sample.get(key).name;
+                continue;
+            }
+
+            Partial part = partials.get(key);
+            CompactPlan plan;
+            int score;
+            int room = part == null ? 0 : 27 - part.size();
+            // Things that don't stack (tools, armor, flint and steel...) are packed as soon as there are two, and added
+            // to a part-full shulker as soon as there is one; a shulker of them is filled with as many as there are
+            boolean single = sample.get(key).maxStack == 1;
+            if (part != null && stacks >= (single ? 1 : Math.min(room, CONFIG.compactTopUpAt))) {
+                int add = Math.min(room, stacks);
+                plan = new CompactPlan(key, sample.get(key), true, part.size(), part.size() + add);
+                plan.sourceBox = part.box();
+                plan.sourceSlot = part.slot();
+                score = 1000 + add;
+            }
+            else if (single ? stacks >= 2 : stacks >= 27) {
+                int target = single ? Math.min(27, stacks) : 27;
+                plan = new CompactPlan(key, sample.get(key), false, 0, target);
+                score = target;
+            }
+            else continue;
+            if (best == null || score > bestScore) {
+                best = plan;
+                bestScore = score;
+            }
+        }
+
+        if (best == null) {
+            compactBlocker = blocker;
+            String closest = "no stacks of anything with a category";
+            int most = 0;
+            for (var entry : full.entrySet()) {
+                if (entry.getValue() <= most) continue;
+                most = entry.getValue();
+                Box chest = where.get(entry.getKey()).entrySet().stream().max(Map.Entry.comparingByValue()).get().getKey();
+                closest = sample.get(entry.getKey()).name + " " + most + "/27, most in the chest at " + chest.pos;
+            }
+            compactWhy(blocker.isEmpty() ? "nothing has a full shulker's worth (closest: " + closest + ")" : blocker + " (closest: " + closest + ")");
+            return false;
+        }
+        // The shulker's slot, a stack to carry and one slot kept free for picking up (the shulker may already be carried)
+        compact = best;
+        int needFree = findPlanShulker() >= 0 ? 2 : 3;
+        compact = null;
+        if (freeCarryCount() < needFree) {
+            compactBlocker = "carry room " + freeCarryCount() + " < " + needFree;
+            compactWhy("not enough carry room for " + best.reference.name + " (" + freeCarryCount() + " free slots, need " + needFree + ")");
+            return false;
+        }
+        if (!best.topUp) {
+            compact = best;
+            boolean available = findPlanShulker() >= 0 || findEmptyShulker() != null;
+            compact = null;
+            if (!available) {
+                compactBlocker = "no empty shulker";
+                compactWhy("no empty shulker for " + best.reference.name + " (" + best.target + " stacks waiting)");
+                return false;
+            }
+        }
+
+        compact = best;
+        compactBlocker = "";
+        lastCompactWhy = "";
+        info("Compacting {} stacks of {} into a shulker, frees {} slots.", best.target - best.startSize, best.reference.name, best.target - best.startSize - (best.topUp ? 0 : 1));
+        return true;
+    }
+
+    // What compacting last said was holding it back, so it is said again only when that changes
+    private String lastCompactWhy = "";
+
+    private void compactWhy(String text) {
+        if (text.equals(lastCompactWhy)) return;
+        lastCompactWhy = text;
+        info("Compaction: {}.", text);
+    }
+
+    private record Found(Box box, int slot) {
+    }
+
+    /**
+     * An unnamed empty shulker in the stash that may be taken: in a chest signed for shulkers first, then the nearest,
+     * never one in a kit chest or a container marked compactSkip, and not one the offhand shulker would clash with.
+     */
+    private @Nullable Found findEmptyShulker() {
+        String offhand = offhandId();
+        Found best = null;
+        boolean bestSigned = false;
+        for (Box box : stash.boxes) {
+            if (!box.sortable() || box.noCompact || signPending(box) || blocked(box, Job.Fetch)) continue;
+            if (box.labels.stream().anyMatch(Categories::isKeepWhole)) continue;
+            boolean signed = box.labels.stream().anyMatch(l -> l.toLowerCase(java.util.Locale.ROOT).contains("shulker"));
+            for (int i = 0; i < box.contents.length; i++) {
+                Item item = box.contents[i];
+                if (!emptyShulker(item) || item.id.equals(offhand)) continue;
+                if (best == null || (signed && !bestSigned) || (signed == bestSigned && closer(box, best.box()))) {
+                    best = new Found(box, i);
+                    bestSigned = signed;
+                }
+                break;
+            }
+        }
+        return best;
+    }
+
+    private @Nullable String abortReason(CompactPlan plan) {
+        if (!compactOn()) return "compacting is off or paused";
+        if (plan.jobs > 12 + 4 * plan.target) return "it took too many trips";
+        if (!hasHome(plan.reference)) return "its category is gone";
+        return null;
+    }
+
+    /**
+     * Gives the plan up. A shulker standing in the world is still fetched back first.
+     */
+    private void abortCompaction(String why) {
+        CompactPlan plan = compact;
+        if (plan == null) return;
+        compactCooldown.put(plan.key, tickCount + COMPACT_COOLDOWN);
+        compactBlocker = why;
+        debug("Compacting {} given up on: {}.", plan.reference.name, why);
+        plan.aborting = true;
+    }
+
+    /**
+     * The next job of the plan in hand, or false when it is over (done or given up on) and normal sorting carries on.
+     */
+    private boolean continueCompaction() {
+        CompactPlan plan = compact;
+        if (plan == null) return false;
+
+        if (!plan.aborting) {
+            String why = abortReason(plan);
+            if (why != null) abortCompaction(why);
+        }
+        if (plan.aborting) {
+            if (plan.placedPos != null && !goneAt(plan.placedPos)) return startPackJob(plan);
+            if (plan.placedPos != null) return recoverLost(plan);
+            compact = null;
+            return false;
+        }
+        if (plan.placedPos != null && goneAt(plan.placedPos)) return recoverLost(plan);
+
+        boolean placedNow = plan.placedPos != null;
+        int shulkerSlot = placedNow ? -1 : findPlanShulker();
+        int have = placedNow ? plan.placedSize : shulkerSlot >= 0 ? inventoryItem(shulkerSlot).contents.size() : -1;
+        int carriedMatch = 0;
+        for (int slot : carriedSlots()) if (matchesPlan(inventoryItem(slot))) carriedMatch++;
+        int free = freeCarryCount();
+
+        if (have >= plan.target) {
+            if (placedNow) return startPackJob(plan);
+            completeCompaction(plan, have);
+            return false;
+        }
+        if (have < 0) {
+            if (++plan.acquireTries > 2) {
+                abortCompaction("couldn't get a shulker");
+                return continueCompaction();
+            }
+            return acquireShulker(plan);
+        }
+
+        int remaining = plan.target - have;
+        if (carriedMatch >= remaining || (carriedMatch > 0 && free <= 1)) return startPackJob(plan);
+
+        Box source = compactSourceBox(plan);
+        if (source == null) {
+            if (carriedMatch > 0) return startPackJob(plan);
+            abortCompaction("not enough left to pack");
+            return continueCompaction();
+        }
+
+        // However much room there is, in rounds: a batch, into the shulker, the next batch. One slot stays free
+        int batch = Math.min(remaining - carriedMatch, free - 1);
+        if (batch <= 0) {
+            abortCompaction("no carry room");
+            return continueCompaction();
+        }
+        gatherLeft = batch;
+        plan.jobs++;
+        return start(Job.Gather, source);
+    }
+
+    private boolean acquireShulker(CompactPlan plan) {
+        Box box;
+        int slot;
+        Predicate<Item> want;
+        if (plan.topUp) {
+            box = plan.sourceBox;
+            slot = plan.sourceSlot;
+            if (box == null || !box.known() || slot < 0 || slot >= box.contents.length || !isPlanShulker(box.contents[slot], plan)) {
+                abortCompaction("the shulker to top up has moved");
+                return continueCompaction();
+            }
+            want = it -> isPlanShulker(it, plan);
+        }
+        else {
+            Found found = findEmptyShulker();
+            if (found == null) {
+                abortCompaction("no empty shulker");
+                return continueCompaction();
+            }
+            box = found.box();
+            slot = found.slot();
+            String offhand = offhandId();
+            want = it -> emptyShulker(it) && !it.id.equals(offhand);
+        }
+        plan.jobs++;
+        wantSlot = slot;
+        fetchWants = want;
+        return start(Job.Fetch, box);
+    }
+
+    /**
+     * Back to the shulker standing in the world, or the one in hand, to put the carried stacks in. When nothing more is
+     * wanted in it, it is broken and picked up.
+     */
+    private boolean startPackJob(CompactPlan plan) {
+        plan.jobs++;
+        if (plan.placedPos != null) {
+            startHandling(Job.Fill, -1, plan.key);
+            placed = plan.placedPos;
+            handle = Handle.Return;
+            returnTo = Handle.Open;
+            return true;
+        }
+        int slot = findPlanShulker();
+        if (slot < 0) {
+            abortCompaction("the shulker is missing");
+            return continueCompaction();
+        }
+        return startHandling(Job.Fill, slot, plan.key);
+    }
+
+    /**
+     * The shulker that was put down is gone from where it was: said loudly, and looked for on the ground.
+     */
+    private boolean recoverLost(CompactPlan plan) {
+        BlockPos at = plan.placedPos;
+        plan.placedPos = null;
+        plan.aborting = true;
+        error("The shulker holding {} stacks of {} that I put down at {} is gone. Looking for it on the ground.", plan.placedSize, plan.reference.name, at);
+        inGameAlertActivePlayer("<red>The shulker at " + at + " is gone.");
+        startHandling(Job.Fill, -1, plan.key);
+        placed = at;
+        handle = Handle.Collect;
+        shulkersBefore = countInInv(this::isShulkerBox) + 1;
+        shulkerSlotsBefore.clear();
+        for (int i = 0; i < 36; i++) {
+            Item item = inventoryItem(i);
+            if (item != null && item.isShulker()) shulkerSlotsBefore.add(i);
+        }
+        return true;
+    }
+
+    private void completeCompaction(CompactPlan plan, int size) {
+        int stacks = size - plan.startSize;
+        if (!plan.topUp) {
+            compactedShulkers++;
+            runPacked++;
+        }
+        slotsFreed += stacks - (plan.topUp ? 0 : 1);
+        runFreed += stacks - (plan.topUp ? 0 : 1);
+        info("Packed {} stacks of {} into a shulker.", stacks, plan.reference.name);
+        compactCooldown.put(plan.key, tickCount + COMPACT_DONE_COOLDOWN);
+        compact = null;
+
+        // Real headway: the circle watchdog starts over
+        passMin = Integer.MAX_VALUE;
+        passJobs = 0;
+        boxVisits.clear();
+        stalled.removeAll(circular);
+        circular.clear();
+        clearStalled();
+    }
+
+    /**
+     * Takes up to the trip's number of full stacks of the plan's item into free carry slots, checking each against
+     * the plan's key as it is in the window.
+     */
+    private boolean gatherOne(Container c) {
+        CompactPlan plan = compact;
+        if (plan == null || gatherLeft <= 0 || freeCarryCount() <= 1) return false;
+
+        int into = freeCarrySlot();
+        if (into == -1) return false;
+        for (int i = 0; i < Stashes.slots(c); i++) {
+            Item item = Item.of(c.getItemStack(i));
+            if (item == null || !item.isFullStack() || !plan.key.equals(item.bulkKey())) continue;
+            clicks(c, i, toWindow(into, c));
+            stashHeld.put(into, item.id);
+            gatherLeft--;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Puts one more reserved stack into the open shulker, until it holds what the plan wants. The shulker's own
+     * contents are checked first: anything that is not the plan's item and the plan is given up on.
+     */
+    private boolean packPlanOne(Container c, CompactPlan plan) {
+        if (plan.aborting) return false;
+
+        int size = 0;
+        for (int i = 0; i < 27; i++) {
+            Item here = Item.of(c.getItemStack(i));
+            if (here == null) continue;
+            if (!plan.key.equals(here.bulkKey())) {
+                warn("The shulker I'm packing holds something that isn't {}, not adding to it.", plan.reference.name);
+                abortCompaction("the shulker holds something else");
+                return false;
+            }
+            size++;
+        }
+        if (size >= plan.target) return false;
+
+        for (int slot : carriedSlots()) {
+            if (!matchesPlan(inventoryItem(slot))) continue;
+            shiftClick(c, toWindow(slot, c));
+            moved++;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * The batch is in. More wanted and more to be had: the window is closed and the shulker stays where it is while the
+     * next batch is gathered. Otherwise it is broken and picked up.
+     */
+    private void afterPacking(Container c, CompactPlan plan) {
+        int size = 0;
+        for (int i = 0; i < 27; i++) if (Item.of(c.getItemStack(i)) != null) size++;
+        plan.placedSize = size;
+
+        // Stacks are waiting and nothing went in: it is not going to, so don't come back for it
+        int waiting = 0;
+        for (int slot : carriedSlots()) if (matchesPlan(inventoryItem(slot))) waiting++;
+        if (actions == 0 && waiting > 0) {
+            abortCompaction("nothing could be packed");
+            handle = Handle.Break;
+            handleTicks = 0;
+            wait = CONFIG.delayTicks;
+            return;
+        }
+
+        boolean more = !plan.aborting && size < plan.target && compactSourceBox(plan) != null && freeCarryCount() >= 2;
+        handle = more ? Handle.Leave : Handle.Break;
+        handleTicks = 0;
+        wait = CONFIG.delayTicks;
+        if (more) plan.placedPos = placed;
+    }
+
+    private void handleLeave() {
+        if (openContainerId() != 0) {
+            closeSafely();
+            return;
+        }
+        // Left standing: the plan knows where, and the next batch comes back to it
+        CompactPlan plan = compact;
+        if (plan != null) plan.placedPos = placed;
+        endHandling();
+    }
+
+    /**
+     * A spot beside the bot for a shulker that is safe: nothing below it that would empty it (a hopper in any
+     * direction) and no chest under it, which would not open with a block on top.
+     */
+    private @Nullable BlockPos safeSpot(@Nullable BlockPos avoid) {
+        Set<BlockPos> seen = new HashSet<>();
+        if (avoid != null) seen.add(avoid);
+        BlockPos last = avoid;
+        Map<String, Integer> rejected = new LinkedHashMap<>();
+        for (int i = 0; i < 8; i++) {
+            BlockPos spot = selectSpotBeside(last);
+            if (spot == null) {
+                rejected.merge("no open air cell left beside the bot", 1, Integer::sum);
+                break;
+            }
+            if (!seen.add(spot)) break;
+            String why = unsafeBecause(spot);
+            if (why == null) return spot;
+            debug("Not putting a shulker at {}: {}.", spot, why);
+            rejected.merge(why, 1, Integer::sum);
+            last = spot;
+        }
+        info("No spot for a shulker beside the bot at {}: {}.", playerFeet(),
+            rejected.entrySet().stream().map(e -> e.getValue() + "x " + e.getKey()).collect(java.util.stream.Collectors.joining(", ")));
+        return null;
+    }
+
+    /**
+     * Why a shulker mustn't be put at this spot, or null if it may.
+     */
+    private @Nullable String unsafeBecause(BlockPos spot) {
+        if (failedSpots.contains(spot)) return "placing there failed before";
+        if (stash.boxAt(spot) != null) return "a stash container is there";
+        // Another player or a mob whose box, a little wider than it is, overlaps the spot's cell blocks the place. Not the
+        // bot itself, and not items, experience, frames or armor stands
+        int botId = CACHE.getPlayerCache().getEntityId();
+        for (var entity : CACHE.getEntityCache().getEntities().values()) {
+            if (entity == null || entity.getEntityId() == botId || !(entity instanceof EntityLiving)) continue;
+            if (entity.getEntityType() == EntityType.ARMOR_STAND) continue;
+            double width = 0.6, height = 1.8;
+            try {
+                width = entity.dimensions().getX();
+                height = entity.dimensions().getY();
+            } catch (RuntimeException ignored) {
+                // Normal player size
+            }
+            double margin = width / 2 + 0.3;
+            if (entity.getX() + margin > spot.x() && entity.getX() - margin < spot.x() + 1
+                && entity.getZ() + margin > spot.z() && entity.getZ() - margin < spot.z() + 1
+                && entity.getY() < spot.y() + 1 && entity.getY() + height > spot.y()) {
+                return "a player or mob is standing in the way";
+            }
+        }
+        BlockPos below = spot.add(0, -1, 0);
+        for (Box box : stash.boxes) if (box.has(below)) return "it is on top of the container at " + box.pos;
+        int[][] around = {{0, -1, 0}, {0, 1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] d : around) {
+            if (World.getBlock(spot.x() + d[0], spot.y() + d[1], spot.z() + d[2]).name().equals("hopper")) return "there is a hopper next to it";
+        }
+        return null;
     }
 
     // Repacking shulkers
@@ -2235,6 +2992,9 @@ public class StashSorter extends AbstractFieldModule {
      * @return true when a job was started
      */
     private boolean nextRepackJob() {
+        // Compacting has the shulkers and the stacks set aside for it
+        if (compact != null) return false;
+
         // A carried shulker with items in it that belong elsewhere: clean it out right here
         if (freeCarrySlot() != -1) {
             for (int slot : carriedSlots()) {
@@ -2248,10 +3008,11 @@ public class StashSorter extends AbstractFieldModule {
         // Loose items with a bulk shulker to go in
         for (int slot : carriedSlots()) {
             Item loose = inventoryItem(slot);
-            if (loose == null || loose.isShulker() || packTried.contains(loose.id)) continue;
-            String id = loose.id;
+            String id = loose == null ? null : loose.bulkKey();
+            if (id == null || packTried.contains(id)) continue;
             int stacks = carriedStacksOf(id);
-            boolean startNew = CONFIG.newBulkAt > 0 && stacks >= CONFIG.newBulkAt;
+            // With compacting on, new bulk shulkers are made by compacting: a full shulker's worth, never a part-filled one
+            boolean startNew = !CONFIG.compact && CONFIG.newBulkAt > 0 && stacks >= CONFIG.newBulkAt;
 
             for (int s : carriedSlots()) {
                 Item shulker = inventoryItem(s);
@@ -2284,6 +3045,7 @@ public class StashSorter extends AbstractFieldModule {
 
     private boolean fetch(Box box, int slot) {
         wantSlot = slot;
+        fetchWants = it -> it.isShulker() && !it.customName;
         return start(Job.Fetch, box);
     }
 
@@ -2295,10 +3057,12 @@ public class StashSorter extends AbstractFieldModule {
         if (wantSlot < 0 || actions > 0) return false;
 
         int into = freeCarrySlot();
-        Item there = wantSlot < target.contents.length ? target.contents[wantSlot] : null;
-        if (into == -1 || there == null || !there.isShulker()) return false;
+        // What is really in that slot now, not what was saved
+        Item there = wantSlot < Stashes.slots(c) ? Item.of(c.getItemStack(wantSlot)) : null;
+        if (into == -1 || there == null || !fetchWants.test(there)) return false;
 
         clicks(c, wantSlot, toWindow(into, c));
+        stashHeld.put(into, there.id);
         wantSlot = -1;
         return true;
     }
@@ -2326,12 +3090,12 @@ public class StashSorter extends AbstractFieldModule {
     /**
      * A shulker holding only {@code id}, with room for more.
      */
-    private static boolean bulkWithRoom(@Nullable Item shulker, String id) {
-        if (shulker == null || !shulker.isShulker() || shulker.customName || shulker.contents.isEmpty()) return false;
+    private static boolean bulkWithRoom(@Nullable Item shulker, @Nullable String key) {
+        if (key == null || shulker == null || !shulker.isShulker() || shulker.customName || shulker.contents.isEmpty()) return false;
 
         boolean room = shulker.contents.size() < 27;
         for (Item inside : shulker.contents) {
-            if (!inside.id.equals(id)) return false;
+            if (!key.equals(inside.bulkKey())) return false;
             if (inside.count < inside.maxStack) room = true;
         }
         return room;
@@ -2341,11 +3105,11 @@ public class StashSorter extends AbstractFieldModule {
         return shulker != null && shulker.isShulker() && !shulker.customName && shulker.contents.isEmpty();
     }
 
-    private int carriedStacksOf(String id) {
+    private int carriedStacksOf(String key) {
         int count = 0;
         for (int slot : carriedSlots()) {
             Item item = inventoryItem(slot);
-            if (item != null && item.id.equals(id)) count++;
+            if (item != null && key.equals(item.bulkKey())) count++;
         }
         return count;
     }
@@ -2362,7 +3126,7 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     private boolean startHandling(Job next, int slot, @Nullable String fill) {
-        passJobs++;
+        if (compact == null) passJobs++;
         job = next;
         target = null;
         handledSlot = slot;
@@ -2391,26 +3155,44 @@ public class StashSorter extends AbstractFieldModule {
             case Break -> handleBreak();
             case Collect -> handleCollect();
             case Return -> handleReturn();
+            case Leave -> handleLeave();
         }
     }
 
     /**
      * Walks back to the shulker we put down, after giving way took us away from it.
      */
+    private int returnRetries, standRetries;
+    // Spots where a place failed, not tried again until one works or sorting starts over
+    private final Set<BlockPos> failedSpots = new HashSet<>();
+    private @Nullable BlockPos lastGoodStand;
+    // The last request to break the shulker in the world, so it is asked for once and not again every few ticks
+    private @Nullable BlockPos breakAsked;
+    private long breakAskedAt;
+
     private void handleReturn() {
-        if (placed == null || !placed(placed) || arrivedAt(new GoalNear(placed, REACH_RANGE_SQ))) {
+        // A chunk that isn't loaded says nothing about the shulker: walk to it first
+        boolean loaded = placed != null && Containers.isLoaded(placed);
+        if (placed == null || (loaded && (!placed(placed) || arrivedAt(new GoalNear(placed, REACH_RANGE_SQ))))) {
             activity.releaseOurPathing();
+            returnRetries = 0;
             enterHandle(returnTo != null ? returnTo : Handle.Open);
             return;
         }
 
         if (handleTicks > WALK_TIMEOUT) {
             activity.releaseOurPathing();
-            failHandling("Couldn't get back to the shulker at " + placed + ".");
+            if (++returnRetries > 3) {
+                abandonShulker("Couldn't get back to the shulker at " + placed + ".");
+                return;
+            }
+            warn("Couldn't get back to the shulker at {} yet, trying again in a while ({}/3).", placed, returnRetries);
+            handleTicks = 0;
+            wait = 20 * 30;
             return;
         }
 
-        if (!activity.ownPathing() && !BARITONE.isActive()) {
+        if (activity.mayRequest()) {
             requestWalk(placed);
             wait = 10;
         }
@@ -2429,6 +3211,20 @@ public class StashSorter extends AbstractFieldModule {
 
         Item offhand = Item.of(CACHE.getPlayerCache().getPlayerInventory().get(45));
         if (offhand != null && offhand.id.equals(shulker.id)) {
+            // Compacting can use a shulker of another colour; the old repacking has no choice
+            CompactPlan plan = compact;
+            if (plan != null) {
+                for (int slot : carriedSlots()) {
+                    Item other = inventoryItem(slot);
+                    if (other != null && !other.id.equals(offhand.id) && isPlanShulker(other, plan)) {
+                        handledSlot = slot;
+                        return;
+                    }
+                }
+                abortCompaction("the offhand holds a shulker of the same color");
+                endHandling();
+                return;
+            }
             warn("The offhand holds a shulker of the same color, so I'm not repacking shulkers this run.");
             repackFailed = true;
             endHandling();
@@ -2470,18 +3266,41 @@ public class StashSorter extends AbstractFieldModule {
             return;
         }
 
-        placed = selectSpotBeside(null);
-        if (placed != null && stash.boxAt(placed) != null) placed = null;
+        // Shulkers are not put down in quick succession: that is what a build bot does
+        if (tickCount - lastPlaceTick < PLACE_GAP_TICKS) {
+            wait = 10;
+            return;
+        }
+        // On the way back to where one went down before
+        if (standRetries > 0 && activity.ownPathing()) return;
+        placed = safeSpot(null);
         if (placed == null) {
-            warn("No room to put a shulker down beside the bot, so I'm not repacking shulkers this run.");
-            repackFailed = true;
+            // Walk to where one went down before and look again; failing that, pause a while instead of giving up
+            if (activity.ownPathing()) {
+                placed = null;
+                return;
+            }
+            BlockPos stand = lastGoodStand;
+            if (stand != null && !playerFeet().equals(stand) && standRetries < 2) {
+                standRetries++;
+                debug("No room beside the bot at {}, walking back to {} where a shulker went down before.", playerFeet(), stand);
+                requestWalk(stand);
+                return;
+            }
+            standRetries = 0;
+            warn("No room to put a shulker down beside the bot, trying again in a few minutes.");
+            repackPausedUntil = tickCount + 20 * 60 * 3;
             endHandling();
             return;
         }
+        standRetries = 0;
 
         placeFailures = 0;
+        if (compact != null) compact.placedSize = shulker.contents.size();
         shulkersBefore = countInInv(this::isShulkerBox);
-        requestPlace(placed, ItemRegistry.REGISTRY.get(shulker.id));
+        lastPlaceTick = tickCount;
+        placedItem = ItemRegistry.REGISTRY.get(shulker.id);
+        requestPlace(placed, placedItem);
         handle = Handle.Place;
         handleTicks = 0;
     }
@@ -2490,6 +3309,9 @@ public class StashSorter extends AbstractFieldModule {
         if (placed(placed) && countInInv(this::isShulkerBox) < shulkersBefore) {
             activity.releaseOurPathing();
             restoreRules();
+            if (compact != null) compact.placedPos = placed;
+            lastGoodStand = playerFeet();
+            failedSpots.clear();
             handle = Handle.Open;
             openRequestedAt = Long.MAX_VALUE;
             openIdBefore = openContainerId();
@@ -2500,8 +3322,9 @@ public class StashSorter extends AbstractFieldModule {
 
         // The place request failed by itself (an entity in the way, nothing to place against): let go of it, so it is
         // not taken for another module, and try the next spot; after three, repacking waits a while
-        if (activity.superseded() && handleTicks > 5) {
+        if (activity.superseded() && !activity.replacedByOther() && handleTicks > 2) {
             BlockPos failed = placed;
+            failedSpots.add(failed);
             activity.releaseOurPathing();
             restoreRules();
             if (++placeFailures >= 3) {
@@ -2510,15 +3333,16 @@ public class StashSorter extends AbstractFieldModule {
                 endHandling();
                 return;
             }
-            BlockPos next = selectSpotBeside(failed);
-            if (next == null || next.equals(failed) || stash.boxAt(next) != null) {
+            BlockPos next = safeSpot(failed);
+            if (next == null || next.equals(failed)) {
                 warn("No other spot to put the shulker down, not repacking shulkers for a few minutes.");
                 repackPausedUntil = tickCount + 20 * 60 * 3;
                 endHandling();
                 return;
             }
             placed = next;
-            requestPlace(placed, ItemRegistry.REGISTRY.get(inventoryItem(handledSlot).id));
+            lastPlaceTick = tickCount;
+            requestPlace(placed, placedItem);
             handleTicks = 0;
             return;
         }
@@ -2615,10 +3439,16 @@ public class StashSorter extends AbstractFieldModule {
             return;
         }
 
-        boolean busy = job == Job.Clean ? takeStray(c) : packOne(c);
+        CompactPlan plan = job == Job.Fill ? compact : null;
+        boolean busy = job == Job.Clean ? takeStray(c) : plan != null ? packPlanOne(c, plan) : packOne(c);
         if (busy) {
             actions++;
             wait = CONFIG.delayTicks;
+            return;
+        }
+
+        if (plan != null) {
+            afterPacking(c, plan);
             return;
         }
 
@@ -2636,12 +3466,14 @@ public class StashSorter extends AbstractFieldModule {
      */
     private boolean takeStray(Container c) {
         int into = freeCarrySlot();
-        if (into == -1) return false;
+        // One slot stays free, for picking the shulker back up
+        if (into == -1 || freeCarryCount() <= 1) return false;
 
         for (int i = 0; i < 27; i++) {
             Item item = Item.of(c.getItemStack(i));
             if (item == null || item.id.equals(mainId) || bestSigned(item).isEmpty()) continue;
             clicks(c, i, toWindow(into, c));
+            stashHeld.put(into, item.id);
             moved++;
             return true;
         }
@@ -2654,7 +3486,7 @@ public class StashSorter extends AbstractFieldModule {
     private boolean packOne(Container c) {
         for (int slot : carriedSlots()) {
             Item item = inventoryItem(slot);
-            if (item == null || !item.id.equals(fillId)) continue;
+            if (item == null || fillId == null || !fillId.equals(item.bulkKey())) continue;
 
             for (int i = 0; i < 27; i++) {
                 Item here = Item.of(c.getItemStack(i));
@@ -2687,12 +3519,24 @@ public class StashSorter extends AbstractFieldModule {
         if (handleTicks > HANDLE_TIMEOUT * 2) {
             activity.releaseOurPathing();
             restoreRules();
-            failHandling("Couldn't break the shulker at " + placed + ", it's still there.");
+            abandonShulker("Couldn't break the shulker at " + placed + ", it's still there.");
             return;
         }
 
-        // Asking again would start the break over: only when the last request is over
-        if (!activity.ownPathing() && !BARITONE.isActive()) requestBreak(placed);
+        // Breaking it needs a free slot to pick it up into: otherwise it would end up on the ground
+        if (activity.mayRequest()) {
+            if (!freeInventorySlot()) {
+                if (handleTicks % 200 == 1) warn("No free inventory slot to pick the shulker at {} up into, leaving it where it is until there is one.", placed);
+                if (handleTicks > 20 * 60 * 5) abandonShulker("No free inventory slot to pick the shulker at " + placed + " up into.");
+                return;
+            }
+            // The pathfinder logs a start for every request: once is enough while it works on it
+            if (!placed.equals(breakAsked) || tickCount - breakAskedAt > 20 * 4) {
+                breakAsked = placed;
+                breakAskedAt = tickCount;
+                requestBreak(placed);
+            }
+        }
     }
 
     private void handleCollect() {
@@ -2703,6 +3547,17 @@ public class StashSorter extends AbstractFieldModule {
             for (int i = 0; i < 36; i++) {
                 Item item = inventoryItem(i);
                 if (shulkerSlotsBefore.contains(i) || item == null || !item.isShulker()) continue;
+                CompactPlan plan = compact;
+                if (plan != null) {
+                    plan.placedPos = null;
+                    plan.slotHint = i;
+                    if (!plan.aborting && item.contents.size() != plan.placedSize) {
+                        error("The shulker of {} I picked up holds {} stacks, I expected {} ({} missing). Something may have taken from it.",
+                            plan.reference.name, item.contents.size(), plan.placedSize, plan.placedSize - item.contents.size());
+                        compactCooldown.put(plan.key, tickCount + COMPACT_COOLDOWN);
+                    }
+                    clearOrphan(placed);
+                }
                 if (!carry.contains(i)) {
                     int free = freeCarrySlot();
                     if (free != -1) {
@@ -2719,7 +3574,7 @@ public class StashSorter extends AbstractFieldModule {
 
         if (handleTicks > COLLECT_TIMEOUT) {
             activity.releaseOurPathing();
-            failHandling("Couldn't pick the shulker back up, it's on the ground near " + placed + ".");
+            abandonShulker("Couldn't pick the shulker back up, it's on the ground near " + placed + ".");
             return;
         }
 
@@ -2732,6 +3587,29 @@ public class StashSorter extends AbstractFieldModule {
         if (stash.isDirty()) stash.save();
         job = null;
         wait = CONFIG.delayTicks;
+    }
+
+    /**
+     * A shulker that could not be broken or picked up: said loudly, left where it is, and no more are put down until
+     * the bot is started again. Sorting carries on.
+     */
+    private void abandonShulker(String why) {
+        CompactPlan plan = compact;
+        String what = plan != null ? plan.reference.name : fillId != null ? fillId : "items";
+        int stacks = plan != null ? plan.placedSize : 0;
+        error("{} It holds {} of {}. No more shulkers are put down until sorting is restarted.", why, stacks > 0 ? stacks + " stacks" : "some stacks", what);
+        inGameAlertActivePlayer("<red>" + why);
+        if (placed != null) recordOrphan(placed, what, stacks);
+        dropLost = true;
+        if (compact != null) compact.aborting = true;
+        compact = null;
+        endHandling();
+    }
+
+    private boolean freeInventorySlot() {
+        Set<Integer> keep = keepSlots();
+        for (int i = 0; i < 36; i++) if (!keep.contains(i) && inventoryItem(i) == null) return true;
+        return false;
     }
 
     private void failHandling(String why) {
@@ -2796,6 +3674,7 @@ public class StashSorter extends AbstractFieldModule {
         return was != null && was == futileSig(box);
     }
 
+    private @Nullable String lastSummary;
     private int passJobs;
     private int passMin = Integer.MAX_VALUE;
     // Containers that could not be read when visited: not tried again until something changes
@@ -2810,18 +3689,23 @@ public class StashSorter extends AbstractFieldModule {
         passJobs = 0;
         passMin = Integer.MAX_VALUE;
         if (stash.isDirty()) stash.save();
+        StashIndex.touch(stash);
         restoreRules();
         reportStrays();
         unrecognisedSigns(true);
 
         long unreachable = stash.boxes.stream().filter(b -> b.unreachable).count();
         String extra = unreachable > 0 ? String.format(" Couldn't open %d containers, they were left alone.", unreachable) : "";
+        if (runPacked > 0) extra += String.format(" Packed %d shulkers, freed %d slots.", runPacked, runFreed);
+        runPacked = runFreed = 0;
         if (!stuckCarried.isEmpty()) extra += String.format(" %d stacks I am carrying have nowhere to go.", stuckCarried.size());
         long leftInDropOffs = stash.boxes.stream().filter(b -> b.dropOff && b.known() && !b.unreachable).mapToLong(b -> b.contents.length - b.free()).sum();
         if (leftInDropOffs > 0) extra += String.format(" %d stacks are still in drop-offs, there's no room left in the stash.", leftInDropOffs);
 
         if (CONFIG.stayOn) {
-            if (moved > 0 || !idle) info("Sorted, moved {} stacks.{} Waiting for more to sort.", moved, extra);
+            // Waking up for a drop-off check that finds nothing says nothing; a changed summary does
+            if (moved > 0 || !extra.equals(lastSummary)) info("Sorted, moved {} stacks.{} Waiting for more to sort.", moved, extra);
+            lastSummary = extra;
             moved = 0;
             idle = true;
             idleTicks = 0;
@@ -2835,8 +3719,11 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     private boolean start(Job next, Box box) {
-        passJobs++;
-        boxVisits.merge(box, 1, Integer::sum);
+        // Compacting has its own limits: its trips are not what the circle watchdog counts
+        if (next != Job.Gather && !(next == Job.Fetch && compact != null)) {
+            passJobs++;
+            boxVisits.merge(box, 1, Integer::sum);
+        }
         signAbort = false;
         job = next;
         target = box;
@@ -2892,7 +3779,7 @@ public class StashSorter extends AbstractFieldModule {
             circular.add(target);
             stalled.add(target);
         }
-        else if (job == Job.Survey && target != null && !target.known() && !signAbort) failedSurvey.add(target);
+        else if (job == Job.Survey && target != null && (!target.known() || target.stale) && !signAbort) failedSurvey.add(target);
         else if (job != null && job != Job.Survey && target != null && !target.unreachable) {
             if (unconfirmed && !signAbort) {
                 if (unconfirmedRuns.merge(target, 1, Integer::sum) >= 2) stalled.add(target);
@@ -2938,7 +3825,7 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         // Anything else on Baritone would have had us give way by now, so this is only ever our own path
-        if (!activity.ownPathing() && !BARITONE.isActive()) {
+        if (activity.mayRequest()) {
             goal = requestWalk(nearestPart(target));
             wait = 10;
         }
@@ -3111,6 +3998,7 @@ public class StashSorter extends AbstractFieldModule {
             case Compact -> compactOne(c);
             case Deposit -> depositOne(c);
             case Dump -> dumpOne(c);
+            case Gather -> gatherOne(c);
         };
 
         if (busy) {
@@ -3145,6 +4033,7 @@ public class StashSorter extends AbstractFieldModule {
 
         // Straight into a carry slot, so it can never land in or top up one of the bot's own stacks
         clicks(c, slot, toWindow(into, c));
+        stashHeld.put(into, target.contents[slot].id);
         return true;
     }
 
@@ -3159,7 +4048,7 @@ public class StashSorter extends AbstractFieldModule {
             // Only where a deposit could go: not a container being skipped or whose sign hasn't settled
             if (box.sortable() && !box.dropOff && box != source && !stalled.contains(box) && !signPending(box)) room.put(box, box.free() + misplacedCount(box));
         }
-        for (int carried : carriedSlots()) {
+        for (int carried : looseCarried()) {
             for (Box box : destinationsFor(inventoryItem(carried))) {
                 if (room.containsKey(box)) {
                     room.merge(box, -1, Integer::sum);
@@ -3190,7 +4079,7 @@ public class StashSorter extends AbstractFieldModule {
     private boolean depositOne(Container c) {
         if (swapStep > 0) return continueSwap(c);
 
-        for (int slot : carriedSlots()) {
+        for (int slot : looseCarried()) {
             Item item = inventoryItem(slot);
             if (!destinationsFor(item).contains(target)) continue;
 
@@ -3210,6 +4099,7 @@ public class StashSorter extends AbstractFieldModule {
                 swapSlot = i;
                 swapStack = snapshot(item);
                 swapDisplaced = snapshot(here);
+                stashHeld.put(slot, here.id);
                 swapStep = 1;
                 clicks(c, swapCarry);
                 moved++;
@@ -3224,7 +4114,7 @@ public class StashSorter extends AbstractFieldModule {
      * Puts carried stacks down in a container with space, when nowhere they belong has room for them.
      */
     private boolean dumpOne(Container c) {
-        for (int slot : carriedSlots()) {
+        for (int slot : looseCarried()) {
             if (!canFit(inventoryItem(slot))) continue;
             shiftClick(c, toWindow(slot, c));
             moved++;
@@ -3365,7 +4255,8 @@ public class StashSorter extends AbstractFieldModule {
 
     private void requestPickup() {
         rules(false, false);
-        PathingRequestFuture future = BARITONE.pickup();
+        // Just the shulker, not whatever else lies around
+        PathingRequestFuture future = placedItem != null ? BARITONE.pickup(placedItem) : BARITONE.pickup();
         activity.notePath(future, BARITONE.getFollowProcess(), null, tickCount);
     }
 
@@ -3858,7 +4749,7 @@ public class StashSorter extends AbstractFieldModule {
     private int spareRoom(Box except) {
         int free = 0;
         for (Box box : stash.boxes) if (box != except && (takesAnything(box, true) || takesAnything(box, false))) free += box.free();
-        return free - carriedSlots().size();
+        return free - looseCarried().size();
     }
 
     /**
@@ -4008,7 +4899,9 @@ public class StashSorter extends AbstractFieldModule {
      */
     private List<Integer> activeCarried() {
         List<Integer> slots = new ArrayList<>();
+        Set<Integer> setAside = reservedSlots();
         for (int slot : carriedSlots()) {
+            if (setAside.contains(slot)) continue;
             Item item = inventoryItem(slot);
             // Signs kept for labelling are not put away
             if (item != null && reservedSigns.contains(slot) && Containers.isSignItem(item.id)) continue;
@@ -4022,8 +4915,42 @@ public class StashSorter extends AbstractFieldModule {
      */
     private List<Integer> carriedSlots() {
         List<Integer> slots = new ArrayList<>();
-        for (int slot : carry) if (inventoryItem(slot) != null) slots.add(slot);
+        for (int slot : carry) {
+            Item item = inventoryItem(slot);
+            if (item == null) continue;
+            // Something a player dropped that is about to be given back is neither the stash's nor the bot's own
+            if (item.raw != null && autoDrop().isReturning(item.raw)) continue;
+            // Gear, food, totems and pearls we didn't put there ourselves are the bot's own
+            if (ownKind(item) && !item.id.equals(stashHeld.get(slot))) continue;
+            slots.add(slot);
+        }
         return slots;
+    }
+
+    /**
+     * Between jobs, with no click outstanding: a slot we filled that is now empty or holds something else is no longer ours.
+     */
+    private void pruneHeld() {
+        if (busy() || openContainerId() != 0) return;
+        stashHeld.entrySet().removeIf(entry -> {
+            Item item = inventoryItem(entry.getKey());
+            return item == null || !item.id.equals(entry.getValue());
+        });
+    }
+
+    /**
+     * What the bot keeps for itself: tools, weapons, armor, food, totems and ender pearls.
+     */
+    private static boolean ownKind(Item item) {
+        String id = item.id;
+        if (item.food || id.equals("totem_of_undying") || id.equals("ender_pearl")) return true;
+        for (String suffix : List.of("_sword", "_axe", "_pickaxe", "_shovel", "_hoe", "_helmet", "_chestplate", "_leggings", "_boots")) {
+            if (id.endsWith(suffix)) return true;
+        }
+        return switch (id) {
+            case "bow", "crossbow", "trident", "shield", "fishing_rod", "shears", "elytra", "mace", "flint_and_steel" -> true;
+            default -> false;
+        };
     }
 
     private int freeCarrySlot() {
@@ -4085,10 +5012,11 @@ public class StashSorter extends AbstractFieldModule {
             case Dump -> "putting down extras in " + target.pos;
             case Fetch -> "fetching a shulker from " + target.pos;
             case Clean -> "cleaning out a mixed shulker";
-            case Fill -> "packing " + fillId + " into a bulk shulker";
+            case Fill -> compact != null ? "packing " + compact.reference.name + " into a shulker" : "packing " + fillId + " into a bulk shulker";
             case Compact -> "merging stacks in " + target.pos;
             case FetchSigns -> "fetching signs from " + target.pos;
             case Label -> "labelling the chest at " + target.pos + " as \"" + labelText + "\"";
+            case Gather -> "gathering stacks to compact from " + target.pos;
         } + " (" + moved + " moved)" + unrecognisedNote();
     }
 }

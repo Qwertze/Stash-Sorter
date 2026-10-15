@@ -3,6 +3,48 @@
 All notable changes to Stash Sorter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0-dev.1] - 2026-10-15
+
+### Added
+- **Compact shulkers** (`stash compact on/off`, on, signs mode): whenever there is a full shulker's worth of an item
+  in the stash (27 full stacks of it, wherever they are), the bot packs it into an empty shulker and puts that in the
+  item's own chest, so 27 slots become 1. Part-filled shulkers of one item are topped up first, once `stash
+  compactTopUpAt <1-26>` (9) full stacks are waiting. It never makes mixed shulkers, never uses a named shulker, and
+  leaves kit chests alone. Gear of the same item id packs together whatever its enchantments, damage or name, while
+  potions, tipped arrows, enchanted books, suspicious stew, firework rockets and stars, goat horns, ominous bottles, maps,
+  heads, written books, banners and shields pack only with the same kind. It works with whatever carry room there is, in rounds, and leaves the shulker standing between
+  rounds. It runs only once everything else is sorted, and the status shows what it has done and what is holding it
+  back.
+- Things that don't stack (tools, weapons, armor, flint and steel...) are compacted as soon as there are two of the
+  same item in the stash, filling a shulker with as many as there are up to 27, and added to a part-full shulker of
+  them whenever one is waiting. Other items still need 27 full stacks for a new shulker.
+- **Full re-read when the bot comes online**: every container is read again before anything is sorted or packed, since
+  players may have changed things while it was away. Search keeps using what was saved until each is re-read.
+- **Stash index**: a readable list of what is in the stash and where, kept next to the stash file as
+  `<server>_<stash>.index.txt` and rewritten (at most every 30 seconds) whenever the stash is saved. `stash index`
+  shows the totals and the items there are most of.
+- `stash compactExclude add/remove <item id>` / `list`: items that are never compacted, like `ender_pearl`.
+- `stash compactSkip [x y z]`: a container that is never used to gather stacks or shulkers for compacting.
+
+- **Auto drop** (`stash autoDrop on/off`, off, `stash autoDrop range <blocks>`, 16): when the bot picks up an item a
+  nearby player threw, or left by breaking a block, it looks at them and drops it back to them. It only does this for
+  items it can tie to a player by seeing them appear, never for blocks or drops of its own, shulkers it is collecting,
+  ender pearls, or mob and death drops.
+
+### Changed
+- Shulker placing is safer: never next to a hopper or on top of a chest, at least 5 seconds apart, and a shulker that
+  can't be broken or picked up is reported in game and left alone instead of stopping sorting. The bot waits for a free
+  slot before breaking a shulker.
+- `newBulkAt` only applies while `compact` is off.
+- The bot's own gear, food, totems and ender pearls in its carry slots are never treated as stash items unless the
+  bot took them from the stash itself.
+- Packing into a shulker matches stacks by item id, and by kind for potions, books and the like, so such items no
+  longer end up mixed.
+- Taking items out of a mixed shulker keeps one slot free for picking the shulker up.
+- A shulker the bot put down and could not pick up is reported in game, saved in the stash file with what it holds and
+  where, and listed in the `stash` status as "Orphaned Shulkers". Stacks the bot took from the stash stay its to put
+  away across a reconnect or turning sorting off and on.
+
 ## [1.1.0] - 2026-10-15
 
 ### Added

@@ -15,6 +15,8 @@ instead of your client.
 - Shulkers are sorted by what they're mostly full of: a shulker of totems goes to the `Totems` chest.
 - **Repacks shulkers** (signs mode): items that belong elsewhere are taken out of mixed shulkers, and loose items are
   packed into shulkers that already hold only that item, before everything is put away. See below.
+- **Compacts shulkers** (signs mode): a full shulker's worth of one item is packed into a shulker and put back in the
+  item's chest, freeing chest slots. See below.
 - Scans the stash once and saves it. After that, opening a container through the proxy keeps it up to date.
 - **Drop-offs** are emptied completely: anything without a home, or whose chest is full, goes to a `Misc` chest, then
   anywhere with room. With stay-on mode, the bot checks them every few seconds and keeps the stash sorted.
@@ -68,9 +70,15 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash stayOn on/off` | Keep running after sorting, sorting again whenever a container changes |
 | `stash recheck <seconds>` | How often stay-on checks drop-offs (30) |
 | `stash repack on/off` | Clean mixed shulkers and pack loose items into bulk shulkers, in signs mode (on) |
-| `stash newBulkAt <stacks>` | Start a new bulk shulker from an empty one at this many stacks of one item (9). 0 only tops up existing ones |
+| `stash newBulkAt <stacks>` | Start a new bulk shulker from an empty one at this many stacks of one item (9). 0 only tops up existing ones. Only used while `compact` is off |
+| `stash compact on/off` | Pack a full shulker's worth of an item into a shulker, in signs mode (on) |
+| `stash compactTopUpAt <1-26>` | Top up a part-full bulk shulker once this many full stacks are waiting (9) |
+| `stash compactExclude add/remove <item id>` / `list` | Items never compacted, like `ender_pearl` |
+| `stash compactSkip [x y z]` | Toggle a container that is never used for compacting (the one you last right-clicked, or at a position) |
 | `stash carry <slots>` / `clear` | Slots to carry stash items in, like `28-36`. Default: every empty slot |
 | `stash keep <slots>` / `clear` | Slots never to touch |
+| `stash index` | Write and show a list of what is in the stash and where (also kept as `plugins/qwerte-stash/stashes/<server>_<stash>.index.txt`) |
+| `stash autoDrop on/off` | Give back to a nearby player what they dropped or left by breaking a block and the bot picked up (off). `stash autoDrop range <blocks>` sets how far (16) |
 | `stash rescan` | Read every container again on the next run |
 | `stash forget` | Delete the saved stash and its marks |
 | `stash tracking on/off` | Keep the stash up to date when containers are opened (on) |
@@ -98,7 +106,27 @@ Named shulkers are never taken apart. To keep kits whole, sign a chest `Kits` (o
 then go there as they are instead of being repacked. A chest signed `Shulkers` is just for shulkers that don't belong
 anywhere else, and doesn't stop repacking.
 
-Once everything is in place, partial stacks of the same item in each container are merged ("downstacked"), so a
+## Compacting shulkers
+Once everything is in place, the bot looks for chances to free chest slots:
+
+- **27 full stacks of one item** anywhere in the stash are packed into an empty shulker, which then goes to the item's
+  own chest. Things that don't stack (tools, weapons, armor, flint and steel...) are packed as soon as there are
+  **two** of the same item, filling a shulker with as many as there are up to 27.
+- A **part-full bulk shulker** of an item is topped up first, once `compactTopUpAt` full stacks are waiting (for
+  things that don't stack, as soon as one is).
+- Stacks pack together by item id. Enchanted, damaged, plain and renamed gear of the same id share a shulker. Items
+  whose id doesn't say what they are (potions, splash and lingering potions, tipped arrows, enchanted books, suspicious
+  stew, firework rockets, goat horns, ominous bottles) pack only with the same kind.
+- Any unnamed empty shulker will do, from a chest signed `Shulkers` first. Named shulkers are never used or opened,
+  and nothing is taken from kit chests, containers marked with `stash compactSkip`, or drop-offs.
+- With little carry room it works in rounds: gather a batch, put it in the shulker, repeat, with the shulker left
+  standing between rounds and picked up when it's full. It needs at least two free carry slots. A shulker left
+  standing for a few moments could be taken by another player, so the bot keeps close and reports in game if one
+  disappears or can't be picked up.
+- The bot's own tools, armor, food, totems and ender pearls are never touched. Stash items of those kinds are packed
+  like anything else. Use `stash compactExclude add ender_pearl` to keep an item out.
+
+Partial stacks aren't packed. After compacting, partial stacks of the same item in each container are merged ("downstacked"), so a
 chest with three stacks of 20 cobblestone ends up with one of 60.
 
 ## Signs

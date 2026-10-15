@@ -50,6 +50,7 @@ final class Activity {
     private @Nullable PathingRequestFuture ourPath;
     private @Nullable IBaritoneProcess ourProcess;
     private @Nullable Goal ourGoal;
+    private @Nullable PathingRequestFuture notedFailure;
     private long ourRequestTick = LONG_AGO;
     private long lastOwnTick = LONG_AGO;
 
@@ -152,6 +153,27 @@ final class Activity {
     }
 
     /**
+     * Our request ended unsuccessfully because something else took over: another module's request is now on the same
+     * process, or another process is in control of Baritone. Not when it failed by itself (an entity in the way of a
+     * place, no path, nothing to click), where the process is idle and still the last one in control.
+     */
+    /**
+     * A new Baritone request of ours may be made: none of ours is outstanding, nothing else is running, and our last one
+     * wasn't just taken over by another module (whose request would be replaced by ours).
+     */
+    boolean mayRequest() {
+        return !ownPathing() && !BARITONE.isActive() && !(superseded() && replacedByOther());
+    }
+
+    boolean replacedByOther() {
+        IBaritoneProcess mine = ourProcess;
+        if (mine == null) return false;
+        if (mine.isActive()) return true;
+        IBaritoneProcess control = BARITONE.getPathingControlManager().mostRecentInControl().orElse(null);
+        return control != null && control != mine && BARITONE.isActive();
+    }
+
+    /**
      * Cancels only the Baritone request that is ours, never someone else's: BARITONE.stop() cancels everything. A path
      * goes if its goal is still the one in the custom goal process (a newer request replaces it), an interaction or
      * pickup if it hasn't finished (a newer one finishes it).
@@ -205,7 +227,15 @@ final class Activity {
         // request replaced it (a new request completes the one before it as failed). That is theirs, and no grace
         // applies: nothing of ours is asked again until we've given way and they've been quiet. A request that
         // failed with Baritone idle was just a path not found, and is ours to try again
-        if (superseded()) return Reason.Pathing;
+        if (superseded()) {
+            if (replacedByOther()) return Reason.Pathing;
+            // It failed by itself: still ours, and the sorter deals with it. Baritone's active list is a tick late, so
+            // for now it is not held against anyone, once for each failed request
+            if (ourPath != notedFailure) {
+                notedFailure = ourPath;
+                lastOwnTick = tick;
+            }
+        }
 
         boolean own = ownPathing();
         if (own) lastOwnTick = tick;

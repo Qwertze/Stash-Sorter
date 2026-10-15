@@ -32,6 +32,10 @@ public class Stash {
         public Item @Nullable [] contents;
         public boolean excluded;
         public boolean dropOff;
+        /** Never a source of stacks or shulkers for compacting. */
+        public boolean noCompact;
+        /** Saved contents that have not been read again since the bot came online. */
+        public transient boolean stale;
         /** The text the sorter itself wrote on this container's sign, and where; null for a sign a player put up. */
         public @Nullable String autoLabel;
         public @Nullable BlockPos autoSignPos;
@@ -68,6 +72,22 @@ public class Stash {
         }
     }
 
+    /** A shulker with stacks in it the bot put down and could not pick up again. */
+    public static class Orphan {
+        public BlockPos pos;
+        public String item;
+        public int stacks;
+        public String when;
+
+        public Orphan(BlockPos pos, String item, int stacks, String when) {
+            this.pos = pos;
+            this.item = item;
+            this.stacks = stacks;
+            this.when = when;
+        }
+    }
+
+    public List<Orphan> orphans = new ArrayList<>();
     public String name;
     public String server;
     // Copy-on-write: searches and commands iterate it from other threads while the sorter adds and drops boxes
@@ -185,8 +205,16 @@ public class Stash {
     }
 
     private static Path file(String name, String server) {
-        String safe = (server + "_" + name).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_");
-        return folder().resolve(safe + ".json");
+        return folder().resolve(baseName(name, server) + ".json");
+    }
+
+    private static String baseName(String name, String server) {
+        return (server + "_" + name).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_");
+    }
+
+    /** Where the readable list of what is in the stash is kept. */
+    public Path indexPath() {
+        return folder().resolve(baseName(name, server) + ".index.txt");
     }
 
     public static String currentServer() {
@@ -211,6 +239,7 @@ public class Stash {
             Files.createDirectories(folder());
             Files.writeString(file(name, server), GSON.toJson(this), StandardCharsets.UTF_8);
             dirty = false;
+            StashIndex.touch(this);
         } catch (IOException e) {
             QwerteStashPlugin.LOG.error("Couldn't save stash {}", name, e);
         }
@@ -226,6 +255,7 @@ public class Stash {
         try {
             Stash stash = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Stash.class);
             if (stash == null) return null;
+            if (stash.orphans == null) stash.orphans = new ArrayList<>();
             stash.boxes = stash.boxes == null ? new CopyOnWriteArrayList<>() : new CopyOnWriteArrayList<>(stash.boxes);
             stash.boxes.removeIf(box -> box == null || box.parts == null || box.parts.isEmpty());
             for (Box box : stash.boxes) {

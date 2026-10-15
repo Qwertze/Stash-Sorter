@@ -8,11 +8,13 @@ import com.aquarius.discord.Embed;
 import com.aquarius.mc.block.BlockPos;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.porter.qwertestash.StashConfig.Mode;
+import com.porter.qwertestash.module.AutoDrop;
 import com.porter.qwertestash.module.StashSorter;
 import com.porter.qwertestash.module.StashTracker;
 import com.porter.qwertestash.stash.Containers;
 import com.porter.qwertestash.stash.Stash;
 import com.porter.qwertestash.stash.Stash.Box;
+import com.porter.qwertestash.stash.StashIndex;
 import com.porter.qwertestash.stash.Stashes;
 import org.jspecify.annotations.Nullable;
 
@@ -67,11 +69,18 @@ public class StashCommand extends Command {
                 "recheck <seconds>",
                 "repack on/off",
                 "newBulkAt <stacks>",
+                "compact on/off",
+                "compactTopUpAt <1-26>",
+                "compactExclude add/remove <item id>/list",
+                "compactSkip [x y z]",
                 "carry <slots>/clear",
                 "keep <slots>/clear",
                 "rescan",
+                "index",
                 "forget",
                 "tracking on/off",
+                "autoDrop on/off",
+                "autoDrop range <blocks>",
                 "whisper on/off",
                 "whitelist add/del <player>",
                 "prefix <word>/clear"
@@ -108,18 +117,47 @@ public class StashCommand extends Command {
             })))
             .then(literal("exclude")
                 .executes(c -> {
-                    mark(c.getSource().getEmbed(), null, true);
+                    mark(c.getSource().getEmbed(), null, MARK_EXCLUDE);
                 })
                 .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer()).executes(c -> {
-                    mark(c.getSource().getEmbed(), new BlockPos(getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z")), true);
+                    mark(c.getSource().getEmbed(), new BlockPos(getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z")), MARK_EXCLUDE);
                 })))))
             .then(literal("dropoff")
                 .executes(c -> {
-                    mark(c.getSource().getEmbed(), null, false);
+                    mark(c.getSource().getEmbed(), null, MARK_DROPOFF);
                 })
                 .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer()).executes(c -> {
-                    mark(c.getSource().getEmbed(), new BlockPos(getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z")), false);
+                    mark(c.getSource().getEmbed(), new BlockPos(getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z")), MARK_DROPOFF);
                 })))))
+            .then(literal("compactSkip")
+                .executes(c -> {
+                    mark(c.getSource().getEmbed(), null, MARK_COMPACT_SKIP);
+                })
+                .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer()).executes(c -> {
+                    mark(c.getSource().getEmbed(), new BlockPos(getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z")), MARK_COMPACT_SKIP);
+                })))))
+            .then(literal("compact").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.compact = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Compact Shulkers " + toggleStrCaps(CONFIG.compact));
+            })))
+            .then(literal("compactTopUpAt").then(argument("stacks", integer(1, 26)).executes(c -> {
+                CONFIG.compactTopUpAt = getInteger(c, "stacks");
+                c.getSource().getEmbed().title("Compact Top-up Set");
+            })))
+            .then(literal("compactExclude")
+                .then(literal("add").then(argument("item", word()).executes(c -> {
+                    String id = itemId(getString(c, "item"));
+                    if (!CONFIG.compactExclude.contains(id)) CONFIG.compactExclude.add(id);
+                    c.getSource().getEmbed().title("Never Compacting " + id);
+                })))
+                .then(literal("remove").then(argument("item", word()).executes(c -> {
+                    String id = itemId(getString(c, "item"));
+                    CONFIG.compactExclude.remove(id);
+                    c.getSource().getEmbed().title("Compacting " + id + " Again");
+                })))
+                .then(literal("list").executes(c -> {
+                    c.getSource().getEmbed().title("Never Compacted").description(CONFIG.compactExclude.isEmpty() ? "Nothing is excluded." : String.join(", ", CONFIG.compactExclude)).primaryColor();
+                })))
             .then(literal("radius").then(argument("blocks", integer(1, 64)).executes(c -> {
                 CONFIG.radius = getInteger(c, "blocks");
                 c.getSource().getEmbed().title("Radius Set");
@@ -205,6 +243,19 @@ public class StashCommand extends Command {
                     CONFIG.keepSlots = getString(c, "slots").trim();
                     c.getSource().getEmbed().title("Keep Slots Set");
                 })))
+            .then(literal("index").executes(c -> {
+                Stash stash = Stashes.current();
+                if (stash == null) {
+                    c.getSource().getEmbed().title("No Stash Here Yet");
+                    return;
+                }
+                try {
+                    StashIndex.writeNow(stash);
+                } catch (RuntimeException ignored) {
+                    // The report below says so if the stash can't be read
+                }
+                c.getSource().getEmbed().title("Stash Index").description(StashIndex.report(stash, 12)).primaryColor();
+            }))
             .then(literal("rescan").executes(c -> {
                 Stash stash = Stashes.current();
                 if (stash == null) {
@@ -220,6 +271,16 @@ public class StashCommand extends Command {
                 Stashes.forget();
                 c.getSource().getEmbed().title("Stash Forgotten").description("Deleted \"" + CONFIG.stashName + "\", including excluded and drop-off marks.");
             }))
+            .then(literal("autoDrop")
+                .then(literal("range").then(argument("blocks", integer(1, 64)).executes(c -> {
+                    CONFIG.autoDropRange = getInteger(c, "blocks");
+                    c.getSource().getEmbed().title("Auto Drop Range Set");
+                })))
+                .then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.autoDrop = getToggle(c, "toggle");
+                    MODULE.get(AutoDrop.class).syncEnabledFromConfig();
+                    c.getSource().getEmbed().title("Auto Drop " + toggleStrCaps(CONFIG.autoDrop));
+                })))
             .then(literal("tracking").then(argument("toggle", toggle()).executes(c -> {
                 CONFIG.tracking = getToggle(c, "toggle");
                 MODULE.get(StashTracker.class).syncEnabledFromConfig();
@@ -255,7 +316,15 @@ public class StashCommand extends Command {
      * Toggles a container as excluded, or as a drop-off. With no position, the container you last right-clicked
      * while connected.
      */
-    private void mark(Embed embed, @Nullable BlockPos pos, boolean exclude) {
+    private static final int MARK_EXCLUDE = 0, MARK_DROPOFF = 1, MARK_COMPACT_SKIP = 2;
+
+    /** "minecraft:Ender_Pearl" as "ender_pearl". */
+    private static String itemId(String text) {
+        String id = text.trim().toLowerCase(java.util.Locale.ROOT);
+        return id.startsWith("minecraft:") ? id.substring("minecraft:".length()) : id;
+    }
+
+    private void mark(Embed embed, @Nullable BlockPos pos, int kind) {
         if (pos == null) pos = MODULE.get(StashTracker.class).lastClicked();
         if (pos == null) {
             embed.title("Which Container?").description("Give its position, or right-click it while connected to the proxy first.").errorColor();
@@ -282,7 +351,12 @@ public class StashCommand extends Command {
         }
 
         String at = box.pos.x() + ", " + box.pos.y() + ", " + box.pos.z();
-        if (exclude) {
+        if (kind == MARK_COMPACT_SKIP) {
+            box.noCompact = !box.noCompact;
+            embed.title(box.noCompact ? "Compact Skip Set" : "Compact Skip Removed").description(at + (box.noCompact
+                ? " is never used to gather stacks or shulkers for compacting." : " can be used for compacting again.") + note);
+        }
+        else if (kind == MARK_EXCLUDE) {
             box.excluded = !box.excluded;
             box.dropOff = false;
             embed.title(box.excluded ? "Excluded" : "No Longer Excluded").description(at + (box.excluded ? " won't be sorted." : " will be sorted again.") + note);
@@ -354,6 +428,18 @@ public class StashCommand extends Command {
         embed.title("Search: " + query).description(out.toString().stripTrailing()).primaryColor();
     }
 
+    private static String orphanLine() {
+        Stash stash = Stashes.current();
+        if (stash == null || stash.orphans.isEmpty()) return "none";
+        StringBuilder out = new StringBuilder();
+        for (Stash.Orphan orphan : stash.orphans) {
+            out.append(orphan.stacks).append(" stacks of ").append(orphan.item).append(" at ")
+                .append(orphan.pos.x()).append(", ").append(orphan.pos.y()).append(", ").append(orphan.pos.z())
+                .append(" (").append(orphan.when).append("); ");
+        }
+        return out.toString();
+    }
+
     @Override
     public void defaultEmbed(Embed embed) {
         Stash stash = Stashes.current();
@@ -372,7 +458,9 @@ public class StashCommand extends Command {
             .addField("Stash", "\"" + CONFIG.stashName + "\": " + stashLine)
             .addField("Mode", CONFIG.mode.name())
             .addField("Area", "radius " + CONFIG.radius + ", height " + CONFIG.height + ", barrels " + toggleStr(CONFIG.barrels))
-            .addField("Repack Shulkers", toggleStr(CONFIG.repack) + " (signs mode, new bulk at " + CONFIG.newBulkAt + " stacks)")
+            .addField("Repack Shulkers", toggleStr(CONFIG.repack) + " (signs mode" + (CONFIG.compact ? "" : ", new bulk at " + CONFIG.newBulkAt + " stacks") + ")")
+            .addField("Compact Shulkers", toggleStr(CONFIG.compact) + " - " + MODULE.get(StashSorter.class).compactStatus()
+                + " (signs mode, top up at " + CONFIG.compactTopUpAt + " stacks, " + CONFIG.compactExclude.size() + " items excluded)")
             .addField("Stay On", toggleStr(CONFIG.stayOn) + " (recheck " + CONFIG.recheckSeconds + "s)")
             .addField("Carry / Keep Slots", (CONFIG.carrySlots.isBlank() ? "every empty slot" : CONFIG.carrySlots) + " / " + (CONFIG.keepSlots.isBlank() ? "none" : CONFIG.keepSlots))
             .addField("Delay", CONFIG.delayTicks + " ticks")
@@ -380,7 +468,9 @@ public class StashCommand extends Command {
             .addField("Watch Chests", toggleStr(CONFIG.watchAccess) + " (re-read " + CONFIG.accessRescanSeconds + "s after another player closes one; needs tracking on)")
             .addField("Auto Label", toggleStr(CONFIG.autoLabel) + " (signs mode, a sign every " + CONFIG.labelGapSeconds + "s at most, see `stash labels`)")
             .addField("Unsigned Overflow", toggleStr(CONFIG.unsignedOverflow) + " (signs mode, stacks with no room go in unsigned containers after misc/other/overflow ones)")
+            .addField("Orphaned Shulkers", orphanLine())
             .addField("Watch Signs", toggleStr(CONFIG.watchSigns) + " (changes used after " + CONFIG.signSettleSeconds + "s, a sign gone or blank for 60s; needs tracking on)")
+            .addField("Auto Drop", toggleStr(CONFIG.autoDrop) + " (gives back what a player dropped near the bot, within " + (int) CONFIG.autoDropRange + " blocks)")
             .addField("Tracking", toggleStr(CONFIG.tracking))
             .addField("Whisper Search", toggleStr(CONFIG.whisperSearch) + ", prefix \"" + CONFIG.prefix + "\", whitelist " + (CONFIG.whitelist.isEmpty() ? "empty" : String.join(", ", CONFIG.whitelist)));
     }

@@ -92,6 +92,7 @@ public final class Stashes {
      * Saves what's in the open container as the box's contents.
      */
     public static void read(Stash stash, Box box, Container c) {
+        box.stale = false;
         if (changed(box, c)) {
             stash.markDirty();
             version++;

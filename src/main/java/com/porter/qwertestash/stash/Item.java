@@ -38,6 +38,11 @@ public final class Item {
     public List<String> tags = new ArrayList<>();
     public List<String> enchants = new ArrayList<>();
     public @Nullable String potion;
+    /**
+     * For items whose id doesn't say what they are (potions, tipped arrows, enchanted books, suspicious stew, rockets,
+     * goat horns, ominous bottles): what they are. Null for everything else, and for stacks saved before this existed.
+     */
+    public @Nullable String typeData;
     /** What's inside, for shulkers. Empty for everything else, and for empty shulkers. */
     public List<Item> contents = new ArrayList<>();
 
@@ -82,6 +87,8 @@ public final class Item {
         var potion = components.get(DataComponentTypes.POTION_CONTENTS);
         if (potion != null && potion.getPotionId() >= 0 && potion.getPotionId() < POTIONS.length) item.potion = POTIONS[potion.getPotionId()];
 
+        item.typeData = typeDataOf(data.name(), components);
+
         List<ItemStack> inside = components.get(DataComponentTypes.CONTAINER);
         if (inside != null) {
             for (ItemStack s : inside) {
@@ -94,6 +101,79 @@ public final class Item {
         }
 
         return item;
+    }
+
+    private static final java.util.Set<String> TYPE_DEFINED = java.util.Set.of(
+        "potion", "splash_potion", "lingering_potion", "tipped_arrow", "enchanted_book", "suspicious_stew",
+        "firework_rocket", "goat_horn", "ominous_bottle", "filled_map", "player_head", "written_book", "firework_star",
+        "shield");
+
+    private static boolean typeDefined(String id) {
+        return TYPE_DEFINED.contains(id) || id.endsWith("_banner");
+    }
+
+    private static @Nullable String typeDataOf(String id, org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponents components) {
+        if (!typeDefined(id)) return null;
+        if (id.endsWith("_banner")) return String.valueOf(components.get(DataComponentTypes.BANNER_PATTERNS));
+        switch (id) {
+            case "potion", "splash_potion", "lingering_potion", "tipped_arrow" -> {
+                return String.valueOf(components.get(DataComponentTypes.POTION_CONTENTS));
+            }
+            case "enchanted_book" -> {
+                ItemEnchantments stored = components.get(DataComponentTypes.STORED_ENCHANTMENTS);
+                if (stored == null) return "none";
+                List<String> parts = new ArrayList<>();
+                for (var entry : stored.getEnchantments().int2IntEntrySet()) {
+                    EnchantmentData data = EnchantmentRegistry.REGISTRY.get(entry.getIntKey());
+                    parts.add((data != null ? data.name() : "#" + entry.getIntKey()) + ":" + entry.getIntValue());
+                }
+                java.util.Collections.sort(parts);
+                return String.join(",", parts);
+            }
+            case "suspicious_stew" -> {
+                return String.valueOf(components.get(DataComponentTypes.SUSPICIOUS_STEW_EFFECTS));
+            }
+            case "firework_rocket" -> {
+                var fireworks = components.get(DataComponentTypes.FIREWORKS);
+                return fireworks == null ? "none" : fireworks.getFlightDuration() + "|" + fireworks.getExplosions();
+            }
+            case "goat_horn" -> {
+                return String.valueOf(components.get(DataComponentTypes.INSTRUMENT));
+            }
+            case "filled_map" -> {
+                return String.valueOf(components.get(DataComponentTypes.MAP_ID));
+            }
+            case "player_head" -> {
+                return String.valueOf(components.get(DataComponentTypes.PROFILE));
+            }
+            case "written_book" -> {
+                return String.valueOf(components.get(DataComponentTypes.WRITTEN_BOOK_CONTENT));
+            }
+            case "firework_star" -> {
+                return String.valueOf(components.get(DataComponentTypes.FIREWORK_EXPLOSION));
+            }
+            case "shield" -> {
+                return components.get(DataComponentTypes.BASE_COLOR) + "|" + components.get(DataComponentTypes.BANNER_PATTERNS);
+            }
+            default -> {
+                return String.valueOf(components.get(DataComponentTypes.OMINOUS_BOTTLE_AMPLIFIER));
+            }
+        }
+    }
+
+    /**
+     * What stacks have to share to be packed into one shulker: the item id, and for items whose id doesn't say what
+     * they are, what they are. Never enchantments, damage or a name on gear. Null for shulkers, anything with contents,
+     * and a stack of such an item saved before its type was kept (it gets one when its container is read again).
+     */
+    public @Nullable String bulkKey() {
+        if (isShulker() || !contents.isEmpty()) return null;
+        if (typeDefined(id)) return typeData == null ? null : id + "|" + typeData;
+        return id;
+    }
+
+    public boolean isFullStack() {
+        return count >= maxStack;
     }
 
     private static void addEnchants(Item item, @Nullable ItemEnchantments enchants) {

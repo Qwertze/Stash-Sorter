@@ -75,13 +75,35 @@ public class StashConfig {
      * left as they are.
      */
     public boolean repack = true;
-    /** Start a new bulk shulker from an empty one once carrying this many stacks of one item. 0 only tops up existing ones. */
+    /**
+     * Start a new bulk shulker from an empty one once carrying this many stacks of one item. 0 only tops up existing
+     * ones. Only used while compacting is off: with it on, new bulk shulkers are made by compacting.
+     */
     public int newBulkAt = 9;
+
+    /**
+     * Signs mode: whenever a full shulker's worth of an item (27 stacks of it, anywhere in the stash) exists, pack it
+     * into an empty shulker and put that back in the item's chest, and top up shulkers that are part full. Never makes
+     * mixed shulkers. Named shulkers, kit chests and containers marked with {@code compactSkip} are left alone.
+     */
+    public boolean compact = true;
+    /** Top up a part-full bulk shulker once there are this many full stacks to add (or enough to fill it). */
+    public int compactTopUpAt = 9;
+    /** Item ids never compacted, like {@code ender_pearl}. */
+    public List<String> compactExclude = new ArrayList<>();
 
     /** Slots to carry stash items in, like "28-36". 1-9 hotbar, 10-36 inventory from the top left. Blank uses every empty slot. */
     public String carrySlots = "";
     /** Slots never to touch. */
     public String keepSlots = "";
+
+    /**
+     * Give back what a player dropped near the bot: when the bot picks up an item a player threw, or left by breaking a
+     * block, it looks at them and drops it again.
+     */
+    public boolean autoDrop = false;
+    /** How far away (blocks) a player can be and still be given their item back. */
+    public double autoDropRange = 16;
 
     public boolean whisperSearch = false;
     public List<String> whitelist = new ArrayList<>();
