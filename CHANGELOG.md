@@ -3,7 +3,7 @@
 All notable changes to Stash Sorter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.3.0-dev.1] - 2026-10-15
+## [1.3.0] - 2026-10-15
 
 ### Added
 - **Collect ground items** (`stash collect on/off`, on; `stash collectRange <blocks>`, 8): the bot picks up items lying
