@@ -82,6 +82,9 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash carry <slots>` / `clear` | Slots to carry stash items in, like `28-36`. Default: every empty slot |
 | `stash keep <slots>` / `clear` | Slots never to touch |
 | `stash index` | Write and show a list of what is in the stash and where (also kept as `plugins/qwerte-stash/stashes/<server>_<stash>.index.txt`) |
+| `stash sort on/off` | Off is scan only: containers are still read (new, stale, the full re-read on login) and kept up to date, chest and sign changes are watched, the index and search work, but nothing is ever moved: no taking, depositing, repacking, compacting, labelling or ground pickup (on) |
+| `stash collect on/off` | Pick up items lying on the ground in the stash area that the bot didn't drop or break out of a block itself, and sort them. Only while no other player is in render distance (on) |
+| `stash collectRange <blocks>` | How far past the outermost containers ground items are picked up, sideways (8). Up and down it is always 4 |
 | `stash autoDrop on/off` | Give back to a nearby player what they dropped or left by breaking a block and the bot picked up (off). `stash autoDrop range <blocks>` sets how far (16) |
 | `stash rescan` | Read every container again on the next run |
 | `stash forget` | Delete the saved stash and its marks |
@@ -91,6 +94,26 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash prefix <word>` / `clear` | Whispers starting with this are searches (`find`) |
 
 Slots: 1-9 is the hotbar, 10-36 the inventory from the top left.
+
+## Ground items
+With `collect` on (the default) the bot also picks up items that lie on the ground in the stash area: the bounding box
+of all the containers, widened by `collectRange` blocks sideways and 4 up and down. It never goes outside that area.
+
+- Only items it didn't drop itself (including AutoDrop returns and PearlPlus pearls) and didn't break out of a block
+  itself. Experience, arrows and thrown pearls are not items on the ground and are left alone. Items the bot threw or
+  broke are remembered for the whole session.
+- Only while no other player is in render distance. If one is, nothing is touched until every player is gone (they are
+  assumed to be about to pick their things up), and a trip in progress is dropped the moment one appears.
+- Only items that have lain still for 3 seconds, and only between jobs, when there is a free carry slot and nothing else
+  is using the bot. Other modules' pathing always wins.
+- An item that can't be reached, or isn't picked up within about 20 seconds, is left alone for 5 minutes.
+- What it picks up is treated as stash cargo, even tools or food, and sorted like everything else.
+
+## Scan only
+`stash sort off` turns sorting off but leaves the rest running: `stash on` still reads new and stale containers and the
+whole stash again on login, containers other players use and signs that change are noticed and read again, and `stash
+index` and search stay current. The bot never takes, deposits, repacks, compacts, labels or collects from the ground, and
+only opens a container to read it. The status says "scan only". Switch `stash sort on` to sort again.
 
 ## Repacking shulkers
 In signs mode, the bot sorts what's inside shulkers too:

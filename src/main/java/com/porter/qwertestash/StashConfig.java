@@ -105,6 +105,21 @@ public class StashConfig {
     /** How far away (blocks) a player can be and still be given their item back. */
     public double autoDropRange = 16;
 
+    /**
+     * Pick up items lying on the ground in the stash area (the containers' bounding box widened by {@code collectRange}
+     * blocks sideways and 4 up and down) that the bot did not drop or break out of a block itself, when no other player
+     * is in render distance, and sort them like everything else.
+     */
+    public boolean collectGround = true;
+    /** How far past the outermost containers (blocks, sideways) ground items are picked up. */
+    public int collectRange = 8;
+
+    /**
+     * Move items: take, deposit, repack, compact, label and collect from the ground. Off is scan only: containers are
+     * still read, kept up to date and searchable, but nothing is ever moved.
+     */
+    public boolean sortItems = true;
+
     public boolean whisperSearch = false;
     public List<String> whitelist = new ArrayList<>();
     /** Whispers starting with this are searches. Blank treats every whitelisted whisper as a search. */

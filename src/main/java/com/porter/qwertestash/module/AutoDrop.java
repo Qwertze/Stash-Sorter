@@ -105,7 +105,7 @@ public class AutoDrop extends Module {
         }
     }
 
-    private static @Nullable ItemStack stackOf(@Nullable Entity entity) {
+    static @Nullable ItemStack stackOf(@Nullable Entity entity) {
         if (entity == null) return null;
         try {
             ItemStack stack = null;

@@ -1,5 +1,6 @@
 package com.porter.qwertestash.module;
 
+import com.aquarius.cache.data.entity.Entity;
 import com.aquarius.cache.data.entity.EntityLiving;
 import com.aquarius.cache.data.inventory.Container;
 import com.aquarius.event.client.ClientBotTick;
@@ -116,7 +117,7 @@ public class StashSorter extends AbstractFieldModule {
     private static final int OWN_WINDOW_GRACE_MS = 10_000;
     private static final int REREAD_COOLDOWN_MS = 60_000;
 
-    private enum Job { Survey, Take, Deposit, Dump, Fetch, Clean, Fill, Compact, FetchSigns, Label, Gather }
+    private enum Job { Survey, Take, Deposit, Dump, Fetch, Clean, Fill, Compact, FetchSigns, Label, Gather, Ground }
 
     private enum Step { Walking, Opening, Working }
 
@@ -274,7 +275,7 @@ public class StashSorter extends AbstractFieldModule {
      * A shulker is being picked up off the ground on purpose.
      */
     public boolean isCollecting() {
-        return handle == Handle.Collect;
+        return handle == Handle.Collect || job == Job.Ground;
     }
 
     public boolean isWorking() {
@@ -356,6 +357,11 @@ public class StashSorter extends AbstractFieldModule {
         dropLost = false;
         resetJobState();
         cursorReported = false;
+        groundId = -1;
+        groundFinishing = false;
+        groundSkipped.clear();
+        nextGroundCheck = 0;
+        surveyed = 0;
 
         if (!CACHE.getPlayerCache().isAlive() || CACHE.getPlayerCache().getPlayerInventory().size() < 45) {
             // Not in game yet: ClientBotTick.Starting calls this again once we are
@@ -381,22 +387,25 @@ public class StashSorter extends AbstractFieldModule {
         unrecognisedReported.clear();
         if (CONFIG.mode == Mode.Signs) unrecognisedSigns(true);
 
-        long sortable = stash.boxes.stream().filter(b -> !b.excluded && !b.dropOff).count();
-        if (sortable < 2) {
-            fail(String.format("Found %d container(s) to sort within %d blocks of the bot, need at least 2.", sortable, CONFIG.radius));
+        // Scan only needs one container to read, sorting needs two to sort between
+        long sortable = stash.boxes.stream().filter(b -> !b.excluded && (!b.dropOff || !CONFIG.sortItems)).count();
+        int needed = CONFIG.sortItems ? 2 : 1;
+        if (sortable < needed) {
+            fail(String.format("Found %d container(s) to %s within %d blocks of the bot, need at least %d.", sortable, CONFIG.sortItems ? "sort" : "scan", CONFIG.radius, needed));
             return;
         }
 
-        if (CONFIG.mode == Mode.Signs && stash.boxes.stream().allMatch(b -> b.labels.isEmpty())) {
+        // Scan only reads containers: signs are not needed for that
+        if (CONFIG.sortItems && CONFIG.mode == Mode.Signs && stash.boxes.stream().allMatch(b -> b.labels.isEmpty())) {
             fail("None of the containers have signs on them. Put signs on them, or use tiers mode.");
             return;
         }
 
         int unknown = stash.boxes.size() - stash.knownCount();
-        if (!existed) info("New stash \"{}\": scanning {} containers, then sorting.", stash.name, stash.boxes.size());
-        else if (unknown > 0) info("Stash \"{}\": {} containers, scanning {} new ones first and reading the rest again.", stash.name, stash.boxes.size(), unknown);
-        else if (!stash.boxes.isEmpty()) info("Stash \"{}\": {} containers, reading all of them again before sorting, as the bot was away.", stash.name, stash.boxes.size());
-        else info("Stash \"{}\": {} containers, sorting by {}.", stash.name, stash.boxes.size(), CONFIG.mode == Mode.Tiers ? "tier" : "sign");
+        if (!existed) info("New stash \"{}\": scanning {} containers{}.", stash.name, stash.boxes.size(), CONFIG.sortItems ? ", then sorting" : " (scan only)");
+        else if (unknown > 0) info("Stash \"{}\": {} containers, scanning {} new ones first and reading the rest again{}.", stash.name, stash.boxes.size(), unknown, CONFIG.sortItems ? "" : " (scan only)");
+        else if (!stash.boxes.isEmpty()) info("Stash \"{}\": {} containers, reading all of them again{}, as the bot was away.", stash.name, stash.boxes.size(), CONFIG.sortItems ? " before sorting" : " (scan only)");
+        else info("Stash \"{}\": {} containers, {}.", stash.name, stash.boxes.size(), CONFIG.sortItems ? "sorting by " + (CONFIG.mode == Mode.Tiers ? "tier" : "sign") : "scan only");
 
         if (added > 0 || !existed) stash.save();
     }
@@ -454,6 +463,8 @@ public class StashSorter extends AbstractFieldModule {
         if (inFlight != null && inFlight.placedPos == null && findPlanShulker() >= 0) warn("Stopped while compacting, a part-filled shulker of {} is in the bot's inventory.", inFlight.reference.name);
         compact = null;
         handle = null;
+        groundId = -1;
+        groundFinishing = false;
 
         // Containers used by others that were waiting to be read again are marked, to be read on the next run
         for (Box held : deferredAccess.keySet()) staleBoxes.add(held.pos);
@@ -565,7 +576,8 @@ public class StashSorter extends AbstractFieldModule {
             warn("{} of the carry slots have items in them, they'll be left alone.", chosen.size() - carry.size());
         }
 
-        if (carry.isEmpty()) {
+        // Scan only moves nothing, so it needs no room; sorting looks again when it is switched on
+        if (carry.isEmpty() && CONFIG.sortItems) {
             int filled = 0;
             for (int i = 0; i < 36; i++) if (inventoryItem(i) != null) filled++;
             String slots = String.format(" The bot has %d of 36 inventory slots filled%s.", filled,
@@ -668,7 +680,12 @@ public class StashSorter extends AbstractFieldModule {
             if (!deferredAccess.isEmpty()) releaseDeferred();
             if (!staleBoxes.isEmpty()) applyStale();
             applySignChanges();
-            if (idle && !wakeUp()) return;
+            if (sortSeen != CONFIG.sortItems && !sortChanged()) return;
+            if (idle && !wakeUp()) {
+                // Stay-on mode with nothing to sort: ground items are looked at now and then, once nothing else is going on
+                if (foreign == null && quietElapsed() && openContainerId() == 0 && !holdingCursor()) startGround(true);
+                return;
+            }
 
             // Nothing is started while another module is working, nor until it has been quiet for a while
             if (foreign != null) {
@@ -691,6 +708,7 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         if (job == Job.Label) tickLabel();
+        else if (job == Job.Ground) tickGround();
         else if (handle != null) tickHandling();
         else {
             stepTicks++;
@@ -704,6 +722,401 @@ public class StashSorter extends AbstractFieldModule {
 
         // The proxy refused one of our requests: somebody else's is ahead of it
         if (gate == Gate.Running && !labelCritical() && activity.rejectedAt(tickCount)) beginYield(Activity.Reason.Inventory);
+    }
+
+    // Scan only
+
+    // The setting as last acted on, which is only done between jobs
+    private boolean sortSeen = true;
+
+    /**
+     * Sorting was switched on or off. The job in hand has finished by now; from the next one on, scan only reads and
+     * sorting does the lot, and everything given up on while it was off is looked at again.
+     * @return false if the sorter stopped because of it
+     */
+    private boolean sortChanged() {
+        sortSeen = CONFIG.sortItems;
+        idle = false;
+        clearStalled();
+        futile.clear();
+        stuckCarried.clear();
+        stuckWarned = false;
+        if (!CONFIG.sortItems) {
+            info("Scan only: containers are read and kept up to date, nothing is moved.");
+            return true;
+        }
+        info("Sorting items again.");
+        // Scan only did not need room to carry things in: sorting does
+        if (carry.isEmpty() && !pickCarrySlots()) return false;
+        return true;
+    }
+
+    // Picking up items lying in the stash area. Only ones the bot didn't drop or break out of a block itself (see
+    // GroundItems), only when no other player is loaded, only ones that have lain still a while, and only between jobs:
+    // when everything is put away, before compacting, and while resting in stay-on mode. What is picked up is stash cargo
+    // and sorted like everything else.
+
+    private static final long GROUND_STILL_MS = 3_000;
+    private static final long GROUND_SKIP_MS = 5 * 60_000;
+    private static final int GROUND_TIMEOUT = 20 * 20;
+    private static final int GROUND_CHECK_TICKS = 10;
+    private static final int GROUND_VERTICAL = 4;
+    private static final int GROUND_FINISH_TICKS = 15;
+    private static final int GROUND_ARRIVED_TICKS = 40;
+    private static final int GROUND_REASK_TICKS = 20 * 3;
+
+    private @Nullable GroundItems groundModule;
+    private int groundId = -1;
+    private @Nullable BlockPos groundCell;
+    private @Nullable ItemStack groundStack;
+    private String groundLabel = "";
+    private String groundItemLabel = "";
+    private String groundItemId = "";
+    private int groundTicks, groundArrivedTicks, groundFinishTicks;
+    private long groundAskedAt;
+    private boolean groundFinishing, groundTaken, groundStartedInside;
+    // Moving what landed outside the carry slots into one
+    private @Nullable RequestFuture groundMove;
+    // What every slot held when the trip began, to tell which of them the pickup went into
+    private final String[] groundBeforeIds = new String[36];
+    private final int[] groundBeforeCounts = new int[36];
+    // Items given up on (unreachable, or not picked up in time), until when
+    private final Map<Integer, Long> groundSkipped = new HashMap<>();
+    private long nextGroundCheck;
+    private boolean groundWaitLogged;
+    // What the status shows, worked out on the tick thread (the command thread only reads it)
+    private volatile String groundStatus = "nothing on the ground";
+    private int surveyed;
+
+    private GroundItems groundItems() {
+        GroundItems found = groundModule;
+        if (found == null) groundModule = found = MODULE.get(GroundItems.class);
+        return found;
+    }
+
+    /**
+     * For the status: whether ground items are being collected, and what is holding that up.
+     */
+    public String groundState() {
+        if (!CONFIG.collectGround) return "off";
+        if (!CONFIG.sortItems) return "off (scan only)";
+        return groundStatus;
+    }
+
+    private static String fmt(BlockPos pos) {
+        return "[" + pos.x() + ", " + pos.y() + ", " + pos.z() + "]";
+    }
+
+    /**
+     * The stash area: every container's bounding box widened by the collect range sideways and 4 blocks up and down.
+     * Returns minX, minY, minZ, maxX, maxY, maxZ as world coordinates, or null if there are no containers.
+     */
+    private double @Nullable [] groundArea() {
+        if (stash == null || stash.boxes.isEmpty()) return null;
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (Box box : stash.boxes) {
+            for (BlockPos part : box.parts) {
+                minX = Math.min(minX, part.x());
+                minY = Math.min(minY, part.y());
+                minZ = Math.min(minZ, part.z());
+                maxX = Math.max(maxX, part.x());
+                maxY = Math.max(maxY, part.y());
+                maxZ = Math.max(maxZ, part.z());
+            }
+        }
+        if (minX == Integer.MAX_VALUE) return null;
+        int range = Math.max(0, CONFIG.collectRange);
+        return new double[] {minX - range, minY - GROUND_VERTICAL, minZ - range, maxX + 1 + range, maxY + 1 + GROUND_VERTICAL, maxZ + 1 + range};
+    }
+
+    private static boolean inArea(double[] area, double x, double y, double z, double margin) {
+        return x >= area[0] - margin && x <= area[3] + margin && y >= area[1] - margin && y <= area[4] + margin
+            && z >= area[2] - margin && z <= area[5] + margin;
+    }
+
+    /**
+     * Lava, fire, cactus and the like at the item or under it, or a chunk that isn't loaded: not worth a trip.
+     */
+    private static boolean hazardAt(BlockPos cell) {
+        if (!World.isChunkLoadedBlockPos(cell.x(), cell.z())) return true;
+        for (int dy = 0; dy >= -1; dy--) {
+            switch (World.getBlock(cell.x(), cell.y() + dy, cell.z()).name()) {
+                case "lava", "fire", "soul_fire", "cactus", "magma_block", "sweet_berry_bush", "powder_snow" -> {
+                    return true;
+                }
+                default -> {
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Starts a trip for the nearest item on the ground that may be picked up, if one may be started now. Called between
+     * jobs only: when everything else is done (always), and while resting in stay-on mode (every few ticks).
+     */
+    private boolean startGround(boolean throttled) {
+        if (!CONFIG.collectGround || !CONFIG.sortItems) return false;
+        // Not over a job, a handle, giving way, a compaction (a shulker may be standing) or a finishing job
+        if (job != null || handle != null || finishing || gate != Gate.Running || stash == null || compact != null) return false;
+        if (throttled) {
+            if (tickCount < nextGroundCheck) return false;
+            nextGroundCheck = tickCount + GROUND_CHECK_TICKS;
+        }
+
+        long wall = System.currentTimeMillis();
+        groundSkipped.values().removeIf(until -> until <= wall);
+
+        GroundItems ground = groundItems();
+        String near = ground.playerNearby();
+        if (near == null) groundWaitLogged = false;
+
+        double[] area = groundArea();
+        BlockPos feet = playerFeet();
+        Entity best = null;
+        ItemStack bestStack = null;
+        double bestDistance = Double.MAX_VALUE;
+        int eligible = 0;
+        if (area != null) {
+            for (Entity entity : ground.candidates(GROUND_STILL_MS)) {
+                if (groundSkipped.containsKey(entity.getEntityId()) || !inArea(area, entity.getX(), entity.getY(), entity.getZ(), 0)) continue;
+                ItemStack stack = GroundItems.stackOf(entity);
+                if (stack == null || stack.getAmount() <= 0 || hazardAt(cell(entity))) continue;
+                eligible++;
+                double distance = distSq(feet, cell(entity));
+                if (distance >= bestDistance) continue;
+                best = entity;
+                bestStack = stack;
+                bestDistance = distance;
+            }
+        }
+        if (best == null || bestStack == null) {
+            groundStatus = "nothing on the ground";
+            return false;
+        }
+
+        // A player in render distance is assumed to be about to pick their things up: nothing is touched until they are gone
+        if (near != null) {
+            groundStatus = "waiting for " + near + " to leave (" + eligible + " items)";
+            if (!groundWaitLogged) {
+                groundWaitLogged = true;
+                debug("Ground items waiting: {} is nearby.", near);
+            }
+            return false;
+        }
+        if (freeCarrySlot() == -1) {
+            groundStatus = "no free carry slot";
+            return false;
+        }
+        // Nothing of anyone's in the way
+        if (openContainerId() != 0 || holdingCursor() || !activity.mayRequest()) return false;
+
+        Item picked = Item.of(bestStack);
+        if (picked == null) return false;
+
+        groundId = best.getEntityId();
+        groundCell = cell(best);
+        groundStack = bestStack;
+        groundItemId = picked.id;
+        groundItemLabel = picked.label();
+        groundLabel = bestStack.getAmount() + " " + picked.label();
+        groundTicks = groundArrivedTicks = groundFinishTicks = 0;
+        groundAskedAt = -1;
+        groundFinishing = groundTaken = false;
+        groundMove = null;
+        groundStartedInside = inArea(area, feet.x() + 0.5, feet.y(), feet.z() + 0.5, 2);
+        for (int i = 0; i < 36; i++) {
+            Item there = inventoryItem(i);
+            groundBeforeIds[i] = there == null ? null : there.id;
+            groundBeforeCounts[i] = there == null ? 0 : there.count;
+        }
+        job = Job.Ground;
+        target = null;
+        idle = false;
+        groundStatus = "picking up " + groundLabel;
+        info("Picking up {} {} from the ground at {}.", bestStack.getAmount(), picked.label(), fmt(groundCell));
+        return true;
+    }
+
+    private static BlockPos cell(Entity entity) {
+        return new BlockPos((int) Math.floor(entity.getX()), (int) Math.floor(entity.getY()), (int) Math.floor(entity.getZ()));
+    }
+
+    private void tickGround() {
+        groundTicks++;
+        GroundItems ground = groundItems();
+        if (!CONFIG.collectGround || !CONFIG.sortItems) {
+            endGround(false);
+            return;
+        }
+
+        // Another player came into view: dropped at once, and nothing more is done about ground items until they are gone
+        if (!groundFinishing) {
+            String near = ground.playerNearby();
+            if (near != null) {
+                debug("{} is nearby, stopping the pickup of {} from the ground.", near, groundLabel);
+                endGround(false);
+                return;
+            }
+        }
+
+        Entity item = CACHE.getEntityCache().get(groundId);
+        if (ground.takenCount(groundId) >= 0) groundTaken = true;
+        boolean gone = item == null || item.isRemoved();
+        if (groundFinishing || groundTaken || gone) {
+            if (!groundFinishing) {
+                groundFinishing = true;
+                activity.releaseOurPathing();
+                restoreRules();
+            }
+            finishGround();
+            return;
+        }
+
+        // The item moved (water, a push): go to where it is now
+        BlockPos at = cell(item);
+        if (!at.equals(groundCell)) {
+            groundCell = at;
+            groundAskedAt = -1;
+            groundArrivedTicks = 0;
+            if (hazardAt(at)) {
+                giveUpOnGround("it is somewhere dangerous");
+                return;
+            }
+        }
+
+        // Never outside the stash area, the bot included (a bot that set out from outside is left to walk back in)
+        double[] area = groundArea();
+        BlockPos feet = playerFeet();
+        if (area == null || !inArea(area, item.getX(), item.getY(), item.getZ(), 0)) {
+            giveUpOnGround("it left the stash area");
+            return;
+        }
+        if (groundStartedInside && !inArea(area, feet.x() + 0.5, feet.y(), feet.z() + 0.5, 2)) {
+            giveUpOnGround("I ended up outside the stash area");
+            return;
+        }
+        if (groundTicks > GROUND_TIMEOUT) {
+            giveUpOnGround("it took longer than 20 seconds");
+            return;
+        }
+        if (activity.ownFailureSettled()) {
+            giveUpOnGround("no way to it was found");
+            return;
+        }
+
+        double dx = CACHE.getPlayerCache().getX() - item.getX(), dz = CACHE.getPlayerCache().getZ() - item.getZ();
+        double dy = CACHE.getPlayerCache().getY() - item.getY();
+        if (Math.abs(dx) < 1.2 && Math.abs(dz) < 1.2 && Math.abs(dy) < 1.5) {
+            // On top of it: the server has a moment to hand it over
+            if (++groundArrivedTicks > GROUND_ARRIVED_TICKS) giveUpOnGround("standing on it didn't pick it up");
+            return;
+        }
+        groundArrivedTicks = 0;
+
+        if (activity.mayRequest() && (groundAskedAt < 0 || tickCount - groundAskedAt > GROUND_REASK_TICKS)) {
+            groundAskedAt = tickCount;
+            // Never dig or build on the way
+            rules(false, false);
+            GoalBlock walkTo = new GoalBlock(groundCell);
+            PathingRequestFuture future = BARITONE.pathTo(walkTo);
+            activity.notePath(future, BARITONE.getCustomGoalProcess(), walkTo, tickCount);
+        }
+    }
+
+    /**
+     * The item is gone from the world: picked up by us (the inventory shows it a moment later), or despawned or taken by
+     * someone else. Only slots that gained exactly that item are claimed as stash cargo.
+     */
+    private void finishGround() {
+        RequestFuture move = groundMove;
+        if (move != null) {
+            if (move.isDone() || ++groundFinishTicks > 20 * 5) endGround(false);
+            return;
+        }
+
+        ItemStack want = groundStack;
+        int[] gain = new int[36];
+        int total = 0;
+        boolean anyExact = false;
+        for (int i = 0; i < 36; i++) {
+            Item now = inventoryItem(i);
+            if (now == null || !now.id.equals(groundItemId)) continue;
+            int was = groundItemId.equals(groundBeforeIds[i]) ? groundBeforeCounts[i] : 0;
+            if (now.count <= was) continue;
+            gain[i] = now.count - was;
+            total += gain[i];
+            if (sameComponents(want, now)) anyExact = true;
+        }
+        if (total == 0) {
+            if (++groundFinishTicks >= GROUND_FINISH_TICKS) {
+                if (groundTaken) debug("Picked up {} from the ground but the inventory never showed it.", groundLabel);
+                endGround(false);
+            }
+            return;
+        }
+
+        int moveFrom = -1;
+        Set<Integer> keep = keepSlots();
+        for (int i = 0; i < 36; i++) {
+            if (gain[i] == 0) continue;
+            Item now = inventoryItem(i);
+            // The components may read differently on the ground and in a slot: only then is the item id enough
+            if (anyExact && !sameComponents(want, now)) continue;
+            boolean pre = groundItemId.equals(groundBeforeIds[i]);
+            if (carry.contains(i)) {
+                // An empty carry slot, or stash cargo already there: stash cargo from now on, so tools and food picked up
+                // this way are not taken for the bot's own
+                if (!pre || groundItemId.equals(stashHeld.get(i))) stashHeld.put(i, groundItemId);
+            }
+            // Landed in a free slot outside the carry slots (and not one that is kept): moved into a carry slot below. Merged
+            // into a stack of the bot's own, it can't be told apart and stays where it is
+            else if (!pre && !keep.contains(i) && moveFrom < 0) moveFrom = i;
+        }
+
+        if (moveFrom >= 0) {
+            if (openContainerId() != 0 || holdingCursor() || busy()) {
+                if (++groundFinishTicks > GROUND_FINISH_TICKS * 4) endGround(false);
+                return;
+            }
+            int free = freeCarrySlot();
+            if (free != -1) {
+                RequestFuture future = submit(new ClickItem(0, invSlot(moveFrom), ClickItemAction.LEFT_CLICK), new ClickItem(0, invSlot(free), ClickItemAction.LEFT_CLICK));
+                if (future == RequestFuture.rejected) {
+                    if (++groundFinishTicks > GROUND_FINISH_TICKS * 4) endGround(false);
+                    return;
+                }
+                stashHeld.put(free, groundItemId);
+                groundMove = future;
+                groundFinishTicks = 0;
+                return;
+            }
+        }
+        endGround(false);
+    }
+
+    private static boolean sameComponents(@Nullable ItemStack want, @Nullable Item have) {
+        if (want == null || have == null || have.raw == null) return true;
+        return Objects.equals(want.getDataComponentsOrEmpty(), have.raw.getDataComponentsOrEmpty());
+    }
+
+    private void giveUpOnGround(String why) {
+        info("Couldn't pick up the {} from the ground at {}: {}. Leaving it alone for 5 minutes.", groundItemLabel, groundCell == null ? "?" : fmt(groundCell), why);
+        endGround(true);
+    }
+
+    private void endGround(boolean skip) {
+        if (skip && groundId >= 0) groundSkipped.put(groundId, System.currentTimeMillis() + GROUND_SKIP_MS);
+        activity.releaseOurPathing();
+        restoreRules();
+        groundId = -1;
+        groundFinishing = groundTaken = false;
+        groundMove = null;
+        job = null;
+        target = null;
+        wait = CONFIG.delayTicks;
+        groundStatus = "nothing on the ground";
     }
 
     // Containers other players used
@@ -1664,9 +2077,16 @@ public class StashSorter extends AbstractFieldModule {
      * Keeps the tracker told where signs of the stash can be, and collects what it saw happen there: every tick, so a
      * job on a container whose sign just changed notices.
      */
+    /**
+     * Signs are watched when sorting by them, and in scan only in either mode: the labels are kept up to date.
+     */
+    private boolean signsWatched() {
+        return CONFIG.watchSigns && (CONFIG.mode == Mode.Signs || !CONFIG.sortItems);
+    }
+
     private void watchSignSpots() {
         StashTracker tracker = MODULE.get(StashTracker.class);
-        if (!CONFIG.watchSigns || CONFIG.mode != Mode.Signs) {
+        if (!signsWatched()) {
             // Nothing is watched, so the tracker is told to stop queueing
             if (signsPublished) {
                 signsPublished = false;
@@ -1740,7 +2160,7 @@ public class StashSorter extends AbstractFieldModule {
      * of them now and then, which catches what was missed (a chunk loading in, a lost packet).
      */
     private void applySignChanges() {
-        if (!CONFIG.watchSigns || CONFIG.mode != Mode.Signs) return;
+        if (!signsWatched()) return;
 
         if (tickCount >= nextSignSweep) {
             nextSignSweep = tickCount + SIGN_SWEEP_TICKS;
@@ -1836,7 +2256,9 @@ public class StashSorter extends AbstractFieldModule {
 
         Long mine = ownSignUntil.get(box);
         if (mine == null || tickCount > mine) {
-            info("Sign at {} changed: \"{}\" -> \"{}\", re-sorting.", box.pos, before.isEmpty() ? "no sign" : before.getFirst(), now.isEmpty() ? "no sign" : now.getFirst());
+            String was = before.isEmpty() ? "no sign" : before.getFirst(), is = now.isEmpty() ? "no sign" : now.getFirst();
+            if (CONFIG.sortItems) info("Sign at {} changed: \"{}\" -> \"{}\", re-sorting.", box.pos, was, is);
+            else info("Sign at {} changed: \"{}\" -> \"{}\" (scan only).", fmt(box.pos), was, is);
         }
         unrecognisedSigns(true);
     }
@@ -2044,6 +2466,11 @@ public class StashSorter extends AbstractFieldModule {
             resumeLabel();
             return;
         }
+        if (job == Job.Ground) {
+            // Looked at again from scratch: the item may have gone, or a player come
+            endGround(false);
+            return;
+        }
         if (handle != null) {
             resumeHandle();
             return;
@@ -2123,7 +2550,8 @@ public class StashSorter extends AbstractFieldModule {
     private boolean wakeUp() {
         idleTicks++;
 
-        if (idleTicks >= CONFIG.recheckSeconds * 20) {
+        // Scan only moves nothing into the drop-offs' reach: their lids and signs are watched, which covers changes
+        if (CONFIG.sortItems && idleTicks >= CONFIG.recheckSeconds * 20) {
             idleTicks = 0;
             boolean any = false;
             for (Box box : stash.boxes) {
@@ -2184,6 +2612,12 @@ public class StashSorter extends AbstractFieldModule {
     private boolean pickJob() {
         Box unread = nearest(stash.boxes.stream().filter(b -> (!b.known() || b.stale) && !b.unreachable && !failedSurvey.contains(b) && !signPending(b)).toList());
         if (unread != null) return start(Job.Survey, unread);
+
+        // Scan only: everything is read and kept up to date, nothing is moved
+        if (!CONFIG.sortItems) {
+            finishSorting();
+            return false;
+        }
 
         plan();
         destCache = new IdentityHashMap<>();
@@ -2280,6 +2714,9 @@ public class StashSorter extends AbstractFieldModule {
 
         // A sign that is being changed decides what is left to do: wait for it before calling it done
         if (CONFIG.watchSigns && !signDirtyAt.isEmpty()) return false;
+
+        // Everything is put away: items lying on the ground in the stash area are fetched next, and then put away too
+        if (startGround(false)) return true;
 
         // Everything is where it belongs: full shulkers' worth of anything are packed, which frees chest slots
         if (startCompaction() && continueCompaction()) return true;
@@ -3693,8 +4130,27 @@ public class StashSorter extends AbstractFieldModule {
         if (stash.isDirty()) stash.save();
         StashIndex.touch(stash);
         restoreRules();
-        reportStrays();
+        if (CONFIG.sortItems) reportStrays();
         unrecognisedSigns(true);
+
+        if (!CONFIG.sortItems) {
+            long unopened = stash.boxes.stream().filter(b -> b.unreachable).count();
+            String note = unopened > 0 ? String.format(" Couldn't open %d containers.", unopened) : "";
+            if (CONFIG.stayOn) {
+                if (surveyed > 0 || !note.equals(lastSummary)) info("Scanned {} containers (scan only).{} Waiting for changes.", surveyed, note);
+                lastSummary = note;
+                surveyed = 0;
+                idle = true;
+                idleTicks = 0;
+                seenVersion = Stashes.version;
+                return;
+            }
+            info("Done, scanned {} containers (scan only).{}", surveyed, note);
+            inGameAlertActivePlayer("<green>Stash scanned: " + stash.knownCount() + " containers read.");
+            surveyed = 0;
+            stop();
+            return;
+        }
 
         long unreachable = stash.boxes.stream().filter(b -> b.unreachable).count();
         String extra = unreachable > 0 ? String.format(" Couldn't open %d containers, they were left alone.", unreachable) : "";
@@ -3727,6 +4183,7 @@ public class StashSorter extends AbstractFieldModule {
             boxVisits.merge(box, 1, Integer::sum);
         }
         signAbort = false;
+        if (next == Job.Survey) surveyed++;
         job = next;
         target = box;
         actions = 0;
@@ -3993,7 +4450,7 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         boolean busy = switch (job) {
-            case Survey, Clean, Fill, Label -> false;
+            case Survey, Clean, Fill, Label, Ground -> false;
             case FetchSigns -> fetchSignsOne(c);
             case Take -> takeOne(c);
             case Fetch -> fetchOne(c);
@@ -5005,8 +5462,16 @@ public class StashSorter extends AbstractFieldModule {
             long left = foreignNow ? quiet : Math.max(0, quiet - (tickCount - lastForeignTick));
             return "waiting: " + waitLabel(foreignNow || !quietElapsed() ? lastReason : null) + ", " + (left + 19) / 20 + "s quiet left";
         }
-        if (idle) return "sorted, waiting for more (stay-on)" + unrecognisedNote();
-        if (job == null) return "planning" + unrecognisedNote();
+        return sortStatus() + scanNote() + ", ground items: " + groundState();
+    }
+
+    private String scanNote() {
+        return CONFIG.sortItems ? "" : " (scan only)";
+    }
+
+    private String sortStatus() {
+        if (idle) return (CONFIG.sortItems ? "sorted, waiting for more (stay-on)" : "scanned, waiting for changes (stay-on)") + unrecognisedNote();
+        if (job == null) return (CONFIG.sortItems ? "planning" : "scanning") + unrecognisedNote();
         return switch (job) {
             case Survey -> "reading " + target.pos;
             case Take -> "taking from " + target.pos;
@@ -5019,6 +5484,7 @@ public class StashSorter extends AbstractFieldModule {
             case FetchSigns -> "fetching signs from " + target.pos;
             case Label -> "labelling the chest at " + target.pos + " as \"" + labelText + "\"";
             case Gather -> "gathering stacks to compact from " + target.pos;
+            case Ground -> "picking up " + groundLabel + " from the ground at " + (groundCell == null ? "?" : fmt(groundCell));
         } + " (" + moved + " moved)" + unrecognisedNote();
     }
 }

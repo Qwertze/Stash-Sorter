@@ -5,6 +5,7 @@ import com.aquarius.plugin.api.Plugin;
 import com.aquarius.plugin.api.PluginAPI;
 import com.porter.qwertestash.command.StashCommand;
 import com.porter.qwertestash.module.AutoDrop;
+import com.porter.qwertestash.module.GroundItems;
 import com.porter.qwertestash.module.StashSorter;
 import com.porter.qwertestash.module.StashTracker;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
@@ -28,6 +29,7 @@ public class QwerteStashPlugin implements AquariusProxyPlugin {
         pluginAPI.registerModule(new StashTracker());
         pluginAPI.registerModule(new StashSorter());
         pluginAPI.registerModule(new AutoDrop());
+        pluginAPI.registerModule(new GroundItems());
         pluginAPI.registerCommand(new StashCommand());
         LOG.info("Qwerte Stash loaded");
     }

@@ -3,6 +3,22 @@
 All notable changes to Stash Sorter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0-dev.1] - 2026-10-15
+
+### Added
+- **Collect ground items** (`stash collect on/off`, on; `stash collectRange <blocks>`, 8): the bot picks up items lying
+  in the stash area (every container's bounding box widened by the range sideways and 4 up and down) and sorts them.
+  Only items it didn't drop or break out of a block itself, only while no other player is in render distance (a trip
+  in progress is dropped the moment one appears), only items that have lain still for 3 seconds, only between jobs with
+  a free carry slot, and it gives way to other modules as always. An item that can't be reached or isn't picked up
+  within about 20 seconds is left alone for 5 minutes. What it picks up counts as stash cargo, so picked-up tools and
+  food are put away and not mistaken for the bot's own. The status line shows `on`, `off` or `waiting: <player> is
+  nearby`.
+- **Scan only** (`stash sort on/off`, on): with sorting off, `stash on` still reads unknown and stale containers, the
+  full re-read on login, the chest and sign watching, the index and search, but never moves an item: no taking,
+  depositing, dumping, repacking, compacting, labelling or ground collection, and it only opens a container to read it.
+  Status and log say "scan only".
+
 ## [1.2.0] - 2026-10-15
 
 Everything from 1.2.0-dev.1 below, plus these fixes found while testing it:

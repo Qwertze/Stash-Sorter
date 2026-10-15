@@ -47,6 +47,7 @@ public class StashCommand extends Command {
                 """)
             .usageLines(
                 "on/off",
+                "sort on/off (off = scan only)",
                 "search <item>",
                 "name <stash name>",
                 "mode <tiers/signs>",
@@ -79,6 +80,8 @@ public class StashCommand extends Command {
                 "index",
                 "forget",
                 "tracking on/off",
+                "collect on/off",
+                "collectRange <blocks>",
                 "autoDrop on/off",
                 "autoDrop range <blocks>",
                 "whisper on/off",
@@ -104,6 +107,19 @@ public class StashCommand extends Command {
                 }
                 c.getSource().getEmbed().title("Stash Sorter " + toggleStrCaps(CONFIG.sorting));
             }))
+            .then(literal("sort").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.sortItems = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Sorting Items " + toggleStrCaps(CONFIG.sortItems))
+                    .description(CONFIG.sortItems ? "Items are moved again." : "Scan only: containers are read and kept up to date, nothing is moved.");
+            })))
+            .then(literal("collect").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.collectGround = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Collecting Ground Items " + toggleStrCaps(CONFIG.collectGround));
+            })))
+            .then(literal("collectRange").then(argument("blocks", integer(0, 64)).executes(c -> {
+                CONFIG.collectRange = getInteger(c, "blocks");
+                c.getSource().getEmbed().title("Collect Range Set");
+            })))
             .then(literal("search").then(argument("query", greedyString()).executes(c -> {
                 search(c.getSource().getEmbed(), getString(c, "query"));
             })))
@@ -455,6 +471,9 @@ public class StashCommand extends Command {
         embed
             .primaryColor()
             .addField("Sorting", toggleStr(CONFIG.sorting) + " - " + MODULE.get(StashSorter.class).statusLine())
+            .addField("Sort Items", toggleStr(CONFIG.sortItems) + (CONFIG.sortItems ? "" : " (scan only: containers are read and kept up to date, nothing is moved)"))
+            .addField("Collect Ground Items", toggleStr(CONFIG.collectGround) + " - " + MODULE.get(StashSorter.class).groundState()
+                + " (items the bot didn't drop or break, " + CONFIG.collectRange + " blocks around the stash, only while no other player is in render distance)")
             .addField("Stash", "\"" + CONFIG.stashName + "\": " + stashLine)
             .addField("Mode", CONFIG.mode.name())
             .addField("Area", "radius " + CONFIG.radius + ", height " + CONFIG.height + ", barrels " + toggleStr(CONFIG.barrels))
