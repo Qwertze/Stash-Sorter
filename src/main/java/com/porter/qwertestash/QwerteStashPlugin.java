@@ -31,6 +31,11 @@ public class QwerteStashPlugin implements AquariusProxyPlugin {
         pluginAPI.registerModule(new AutoDrop());
         pluginAPI.registerModule(new GroundItems());
         pluginAPI.registerCommand(new StashCommand());
+        try {
+            ConsoleQuiet.install();
+        } catch (LinkageError | RuntimeException e) {
+            LOG.debug("Qwerte Stash: quiet mode can not filter the terminal", e);
+        }
         LOG.info("Qwerte Stash loaded");
     }
 }

@@ -7,6 +7,7 @@ import com.aquarius.command.api.CommandUsage;
 import com.aquarius.discord.Embed;
 import com.aquarius.mc.block.BlockPos;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.porter.qwertestash.StashConfig.LogLevel;
 import com.porter.qwertestash.StashConfig.Mode;
 import com.porter.qwertestash.module.AutoDrop;
 import com.porter.qwertestash.module.StashSorter;
@@ -52,6 +53,7 @@ public class StashCommand extends Command {
                 "search <item>",
                 "name <stash name>",
                 "mode <tiers/signs>",
+                "log <quiet/normal/debug>",
                 "exclude [x y z]",
                 "dropoff [x y z]",
                 "area <x1> <y1> <z1> <x2> <y2> <z2>",
@@ -72,6 +74,7 @@ public class StashCommand extends Command {
                 "labels",
                 "stayOn on/off",
                 "recheck <seconds>",
+                "smartRecheck on/off",
                 "repack on/off",
                 "newBulkAt <stacks>",
                 "compact on/off",
@@ -81,6 +84,7 @@ public class StashCommand extends Command {
                 "carry <slots>/clear",
                 "keep <slots>/clear",
                 "rescan",
+                "unstuck",
                 "index",
                 "forget",
                 "tracking on/off",
@@ -139,6 +143,15 @@ public class StashCommand extends Command {
             .then(literal("mode").then(argument("mode", enumStrings(Mode.values())).executes(c -> {
                 CONFIG.mode = getString(c, "mode").equalsIgnoreCase("signs") ? Mode.Signs : Mode.Tiers;
                 c.getSource().getEmbed().title("Mode Set");
+            })))
+            .then(literal("log").then(argument("level", enumStrings(LogLevel.values())).executes(c -> {
+                String name = getString(c, "level");
+                CONFIG.logLevel = java.util.Arrays.stream(LogLevel.values()).filter(l -> l.name().equalsIgnoreCase(name)).findFirst().orElse(LogLevel.Normal);
+                c.getSource().getEmbed().title("Log Level Set").description(switch (CONFIG.logLevel) {
+                    case Quiet -> "Quiet: step lines, errors and alerts only (alerts are also whispered to the whitelisted players).";
+                    case Normal -> "Normal: step lines, the usual messages, errors and alerts.";
+                    case Debug -> "Debug: everything, with the reasons behind each decision, marked [debug].";
+                });
             })))
             .then(literal("exclude")
                 .executes(c -> {
@@ -270,6 +283,11 @@ public class StashCommand extends Command {
                 CONFIG.recheckSeconds = getInteger(c, "seconds");
                 c.getSource().getEmbed().title("Recheck Set");
             })))
+            .then(literal("smartRecheck").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.smartRecheck = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Smart Recheck " + toggleStrCaps(CONFIG.smartRecheck))
+                    .description(CONFIG.smartRecheck ? "Only drop-offs a hopper or dropper can fill, or that are out of sight, are looked into, less often while they stay unchanged; the others when their lid moves." : "Every drop-off is looked into every recheck interval.");
+            })))
             .then(literal("repack").then(argument("toggle", toggle()).executes(c -> {
                 CONFIG.repack = getToggle(c, "toggle");
                 c.getSource().getEmbed().title("Repack " + toggleStrCaps(CONFIG.repack));
@@ -315,11 +333,16 @@ public class StashCommand extends Command {
                     c.getSource().getEmbed().title("No Stash Here Yet");
                     return;
                 }
-                for (Box box : stash.boxes) box.contents = null;
+                for (Box box : stash.boxes) box.stale = true;
                 stash.save();
                 Stashes.version++;
                 Stashes.exploreVersion++;
                 c.getSource().getEmbed().title("Stash Will Be Read Again").description("Every container is read again the next time sorting runs.");
+            }))
+            .then(literal("unstuck").executes(c -> {
+                String what = MODULE.get(StashSorter.class).requestUnstuck();
+                c.getSource().getEmbed().title("Stash Sorter Unstuck").description(what
+                    + " A shulker of ours still standing is left where it is and listed with the orphaned shulkers.").primaryColor();
             }))
             .then(literal("forget").executes(c -> {
                 Stashes.forget();
@@ -586,13 +609,14 @@ public class StashCommand extends Command {
                 + " (items the bot didn't drop or break, " + CONFIG.collectRange + " blocks around the stash, only while no other player is in render distance)")
             .addField("Stash", "\"" + CONFIG.stashName + "\": " + stashLine)
             .addField("Mode", CONFIG.mode.name())
+            .addField("Log Level", CONFIG.logLevel.name() + " (quiet: steps, errors and alerts; alerts are also whispered to the whitelist)")
             .addField("Stash Area", stashAreaLine())
             .addField("Safe Walking", toggleStr(CONFIG.safeWalk) + " (no parkour, jumping off or falling more than a block; sneaks at ledges)")
             .addField("Area", "radius " + CONFIG.radius + ", height " + CONFIG.height + ", barrels " + toggleStr(CONFIG.barrels))
             .addField("Repack Shulkers", toggleStr(CONFIG.repack) + " (signs mode" + (CONFIG.compact ? "" : ", new bulk at " + CONFIG.newBulkAt + " stacks") + ")")
             .addField("Compact Shulkers", toggleStr(CONFIG.compact) + " - " + MODULE.get(StashSorter.class).compactStatus()
                 + " (signs mode, top up at " + CONFIG.compactTopUpAt + " stacks, " + CONFIG.compactExclude.size() + " items excluded)")
-            .addField("Stay On", toggleStr(CONFIG.stayOn) + " (recheck " + CONFIG.recheckSeconds + "s)")
+            .addField("Stay On", toggleStr(CONFIG.stayOn) + " (recheck " + CONFIG.recheckSeconds + "s, " + (CONFIG.smartRecheck ? "smart: only drop-offs a hopper or dropper can fill, backing off to 5 min" : "every drop-off") + ")")
             .addField("Carry / Keep Slots", (CONFIG.carrySlots.isBlank() ? "every empty slot" : CONFIG.carrySlots) + " / " + (CONFIG.keepSlots.isBlank() ? "none" : CONFIG.keepSlots))
             .addField("Delay", CONFIG.delayTicks + " ticks")
             .addField("Gives Way To Other Modules", "waits " + CONFIG.quietSeconds + "s after they stop, pearl slot (hotbar 1) kept for PearlPlus " + toggleStr(CONFIG.reservePearlSlot))

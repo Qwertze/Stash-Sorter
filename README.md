@@ -19,7 +19,8 @@ instead of your client.
   item's chest, freeing chest slots. See below.
 - Scans the stash once and saves it. After that, opening a container through the proxy keeps it up to date.
 - **Drop-offs** are emptied completely: anything without a home, or whose chest is full, goes to a `Misc` chest, then
-  anywhere with room. With stay-on mode, the bot checks them every few seconds and keeps the stash sorted.
+  anywhere with room. With stay-on mode, the bot watches them (and checks the ones a hopper or dropper can fill) and keeps
+  the stash sorted.
 - **Downstacks**: partial stacks of the same item in a chest are merged.
 - Excluded containers, and carry and keep slots so it never touches your own items.
 - Search from the terminal, Discord or in-game (`stash search <item>`), or let whitelisted players whisper the bot
@@ -57,6 +58,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash search <item>` | Find items in the saved stash, including inside shulkers |
 | `stash name <name>` | Which stash to use. Each name on each server is its own stash |
 | `stash mode tiers` / `signs` | How to sort |
+| `stash log quiet` / `normal` / `debug` | How much the sorter says (normal). Quiet: step lines, errors and alerts only. See Logging |
 | `stash exclude [x y z]` | Never sort into or out of this container. Toggles. With no position, the container you last right-clicked while connected |
 | `stash dropoff [x y z]` | Empty this container into the stash, for others to drop items in. Toggles. Always emptied completely: anything without a home, or whose chest is full, goes to a `Misc` chest, then anywhere with room |
 | `stash safewalk on/off` | Safe walking (on): while walking the bot never parkours, jumps off or falls more than one block, and it sneaks when it stands at the edge of a drop of two blocks or more |
@@ -75,6 +77,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash labels` | Show the signs the bot has put up, and any it gave up on |
 | `stash stayOn on/off` | Keep running after sorting, sorting again whenever a container changes |
 | `stash recheck <seconds>` | How often stay-on checks drop-offs (30) |
+| `stash smartRecheck on/off` | Stay-on drop-off checks (on). On: only drop-offs a hopper, dropper or dispenser next to or above them can fill, or whose chunk is not loaded, are looked into, each less often (30 s up to 5 min) while its contents stay unchanged; the others are read when their lid moves. Off: every drop-off every `recheck` seconds |
 | `stash repack on/off` | Clean mixed shulkers and pack loose items into bulk shulkers, in signs mode (on) |
 | `stash newBulkAt <stacks>` | Start a new bulk shulker from an empty one at this many stacks of one item (9). 0 only tops up existing ones. Only used while `compact` is off |
 | `stash compact on/off` | Pack a full shulker's worth of an item into a shulker, in signs mode (on) |
@@ -89,6 +92,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash collectRange <blocks>` | How far past the outermost containers ground items are picked up, sideways (8). Up and down it is always 4 |
 | `stash autoDrop on/off` | Give back to a nearby player what they dropped or left by breaking a block and the bot picked up (off). `stash autoDrop range <blocks>` sets how far (16) |
 | `stash rescan` | Read every container again on the next run |
+| `stash unstuck` | Drop whatever the bot is doing and start over; a shulker job under way is not resumed (a standing shulker is left and listed as orphaned) |
 | `stash forget` | Delete the saved stash and its marks |
 | `stash tracking on/off` | Keep the stash up to date when containers are opened (on) |
 | `stash whisper on/off` | Whisper search (off) |
@@ -129,6 +133,8 @@ of all the containers, widened by `collectRange` blocks sideways and 4 up and do
   assumed to be about to pick their things up), and a trip in progress is dropped the moment one appears.
 - Only items that have lain still for 3 seconds, and only between jobs, when there is a free carry slot and nothing else
   is using the bot. Other modules' pathing always wins.
+- It picks up in batches: while two or more carry slots are free and eligible items are left it fetches the next one, and
+  only then puts them all away.
 - An item that can't be reached, or isn't picked up within about 20 seconds, is left alone for 5 minutes.
 - What it picks up is treated as stash cargo, even tools or food, and sorted like everything else.
 
@@ -172,7 +178,8 @@ Once everything is in place, the bot looks for chances to free chest slots:
 - With little carry room it works in rounds: gather a batch, put it in the shulker, repeat, with the shulker left
   standing between rounds and picked up when it's full. It needs at least two free carry slots. A shulker left
   standing for a few moments could be taken by another player, so the bot keeps close and reports in game if one
-  disappears or can't be picked up.
+  disappears or can't be picked up. When fewer than 3 stacks are left to add, the shulker is picked up instead of left
+  standing.
 - The bot's own tools, armor, food, totems and ender pearls are never touched. Stash items of those kinds are packed
   like anything else. Use `stash compactExclude add ender_pearl` to keep an item out.
 
@@ -193,6 +200,47 @@ the lines together, and lists like `Logs, Planks & Wood` are split up.
 With `autoLabel` on, an item that no sign describes can get a sign of its own: when there's an empty unsigned chest
 next to the signed ones, the bot writes a new category on a sign there and sorts the item into it. It only writes
 signs, never chests.
+
+## Logging
+`stash log quiet` / `normal` / `debug` (normal) sets how much the sorter writes to the terminal.
+
+| What | Quiet | Normal | Debug |
+|---|---|---|---|
+| Errors | shown | shown | shown |
+| Alerts (something needs a person) | shown, and whispered | shown, and whispered | shown, and whispered |
+| Step lines | shown | shown | shown |
+| The usual info and warnings | debug log only | shown | shown |
+| Debug detail | not shown | debug log only | shown, marked `[debug]` |
+
+A step line says what the sorter is doing and what comes next, and is never repeated, for example
+`Stash: sorting: taking 14 stacks from "Totems" at 10 64 -3; next: put them away (3 containers, nearest 12 64 -3).`
+Progress lines come at most every 10% or every 60 seconds. Debug adds the reason behind every decision: which job was
+picked and why, what was stalled, the clicks sent, how long walking, opening, placing and breaking took, and so on.
+What a level leaves out is still written to the proxy's debug log (when it writes one).
+
+In quiet mode the proxy's own `Pathfinder` and `Cache` info lines are also kept off the terminal, with a filter on the
+terminal appender (the log files and the logger levels are not touched; if the proxy's logging is set up differently,
+only the sorter's own output is quiet).
+
+Alerts are things that need a person: a shulker left standing, lost or abandoned, a shulker it can't break, nowhere to
+put stacks, sorting going in circles, no signs for new categories, no free carry slot, stopping while carrying, a sign it
+doesn't understand, a container it can't reach or open, going offline in the middle of a job. Each is also whispered to
+the players on `stash whitelist`, at most one whisper every 5 seconds (at most 5 queued, the oldest dropped), the same text (ignoring digits) at most once in 10 minutes, sent with the proxy's whisper command as plain
+text up to 256 characters, and never while the bot is offline.
+
+## If the bot goes offline or is stopped
+While the bot has a shulker of its own standing in the world (repacking, or compacting between rounds), what it was doing
+is saved with the stash (an `inFlight` record, together with which carry slots hold things taken from the stash). When
+sorting is started again, or the bot reconnects, that comes first, before the area is explored or any container read:
+back to the shulker, open it, finish packing or cleaning, break it, pick it up and put what is in it away. Then every
+container is read again as usual. This also happens after `stash off` with a shulker standing.
+
+- It only breaks a shulker that is the same block that was put down and holds what the record says it should; anything
+  else is left alone, said, and listed as an orphan.
+- If the bot is in another dimension it waits, puts no shulkers down, and says so once.
+- If the shulker is gone it looks for the dropped item nearby, and says so if it isn't found.
+- It gives up after 10 minutes or three failed walks back, and then reports the shulker like any other it couldn't pick
+  up.
 
 ## Building
 Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in

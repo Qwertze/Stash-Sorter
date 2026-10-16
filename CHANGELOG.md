@@ -3,6 +3,59 @@
 All notable changes to Stash Sorter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+## [1.4.0-dev.2] - 2026-10-16
+
+### Added
+- **Log levels** (`stash log quiet|normal|debug`, normal): quiet shows only step lines ("what now, what next", for
+  example `Stash: sorting: taking 14 stacks from "Totems" at 10 64 -3; next: put them away (3 containers, nearest 12 64
+  -3).`), errors and alerts; the usual info and warnings go to the debug log. Debug adds the reasons behind every
+  decision (job choice and candidates, stalls, clicks sent, walk/open/place/break/pickup requests with their outcome and
+  time, open latency, yield reasons, job durations, compaction scoring, ground item eligibility), marked `[debug]`. In
+  quiet mode the proxy's `Pathfinder` and `Cache` info lines are kept off the terminal by a filter on the terminal
+  appender (log files untouched).
+- **Alerts**: things that need a person (a shulker left standing, lost or abandoned, one that can't be broken, nowhere to
+  put stacks, sorting going in circles, no signs for new categories, no free carry slot, stopping while carrying, a sign
+  it doesn't understand, a container it can't reach or open, going offline mid-job) are also whispered to the
+  `stash whitelist` players: the same text at most once in 10 minutes, one whisper per 5 seconds, plain text up to 256
+  characters, never while the bot is offline.
+- **Offline and stop safety net**: a shulker of the bot's own standing in the world (repacking, or compacting between
+  rounds) is saved with the stash (`inFlight`, plus which carry slots hold stash items, `held`) on a disconnect or
+  `stash off`. On the next start it is finished first, before exploring or reading: back to the shulker, open it, finish,
+  break it, pick it up, put the contents away, then every container is read again. It only breaks a shulker that is the
+  block that was put down and holds what the record says; another dimension holds the record and blocks placing shulkers;
+  a gone shulker is looked for nearby; it gives up after 10 minutes or 3 failed walks. The stash file is written
+  atomically, orphans record their dimension, and orphans that have been picked up by someone are forgotten.
+- `stash smartRecheck on/off` (on): stay-on drop-off checks.
+- `stash unstuck`: drops whatever the bot is doing and starts sorting over. The unfinished shulker record is cleared so
+  nothing is resumed, and the "no more shulkers until restarted" block is lifted. A shulker of the bot's own still standing
+  is left where it is and listed with the orphaned shulkers. With sorting off it only clears the saved record.
+
+### Changed
+- Stay-on drop-off checks only look into drop-offs something can fill without moving a lid (a hopper, dropper or
+  dispenser next to or above them, or a chunk that isn't loaded) and back off from 30 s to 5 min while they come up
+  empty; the others are read when their lid moves. `stash smartRecheck off` keeps the old behaviour; the back-off resets when a check finds the contents changed.
+- Planning is cheaper: the room each container has to take items is worked out once per pass, and the signs are scored
+  once per kind of stack (id and data) per pass.
+- Ground items are picked up in batches while two carry slots are free and eligible items are left, then put away.
+- A container another player used (and `stash rescan`) is marked to be read again instead of being forgotten: search and
+  planning keep working with what was saved, and a container marked this way is not taken from until it is read.
+- With room in the carry slots, a container to take from that is nearer than the one to put away into is visited first.
+- A job that made headway at an open container carries on in place with the take or merge that container also has to
+  do, instead of closing and opening it again (at most four in a row).
+- While exploring the stash area, containers within reach of each waypoint are read before moving on.
+- A compaction shulker with fewer than 3 stacks left to add is broken and picked up instead of left standing.
+- A stop with a shulker standing no longer records it as an orphan and warns; it is saved to be finished (see above).
+
+### Fixed
+- A repacked shulker the bot had already picked up could be looked for on the ground for 2 minutes and then abandoned:
+  the shulker count could be off by one (a stale slot in the proxy's inventory), and a resume after a reconnect
+  expected one more shulker than the bot could hold. Picking up is now told from the count just before the break, and
+  failing that, after 3 s with nothing dropped in sight, from the one held shulker that matches it (colour, stack count
+  and contents), only while standing near the spot and with the block gone.
+- Matches Qwerte addon 0.3.2-dev.2.
+
 ## [1.4.0-dev.1] - 2026-10-15
 
 ### Added

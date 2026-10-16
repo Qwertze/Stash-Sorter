@@ -8,13 +8,18 @@ import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Supplier;
 
 import static com.aquarius.Globals.CONFIG;
 
@@ -78,16 +83,69 @@ public class Stash {
         public String item;
         public int stacks;
         public String when;
+        /** The dimension it stands in; null in files saved before this was kept. */
+        public @Nullable String dimension;
 
         public Orphan(BlockPos pos, String item, int stacks, String when) {
             this.pos = pos;
             this.item = item;
             this.stacks = stacks;
             this.when = when;
+            this.dimension = currentDimension();
         }
     }
 
     public List<Orphan> orphans = new ArrayList<>();
+
+    /**
+     * The compaction plan that was under way, as saved in {@link InFlight}.
+     */
+    public static class CompactState {
+        public String key;
+        public Item reference;
+        public boolean topUp;
+        public int startSize, target;
+        public @Nullable BlockPos sourceBox;
+        public int sourceSlot = -1;
+        public @Nullable BlockPos placedPos;
+        public int placedSize;
+        public int jobs;
+        public boolean aborting;
+    }
+
+    /**
+     * What the bot was in the middle of when it went offline or was stopped with a shulker of its own standing in the
+     * world, so that the next start can finish it: open the shulker, finish packing or cleaning, break it, pick it up
+     * and put it away. Kept in the stash file; null when nothing is under way.
+     */
+    public static class InFlight {
+        public static final int VERSION = 1;
+        public int version = VERSION;
+        public String savedAt;
+        public @Nullable String dimension;
+        /** Fill or Clean. */
+        public String job;
+        /** The step it was at: Hold, Place, Open, Work, Break, Collect, Return or Leave. */
+        public @Nullable String handle;
+        public @Nullable String returnTo;
+        /** Where the shulker stands. */
+        public @Nullable BlockPos placed;
+        /** The block it is, like {@code red_shulker_box}. */
+        public @Nullable String placedItemId;
+        public int placedStacks = -1;
+        public @Nullable String fillKey;
+        public @Nullable String cleanMainId;
+        public @Nullable BlockPos lastGoodStand;
+        /** The container the job was at, if it had one. */
+        public @Nullable BlockPos target;
+        public @Nullable CompactState compact;
+    }
+
+    /** The carry slots holding things the sorter took from the stash: slot index to item id. */
+    public Map<Integer, String> held = new HashMap<>();
+    public @Nullable InFlight inFlight;
+    /** Where the live held map is read from when saving, set by the sorter. */
+    public transient @Nullable Supplier<Map<Integer, String>> heldSource;
 
     /**
      * The perimeter: two corners (any order) and the dimension they were set in. One immutable object, so both corners
@@ -333,11 +391,43 @@ public class Stash {
     public void save() {
         try {
             Files.createDirectories(folder());
-            Files.writeString(file(name, server), GSON.toJson(this), StandardCharsets.UTF_8);
+            Supplier<Map<Integer, String>> source = heldSource;
+            if (source != null) held = new HashMap<>(source.get());
+            // Written beside the file and moved over it, so a crash or a stop in the middle never leaves half a stash
+            Path target = file(name, server);
+            Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+            Files.writeString(temp, GSON.toJson(this), StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
             dirty = false;
             StashIndex.touch(this);
         } catch (IOException e) {
             QwerteStashPlugin.LOG.error("Couldn't save stash {}", name, e);
+        }
+    }
+
+    /**
+     * After loading: a record of a version this code doesn't know is dropped, and the saved item in a compaction plan
+     * gets the lists the rest of the code relies on.
+     */
+    private void normalizeInFlight() {
+        InFlight record = inFlight;
+        if (record == null) return;
+        if (record.version != InFlight.VERSION) {
+            QwerteStashPlugin.LOG.warn("Qwerte Stash: ignoring a saved in-flight record of version {}", record.version);
+            inFlight = null;
+            return;
+        }
+        CompactState compact = record.compact;
+        if (compact != null && compact.reference != null) {
+            Item reference = compact.reference;
+            if (reference.contents == null) reference.contents = new ArrayList<>();
+            reference.normalizeName();
+            if (reference.tags == null) reference.tags = new ArrayList<>();
+            if (reference.enchants == null) reference.enchants = new ArrayList<>();
         }
     }
 
@@ -352,6 +442,8 @@ public class Stash {
             Stash stash = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Stash.class);
             if (stash == null) return null;
             if (stash.orphans == null) stash.orphans = new ArrayList<>();
+            if (stash.held == null) stash.held = new HashMap<>();
+            stash.normalizeInFlight();
             stash.boxes = stash.boxes == null ? new CopyOnWriteArrayList<>() : new CopyOnWriteArrayList<>(stash.boxes);
             stash.boxes.removeIf(box -> box == null || box.parts == null || box.parts.isEmpty());
             for (Box box : stash.boxes) {

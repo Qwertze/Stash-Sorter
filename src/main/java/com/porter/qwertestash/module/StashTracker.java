@@ -351,6 +351,7 @@ public class StashTracker extends Module {
         trackedContainer = 0;
         trackedBox = null;
         replies.clear();
+        Alerts.clear();
         accesses.clear();
         watches.clear();
         signEvents.clear();
@@ -360,6 +361,7 @@ public class StashTracker extends Module {
     }
 
     private void onTick(ClientTickEvent event) {
+        Alerts.pump(this);
         if (replyCooldown > 0) replyCooldown--;
         else if (!replies.isEmpty()) {
             String[] reply = replies.poll();

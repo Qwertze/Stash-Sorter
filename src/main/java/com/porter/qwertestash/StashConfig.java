@@ -9,6 +9,9 @@ import java.util.List;
 public class StashConfig {
     public enum Mode { Tiers, Signs }
 
+    /** How much the sorter says: Quiet is step lines, errors and alerts only; Debug adds the detail behind every decision. */
+    public enum LogLevel { Quiet, Normal, Debug }
+
     /** Sorting is running. */
     public boolean sorting = false;
     /** Keeping saved stashes up to date and answering whisper searches, even while not sorting. */
@@ -68,6 +71,13 @@ public class StashConfig {
     public boolean stayOn = false;
     /** Seconds between drop-off checks in stay-on mode. */
     public int recheckSeconds = 30;
+    /**
+     * Stay-on mode, smart recheck (the default): only drop-offs something can fill without opening them (a hopper,
+     * dropper or dispenser next to or above them, or a chunk that isn't loaded so their lid can't be seen) are looked into,
+     * each less often (up to every 5 minutes) while its contents stay unchanged; the others are read when their lid moves.
+     * Off: every drop-off is looked into every {@code recheckSeconds}, as before.
+     */
+    public boolean smartRecheck = true;
 
     /**
      * Signs mode: take items that belong elsewhere out of mixed shulkers, and pack loose items into shulkers that
@@ -125,6 +135,13 @@ public class StashConfig {
      * down is fine), and it holds sneak when standing at the edge of a drop of two blocks or more.
      */
     public boolean safeWalk = true;
+
+    /**
+     * What the sorter writes to the terminal. Quiet: step lines ("what now, what next"), errors and alerts (things that
+     * need a person, also whispered to the whitelisted players). Normal: those and the usual messages. Debug: and the
+     * reasons behind every decision. What quiet and normal leave out still goes to the debug log.
+     */
+    public LogLevel logLevel = LogLevel.Normal;
 
     public boolean whisperSearch = false;
     public List<String> whitelist = new ArrayList<>();
