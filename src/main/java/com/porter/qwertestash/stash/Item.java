@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
+import static com.porter.qwertestash.QwerteStashPlugin.CONFIG;
+
 /**
  * What the sorter knows about one stack: enough to sort and search it, and to save it with the stash. Read from the
  * proxy's item data. The live stack is kept too, while there is one, for telling identical stacks apart.
@@ -175,13 +177,26 @@ public final class Item {
 
     /**
      * What stacks have to share to be packed into one shulker: the item id, and for items whose id doesn't say what
-     * they are, what they are. Never enchantments, damage or a name on gear. Null for shulkers, anything with contents,
-     * and a stack of such an item saved before its type was kept (it gets one when its container is read again).
+     * they are, what they are. Never enchantments or a name on gear, and damage only with split durability on. Null for
+     * shulkers, anything with contents, and a stack of such an item saved before its type was kept (it gets one when its
+     * container is read again).
      */
     public @Nullable String bulkKey() {
         if (isShulker() || !contents.isEmpty() || bundleStacks > 0) return null;
-        if (typeDefined(id)) return typeData == null ? null : id + "|" + typeData;
-        return id;
+        if (typeDefined(id)) return typeData == null ? null : used(id + "|" + typeData);
+        return kindKey();
+    }
+
+    /**
+     * What tells kinds of stack apart for sorting: the item id, and with split durability on, whether it's used (not at
+     * full durability), so used and full gear of one kind are kept apart.
+     */
+    public String kindKey() {
+        return used(id);
+    }
+
+    private String used(String key) {
+        return damaged && CONFIG.splitDurability ? key + "|used" : key;
     }
 
     public boolean isFullStack() {

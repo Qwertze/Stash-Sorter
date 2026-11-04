@@ -81,6 +81,7 @@ public class StashCommand extends Command {
                 "compactTopUpAt <1-26>",
                 "compactExclude add/remove <item id>/list",
                 "compactSkip [x y z]",
+                "splitDurability on/off",
                 "carry <slots>/clear",
                 "keep <slots>/clear",
                 "rescan",
@@ -177,6 +178,12 @@ public class StashCommand extends Command {
             .then(literal("compact").then(argument("toggle", toggle()).executes(c -> {
                 CONFIG.compact = getToggle(c, "toggle");
                 c.getSource().getEmbed().title("Compact Shulkers " + toggleStrCaps(CONFIG.compact));
+            })))
+            .then(literal("splitDurability").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.splitDurability = getToggle(c, "toggle");
+                // Where used and full items belong changes: sort again
+                Stashes.version++;
+                c.getSource().getEmbed().title("Split Durability " + toggleStrCaps(CONFIG.splitDurability));
             })))
             .then(literal("compactTopUpAt").then(argument("stacks", integer(1, 26)).executes(c -> {
                 CONFIG.compactTopUpAt = getInteger(c, "stacks");
@@ -402,10 +409,20 @@ public class StashCommand extends Command {
     }
 
     private void mark(Embed embed, @Nullable BlockPos pos, int kind) {
+        boolean typed = pos != null;
         if (pos == null) pos = MODULE.get(StashTracker.class).lastClicked();
         if (pos == null) {
             embed.title("Which Container?").description("Give its position, or right-click it while connected to the proxy first.").errorColor();
             return;
+        }
+        // A typo (a digit too many) put a drop-off millions of blocks away, and the bot spent minutes trying to path to it
+        if (typed && !Containers.isLoaded(pos)) {
+            double away = Math.hypot(CACHE.getPlayerCache().getX() - (pos.x() + 0.5), CACHE.getPlayerCache().getZ() - (pos.z() + 0.5));
+            if (away > 128) {
+                embed.title("Too Far Away").description(String.format("%d, %d, %d is %,d blocks from the bot and not loaded, check the coordinates. Nothing was changed.",
+                    pos.x(), pos.y(), pos.z(), Math.round(away))).errorColor();
+                return;
+            }
         }
         String note = "";
         if (Containers.isLoaded(pos) && !Containers.isContainer(pos, true)) {
@@ -421,6 +438,11 @@ public class StashCommand extends Command {
         }
 
         Stash stash = Stashes.currentOrNew();
+        int[] bounds = stash.bounds();
+        if (stash.hasArea() && bounds != null && !stash.inArea(pos, 0)) {
+            note += String.format(" Note: %d, %d, %d is outside the stash area %s, so the bot may not walk to it; widen the area with stash area here1/here2 if so.",
+                pos.x(), pos.y(), pos.z(), Stash.describe(bounds));
+        }
         Box box = stash.boxAt(pos);
         if (box == null) {
             box = Containers.isLoaded(pos) ? Containers.makeBox(pos) : new Box(pos, new java.util.ArrayList<>(List.of(pos)));
@@ -616,6 +638,7 @@ public class StashCommand extends Command {
             .addField("Repack Shulkers", toggleStr(CONFIG.repack) + " (signs mode" + (CONFIG.compact ? "" : ", new bulk at " + CONFIG.newBulkAt + " stacks") + ")")
             .addField("Compact Shulkers", toggleStr(CONFIG.compact) + " - " + MODULE.get(StashSorter.class).compactStatus()
                 + " (signs mode, top up at " + CONFIG.compactTopUpAt + " stacks, " + CONFIG.compactExclude.size() + " items excluded)")
+            .addField("Split Durability", toggleStr(CONFIG.splitDurability) + " (signs mode, used gear goes in containers signed \"Used\", full gear everywhere else)")
             .addField("Stay On", toggleStr(CONFIG.stayOn) + " (recheck " + CONFIG.recheckSeconds + "s, " + (CONFIG.smartRecheck ? "smart: only drop-offs a hopper or dropper can fill, backing off to 5 min" : "every drop-off") + ")")
             .addField("Carry / Keep Slots", (CONFIG.carrySlots.isBlank() ? "every empty slot" : CONFIG.carrySlots) + " / " + (CONFIG.keepSlots.isBlank() ? "none" : CONFIG.keepSlots))
             .addField("Delay", CONFIG.delayTicks + " ticks")

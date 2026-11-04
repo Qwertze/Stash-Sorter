@@ -16,6 +16,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
+import static com.porter.qwertestash.QwerteStashPlugin.CONFIG;
+
 /**
  * What players mean by the words they put on signs and type into searches. Maps everyday terms ("redstone stuff",
  * "pvp", "building blocks", "valuables") onto the items they describe, so signs and searches can be written the way
@@ -41,6 +43,92 @@ public final class Categories {
         int best = 0;
         for (Part part : prepared(line)) best = Math.max(best, partScore(part, item));
         return best;
+    }
+
+    /**
+     * How well a container's sign, all of its lines, describes an item: the best line. With split durability on, a
+     * container whose sign marks it used (see {@link #marksUsed}) takes only used items, scored by what its sign says
+     * besides the used words, and every other container only items at full durability. Catch-alls take both.
+     */
+    public static int boxScore(List<String> labels, Described described) {
+        if (!CONFIG.splitDurability) return bestLine(labels, described);
+        boolean used = labels.stream().anyMatch(Categories::marksUsed);
+        if (used != described.item.damaged) return labels.stream().anyMatch(Categories::isCatchAll) ? CATCH_ALL_SCORE : 0;
+        if (!used) return bestLine(labels, described);
+
+        // "Used" on a line of its own goes with what the other lines say; only a sign that says nothing else is for all used items
+        List<String> rest = new ArrayList<>();
+        for (String label : labels) {
+            String without = withoutUsed(label);
+            if (without.equals(NOT_USED)) without = label;
+            if (!without.isBlank() && recognises(without)) rest.add(without);
+        }
+        return bestLine(rest.isEmpty() ? labels : rest, described);
+    }
+
+    private static int bestLine(List<String> labels, Described described) {
+        int best = 0;
+        for (String label : labels) best = Math.max(best, signScore(label, described));
+        return best;
+    }
+
+    private static final Set<String> USED_WORDS = Set.of("used", "damaged", "worn", "broken", "repair");
+    // Taken out along with the used words, but saying nothing on their own: "needs repair", "to repair"
+    private static final Set<String> USED_FILLER = Set.of("needs", "need", "to");
+
+    /**
+     * Whether a sign line is for used items, with split durability on: a word like "used" on its own, or with what it
+     * names ("Used Diamond Sword", "Damaged Tools", "Needs Repair"). Never the name of an item, like "Damaged Anvil".
+     */
+    public static boolean marksUsed(String line) {
+        return !withoutUsed(line).equals(NOT_USED);
+    }
+
+    /**
+     * A sign line saying only that its container is for used items, like "Used", and nothing about which.
+     */
+    public static boolean isUsedOnly(String line) {
+        return withoutUsed(line).isEmpty();
+    }
+
+    private static boolean usedPart(Part part) {
+        boolean used = false, other = false;
+        for (String word : part.full().split(" ")) {
+            if (USED_WORDS.contains(word)) used = true;
+            else if (!word.isEmpty() && !USED_FILLER.contains(word)) other = true;
+        }
+        return used && (!other || !namesAnItem(part.full()));
+    }
+
+    private static final String NOT_USED = "\0";
+    // Every container's lines are looked at for every kind of item, and telling an item name apart is slow
+    private static final Map<String, String> WITHOUT_USED = new ConcurrentHashMap<>();
+
+    /**
+     * The line without its used words, blank if that's all it said, or {@link #NOT_USED} if it doesn't mark used items.
+     */
+    private static String withoutUsed(String line) {
+        String found = WITHOUT_USED.get(line);
+        if (found != null) return found;
+        if (WITHOUT_USED.size() > 2048) WITHOUT_USED.clear();
+
+        List<String> kept = new ArrayList<>();
+        boolean any = false;
+        for (Part part : prepared(line)) {
+            if (!usedPart(part)) {
+                kept.add(part.full());
+                continue;
+            }
+            any = true;
+            List<String> words = new ArrayList<>();
+            for (String word : part.full().split(" ")) {
+                if (!word.isEmpty() && !USED_WORDS.contains(word) && !USED_FILLER.contains(word)) words.add(word);
+            }
+            if (!words.isEmpty()) kept.add(String.join(" ", words));
+        }
+        found = any ? String.join(", ", kept) : NOT_USED;
+        WITHOUT_USED.put(line, found);
+        return found;
     }
 
     public static Described describe(Item item) {
@@ -416,10 +504,12 @@ public final class Categories {
         Map<String, Item> sample = new HashMap<>();
         for (Item item : contents) {
             if (item == null) continue;
-            int[] t = tally.computeIfAbsent(item.id, i -> new int[2]);
+            // With split durability, used and full ones of an item count as two
+            String key = item.kindKey();
+            int[] t = tally.computeIfAbsent(key, i -> new int[2]);
             t[0]++;
             t[1] += item.count;
-            sample.putIfAbsent(item.id, item);
+            sample.putIfAbsent(key, item);
         }
 
         String best = null;

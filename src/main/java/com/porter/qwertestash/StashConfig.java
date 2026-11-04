@@ -102,6 +102,14 @@ public class StashConfig {
     /** Item ids never compacted, like {@code ender_pearl}. */
     public List<String> compactExclude = new ArrayList<>();
 
+    /**
+     * Signs mode: keep used gear (anything below full durability) apart from gear at full durability. A container whose
+     * sign says "used" (like "Used Diamond Sword", or "Used" on a line of its own) takes only used items, every other
+     * container only full ones, except misc/other/overflow, which take both. New signs for used items read "Used" and the
+     * item's name. Compacting never packs used and full ones into the same shulker.
+     */
+    public boolean splitDurability = false;
+
     /** Slots to carry stash items in, like "28-36". 1-9 hotbar, 10-36 inventory from the top left. Blank uses every empty slot. */
     public String carrySlots = "";
     /** Slots never to touch. */

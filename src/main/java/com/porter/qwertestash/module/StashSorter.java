@@ -2359,7 +2359,7 @@ public class StashSorter extends AbstractFieldModule {
 
         Map<String, Item> known = knownItems();
         Map<String, Integer> current = new HashMap<>();
-        for (Item item : known.values()) current.put(item.id, signedScore(item));
+        for (Item item : known.values()) current.put(item.kindKey(), signedScore(item));
         Map<String, String> chosen = new HashMap<>();
 
         List<Item> sources = new ArrayList<>();
@@ -2369,7 +2369,13 @@ public class StashSorter extends AbstractFieldModule {
         }
         for (Box box : stash.boxes) {
             if (!box.known() || box.unreachable || box.excluded) continue;
-            if (!(box.dropOff || box.labels.isEmpty() || isMisc(box))) continue;
+            if (!(box.dropOff || box.labels.isEmpty() || isMisc(box))) {
+                // Used items kept apart that are in a container signed for full ones, and have nowhere to go
+                if (CONFIG.splitDurability) {
+                    for (Item item : box.contents) if (item != null && usedApart(labelSubject(item)) && destinationsFor(item).isEmpty()) sources.add(item);
+                }
+                continue;
+            }
             for (Item item : box.contents) if (item != null) sources.add(item);
         }
 
@@ -2384,13 +2390,13 @@ public class StashSorter extends AbstractFieldModule {
             String text;
             boolean same = false;
             if (homeless) {
-                if (!chosen.containsKey(subject.id)) chosen.put(subject.id, chooseLabel(subject, known, current));
-                text = chosen.get(subject.id);
+                if (!chosen.containsKey(subject.kindKey())) chosen.put(subject.kindKey(), chooseLabel(subject, known, current));
+                text = chosen.get(subject.kindKey());
             }
             else {
                 // A container for it exists, but every one is full: another chest with the same sign
                 if (dests.stream().anyMatch(b -> b.free() > 0 || misplacedCount(b) > 0)) continue;
-                text = signTextOf(dests);
+                text = signTextOf(dests, usedApart(subject));
                 same = true;
             }
             if (text == null) continue;
@@ -2504,7 +2510,7 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     /**
-     * Every kind of stack in the stash and being carried, one of each.
+     * Every kind of stack in the stash and being carried, one of each (used and full count as two with split durability).
      */
     private Map<String, Item> knownItems() {
         Map<String, Item> known = new HashMap<>();
@@ -2512,14 +2518,14 @@ public class StashSorter extends AbstractFieldModule {
             if (!box.known()) continue;
             for (Item item : box.contents) {
                 if (item == null) continue;
-                known.putIfAbsent(item.id, item);
+                known.putIfAbsent(item.kindKey(), item);
                 Item inside = item.isShulker() ? Categories.dominantContent(item) : null;
-                if (inside != null) known.putIfAbsent(inside.id, inside);
+                if (inside != null) known.putIfAbsent(inside.kindKey(), inside);
             }
         }
         for (int slot : carriedSlots()) {
             Item item = inventoryItem(slot);
-            if (item != null) known.putIfAbsent(item.id, item);
+            if (item != null) known.putIfAbsent(item.kindKey(), item);
         }
         return known;
     }
@@ -2532,7 +2538,7 @@ public class StashSorter extends AbstractFieldModule {
         int best = 0;
         for (Box box : stash.boxes) {
             if (!box.sortable() || box.dropOff) continue;
-            for (String label : box.labels) best = Math.max(best, Categories.signScore(label, described));
+            best = Math.max(best, Categories.boxScore(scoredLabels(box), described));
         }
         return best;
     }
@@ -2546,24 +2552,25 @@ public class StashSorter extends AbstractFieldModule {
     private @Nullable String chooseLabel(Item item, Map<String, Item> known, Map<String, Integer> current) {
         Categories.Described described = Categories.describe(item);
         String name = Item.prettyName(item.id);
+        // Used items kept apart get a container of their own, by name: "Used Diamond Sword"
+        List<String> candidates = usedApart(item) ? List.of(USED + name) : Categories.labelCandidates(item);
 
-        for (String text : Categories.labelCandidates(item)) {
-            if (text.length() > SIGN_LINE_LENGTH) continue;
-            boolean byName = text.equals(name);
-            List<String> labels = Containers.labelsOf(List.of(text, signDate()));
+        for (String text : candidates) {
+            String[] lines = signLines(text);
+            if (lines == null) continue;
+            boolean byName = text.equals(name) || text.equals(USED + name);
+            // A used items sign is read as a whole (see scoredLabels)
+            List<String> labels = usedApart(item) ? List.of(text) : Containers.labelsOf(List.of(lines));
 
-            int got = 0;
-            for (String label : labels) got = Math.max(got, Categories.signScore(label, described));
+            int got = Categories.boxScore(labels, described);
             if (got < (byName ? 100 : 40)) continue;
 
             boolean steals = false;
             for (Item other : known.values()) {
-                int home = current.getOrDefault(other.id, 0);
+                int home = current.getOrDefault(other.kindKey(), 0);
                 // Only a real home is protected: a weak match or the catch-all would just as well be somewhere else
-                if (home < 40 || other.id.equals(item.id)) continue;
-                Categories.Described d = Categories.describe(other);
-                int now = 0;
-                for (String label : labels) now = Math.max(now, Categories.signScore(label, d));
+                if (home < 40 || other.kindKey().equals(item.kindKey())) continue;
+                int now = Categories.boxScore(labels, Categories.describe(other));
                 if (now > home) {
                     steals = true;
                     break;
@@ -2576,14 +2583,78 @@ public class StashSorter extends AbstractFieldModule {
 
     /**
      * The words the signs of these full containers have in common to copy: a line that is a word we know, not a date.
+     * For used items kept apart, that line with "Used" in front unless it says used already, and never "Used" alone.
      */
-    private @Nullable String signTextOf(List<Box> boxes) {
+    private @Nullable String signTextOf(List<Box> boxes, boolean used) {
         for (Box box : boxes) {
-            for (String label : box.labels) {
-                if (label.length() <= SIGN_LINE_LENGTH && !label.matches(".*\\d+[-/.]\\d+[-/.]\\d+.*") && Categories.recognises(label)) return label;
+            if (used && box.autoLabel != null && Categories.marksUsed(box.autoLabel) && labelBody(box.autoLabel) != null) return box.autoLabel;
+            // A used sign written by hand over several lines: the lines together ("Used Netherite Chestplate"), not one of them
+            List<String> labels = used ? box.labels.stream().sorted(Comparator.comparingInt(String::length).reversed()).toList() : box.labels;
+            for (String label : labels) {
+                if (label.matches(".*\\d+[-/.]\\d+[-/.]\\d+.*") || !Categories.recognises(label)) continue;
+                if (!used) {
+                    if (label.length() <= SIGN_LINE_LENGTH) return label;
+                    continue;
+                }
+                if (Categories.isUsedOnly(label)) continue;
+                String text = Categories.marksUsed(label) ? label : USED + label;
+                if (labelBody(text) != null) return text;
             }
         }
         return null;
+    }
+
+    private static final String USED = "Used ";
+
+    /**
+     * Split durability is on and this is a used item: it goes in a container of its own, apart from full ones.
+     */
+    private static boolean usedApart(Item item) {
+        return CONFIG.splitDurability && item.damaged;
+    }
+
+    /**
+     * The four lines of a new sign saying this, with the date: on the first line, or for used items too long for one,
+     * "Used" on a line of its own and the name over the next ones. Null if it doesn't fit.
+     */
+    private static String @Nullable [] signLines(String text) {
+        List<String> body = labelBody(text);
+        if (body == null) return null;
+        String[] lines = {"", "", "", ""};
+        for (int i = 0; i < body.size(); i++) lines[i] = body.get(i);
+        if (body.size() < 4) lines[body.size()] = signDate();
+        return lines;
+    }
+
+    /**
+     * The lines a label is written over, without the date, or null if it doesn't fit on a sign.
+     */
+    private static @Nullable List<String> labelBody(String text) {
+        if (text.length() <= SIGN_LINE_LENGTH) return List.of(text);
+        if (!text.startsWith(USED)) return null;
+        List<String> lines = new ArrayList<>();
+        lines.add(USED.trim());
+        StringBuilder line = new StringBuilder();
+        for (String word : text.substring(USED.length()).split(" ")) {
+            if (word.length() > SIGN_LINE_LENGTH) return null;
+            if (!line.isEmpty() && line.length() + 1 + word.length() > SIGN_LINE_LENGTH) {
+                lines.add(line.toString());
+                line.setLength(0);
+            }
+            if (!line.isEmpty()) line.append(' ');
+            line.append(word);
+        }
+        if (!line.isEmpty()) lines.add(line.toString());
+        return lines.size() <= 4 ? lines : null;
+    }
+
+    /**
+     * What a container's sign is scored by: its lines, or for a used items sign the bot wrote, the label as a whole. Its
+     * name can be over several lines ("Netherite" / "Chestplate"), and each alone would take more than it should.
+     */
+    private static List<String> scoredLabels(Box box) {
+        if (CONFIG.splitDurability && box.autoLabel != null && Categories.marksUsed(box.autoLabel)) return List.of(box.autoLabel);
+        return box.labels;
     }
 
     private static String signDate() {
@@ -2607,7 +2678,8 @@ public class StashSorter extends AbstractFieldModule {
 
         labelText = plan.text();
         step("labelling: putting up \"" + plan.text() + "\" on the chest at " + xyz(plan.box().pos) + "; next: sort " + labelItemName + " into it.");
-        labelLines = new String[] {plan.text(), signDate(), "", ""};
+        labelLines = signLines(plan.text());
+        if (labelLines == null) labelLines = new String[] {plan.text(), signDate(), "", ""};
         labelFace = plan.face();
         labelStep = LabelStep.Walk;
         labelResume = null;
@@ -2909,7 +2981,7 @@ public class StashSorter extends AbstractFieldModule {
      */
     private void labelVerify() {
         Containers.Signs read = Containers.readSignsIfLoaded(target);
-        if (read != null && read.labels().contains(labelText)) {
+        if (read != null && saysLabel(read.labels(), labelText)) {
             Box box = target;
             box.labels.clear();
             box.labels.addAll(read.labels());
@@ -2932,6 +3004,16 @@ public class StashSorter extends AbstractFieldModule {
             if (!labelReopened) reopenSign();
             else labelFailed("The sign at " + labelFace.sign() + " never showed what was written on it.");
         }
+    }
+
+    /**
+     * Whether a sign's lines say this label: as a line of its own, or every line it was written over (see signLines).
+     */
+    private static boolean saysLabel(List<String> labels, @Nullable String text) {
+        if (text == null) return false;
+        if (labels.contains(text)) return true;
+        List<String> body = labelBody(text);
+        return body != null && body.size() > 1 && labels.containsAll(body);
     }
 
     /**
@@ -3190,7 +3272,7 @@ public class StashSorter extends AbstractFieldModule {
         box.labels.addAll(now);
 
         // A player's text on a sign the sorter wrote is theirs from then on
-        if (box.autoLabel != null && !now.contains(box.autoLabel)) {
+        if (box.autoLabel != null && !saysLabel(now, box.autoLabel)) {
             box.autoLabel = null;
             box.autoSignPos = null;
         }
@@ -4333,7 +4415,7 @@ public class StashSorter extends AbstractFieldModule {
                 if (item.contents.isEmpty() ? plan.placedSize == 0 && !plan.topUp : isPlanShulker(item, plan)) return true;
             }
             else if (cleaning) {
-                if (record.cleanMainId != null && item.contents.stream().anyMatch(c -> c.id.equals(record.cleanMainId))) return true;
+                if (record.cleanMainId != null && item.contents.stream().anyMatch(c -> c.kindKey().equals(record.cleanMainId))) return true;
             }
             else if (record.fillKey != null && !item.contents.isEmpty() && item.contents.stream().allMatch(c -> record.fillKey.equals(c.bulkKey()))) return true;
         }
@@ -4384,7 +4466,7 @@ public class StashSorter extends AbstractFieldModule {
                 Item here = Item.of(c.getItemStack(i));
                 if (here == null) continue;
                 any = true;
-                if (here.id.equals(mainId)) main = true;
+                if (here.kindKey().equals(mainId)) main = true;
             }
             if (any && !main) return "none of it is " + mainId;
         }
@@ -5114,7 +5196,7 @@ public class StashSorter extends AbstractFieldModule {
             for (int slot : carriedSlots()) {
                 Item shulker = inventoryItem(slot);
                 if (strays(shulker).isEmpty()) continue;
-                mainId = Categories.dominantContent(shulker).id;
+                mainId = Categories.dominantContent(shulker).kindKey();
                 step("repacking: cleaning a mixed shulker beside " + xyz(playerFeet()) + "; next: break and pick it up, then put away " + strays(shulker).size() + " stacks.");
                 return startHandling(Job.Clean, slot, null);
             }
@@ -5197,7 +5279,7 @@ public class StashSorter extends AbstractFieldModule {
 
         List<Item> out = new ArrayList<>();
         for (Item inside : shulker.contents) {
-            if (inside.isFilledBundle() || (!inside.id.equals(main.id) && !bestSigned(inside).isEmpty())) out.add(inside);
+            if (inside.isFilledBundle() || (!inside.kindKey().equals(main.kindKey()) && !bestSigned(inside).isEmpty())) out.add(inside);
         }
         return out;
     }
@@ -5641,7 +5723,7 @@ public class StashSorter extends AbstractFieldModule {
 
         for (int i = 0; i < 27; i++) {
             Item item = Item.of(c.getItemStack(i));
-            if (item == null || item.id.equals(mainId) || (!item.isFilledBundle() && bestSigned(item).isEmpty())) continue;
+            if (item == null || item.kindKey().equals(mainId) || (!item.isFilledBundle() && bestSigned(item).isEmpty())) continue;
             if (item.isBundle()) {
                 noteBundleTaken();
                 shiftClick(c, i);
@@ -5868,7 +5950,7 @@ public class StashSorter extends AbstractFieldModule {
             return true;
         }
         if (job == Job.Clean && mainId != null) {
-            for (Item inside : item.contents) if (!mainId.equals(inside.id)) return false;
+            for (Item inside : item.contents) if (!mainId.equals(inside.kindKey())) return false;
             return true;
         }
         return false;
@@ -7312,8 +7394,7 @@ public class StashSorter extends AbstractFieldModule {
         for (Box box : stash.boxes) {
             if (!box.sortable() || box.dropOff) continue;
 
-            int score = 0;
-            for (String label : box.labels) score = Math.max(score, Categories.signScore(label, described));
+            int score = Categories.boxScore(scoredLabels(box), described);
 
             if (score > best) {
                 best = score;
