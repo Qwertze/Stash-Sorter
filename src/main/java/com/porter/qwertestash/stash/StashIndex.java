@@ -59,6 +59,7 @@ public final class StashIndex {
     private static Snapshot snapshot(Stash stash) {
         List<BoxSnap> boxes = new ArrayList<>();
         for (Box box : stash.boxes) {
+            if (box.delivery) continue;
             List<String> labels;
             try {
                 labels = List.copyOf(new ArrayList<>(box.labels));

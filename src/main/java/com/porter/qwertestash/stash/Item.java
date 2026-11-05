@@ -49,6 +49,15 @@ public final class Item {
     public @Nullable String typeData;
     /** What's inside, for shulkers. Empty for everything else, and for empty shulkers. */
     public List<Item> contents = new ArrayList<>();
+    /**
+     * The Stash Manager key: "minecraft:" and the id, then # and 8 hex digits when the stack has a component patch (see
+     * ItemKeys). Null in stashes saved before it existed; they get one when their container is read again.
+     */
+    public @Nullable String key;
+    /** The same over the whole component patch, contents included. Null in older saves. */
+    public @Nullable String variant;
+    /** For an item inside a shulker: its slot there (the list drops empty slots). -1 anywhere else and in older saves. */
+    public int slot = -1;
 
     /** The stack this was read from, while it's still in front of us. Not saved. */
     public transient @Nullable ItemStack raw;
@@ -68,6 +77,9 @@ public final class Item {
         Item item = new Item();
         item.raw = stack;
         item.id = data.name();
+        var keys = com.porter.qwertestash.manager.ItemKeys.of(data.name(), stack.getDataComponentsOrEmpty(), data.name().endsWith("shulker_box"));
+        item.key = keys.key();
+        item.variant = keys.variant();
         item.count = stack.getAmount();
 
         var components = stack.getDataComponentsOrEmpty();
@@ -105,10 +117,13 @@ public final class Item {
 
         List<ItemStack> inside = components.get(DataComponentTypes.CONTAINER);
         if (inside != null) {
+            int at = 0;
             for (ItemStack s : inside) {
                 Item i = of(s);
+                int slotHere = at++;
                 if (i != null) {
                     i.raw = null;
+                    i.slot = slotHere;
                     item.contents.add(i);
                 }
             }
@@ -240,6 +255,19 @@ public final class Item {
         if (!id.equals(other.id)) return false;
         if (raw != null && other.raw != null) return Objects.equals(raw.getDataComponents(), other.raw.getDataComponents());
         return Objects.equals(customText, other.customText) && enchants.equals(other.enchants) && Objects.equals(potion, other.potion) && contents.size() == other.contents.size();
+    }
+
+    /**
+     * The key the Stash Manager lists this item under. A stack saved before keys existed has none: it gets the bare id
+     * when nothing sets it apart, else a "legacy" key from what was saved, until its container is read again.
+     */
+    public String indexKey() {
+        if (key != null) return key;
+        String base = "minecraft:" + id;
+        boolean plain = !customName && customText == null && (enchantLevels == null || enchantLevels.isEmpty()) && potion == null && typeData == null && !damaged;
+        if (plain) return base;
+        String text = customText + "|" + enchantLevels + "|" + potion + "|" + typeData + "|" + damaged;
+        return base + "#legacy" + Integer.toHexString(text.hashCode());
     }
 
     /**

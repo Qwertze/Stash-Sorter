@@ -39,6 +39,10 @@ public class Stash {
         public boolean dropOff;
         /** Never a source of stacks or shulkers for compacting. */
         public boolean noCompact;
+        /** The delivery container for stash orders: never sorted into, never a source, not in the index. Kept in step with the config. */
+        public boolean delivery;
+        /** When the contents were last read (ms since 1970), 0 if never or not known. A fresh read is not repeated on a restart. */
+        public long readAt;
         /** Saved contents that have not been read again since the bot came online. */
         public transient boolean stale;
         /** The text the sorter itself wrote on this container's sign, and where; null for a sign a player put up. */
@@ -141,6 +145,9 @@ public class Stash {
         public @Nullable CompactState compact;
     }
 
+    /** The stash order being worked on: its plan and progress, so a restart carries on the same plan. Null when none. */
+    public com.porter.qwertestash.orders.OrderFlow.@Nullable Saved activeOrder;
+
     /** The carry slots holding things the sorter took from the stash: slot index to item id. */
     public Map<Integer, String> held = new HashMap<>();
     public @Nullable InFlight inFlight;
@@ -239,7 +246,7 @@ public class Stash {
     public int dropOutsideArea() {
         if (!hasArea()) return 0;
         int before = boxes.size();
-        if (boxes.removeIf(box -> !boxInArea(box))) markDirty();
+        if (boxes.removeIf(box -> !boxInArea(box) && !box.delivery)) markDirty();
         return before - boxes.size();
     }
     public String name;
@@ -309,7 +316,8 @@ public class Stash {
         if (Categories.normalize(query).isEmpty()) return results;
 
         for (Box box : boxes) {
-            if (!box.known()) continue;
+            // The delivery container is where orders are put, not part of the stash: never listed (with its position)
+            if (!box.known() || box.delivery) continue;
 
             for (Item item : box.contents) {
                 if (item == null) continue;
@@ -461,7 +469,31 @@ public class Stash {
             return stash;
         } catch (IOException | RuntimeException e) {
             QwerteStashPlugin.LOG.error("Couldn't load stash {}", name, e);
+            backUpBroken(path);
             return null;
+        }
+    }
+
+    /**
+     * A stash file that could not be read is copied beside itself before anything can save a new, empty stash over it
+     * (a failed load starts a new stash, which is written over the file the next time it is saved). The newest three
+     * copies are kept.
+     */
+    private static void backUpBroken(Path path) {
+        try {
+            String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+            Path copy = path.resolveSibling(path.getFileName() + ".bak-" + stamp);
+            Files.copy(path, copy, StandardCopyOption.REPLACE_EXISTING);
+            QwerteStashPlugin.LOG.error("Qwerte Stash: {} could not be read, a copy was saved as {}. A new empty stash replaces it the next time it is saved; restore the copy to get the old one back.", path.getFileName(), copy.getFileName());
+
+            List<Path> copies = new ArrayList<>();
+            try (var files = Files.list(path.getParent())) {
+                files.filter(p -> p.getFileName().toString().startsWith(path.getFileName() + ".bak-")).forEach(copies::add);
+            }
+            copies.sort(Comparator.comparing((Path p) -> p.getFileName().toString()).reversed());
+            for (int i = 3; i < copies.size(); i++) Files.deleteIfExists(copies.get(i));
+        } catch (IOException | RuntimeException e) {
+            QwerteStashPlugin.LOG.error("Qwerte Stash: couldn't back up the unreadable stash file {}", path.getFileName(), e);
         }
     }
 }

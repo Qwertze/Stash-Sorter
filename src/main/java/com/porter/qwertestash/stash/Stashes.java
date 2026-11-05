@@ -96,6 +96,7 @@ public final class Stashes {
      */
     public static void read(Stash stash, Box box, Container c) {
         box.stale = false;
+        box.readAt = System.currentTimeMillis();
         if (changed(box, c)) {
             stash.markDirty();
             version++;

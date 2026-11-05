@@ -155,4 +155,43 @@ public class StashConfig {
     public List<String> whitelist = new ArrayList<>();
     /** Whispers starting with this are searches. Blank treats every whitelisted whisper as a search. */
     public String prefix = "find";
+
+    /**
+     * Stash Manager: pushes an index of the saved stash to the Stash Manager web server on the local network, keeps a
+     * heartbeat going and re-reads the containers when the website asks for a rescan. Works with sorting off.
+     */
+    public boolean manager = false;
+    public String managerUrl = "http://127.0.0.1:8765";
+    /** The server's API key. Never shown in command output or logs. */
+    public String managerKey = "";
+    /** Also list containers excluded from sorting. */
+    public boolean managerIncludeExcluded = false;
+    /** Seconds between checks of the stash for changes. Only changes are sent. */
+    public int managerScanInterval = 10;
+    /**
+     * With the manager on, also keep a link to the Stash Manager website's dashboard: it shows these settings and the
+     * console there and applies changes made on the website. Every connection is opened by this plugin.
+     */
+    public boolean dashboard = true;
+    /**
+     * The website may run console commands here. Off unless turned on in the proxy terminal: it can not be changed from the
+     * dashboard, Discord or in game, nor through a multi command from there.
+     */
+    public boolean dashboardConsole = false;
+    /** The website may change the proxy settings and other plugins settings. Same rule as dashboardConsole. */
+    public boolean dashboardProxy = false;
+    /** Identifies this bot to the Stash Manager server. Generated the first time the dashboard link starts. */
+    public String managerBotId = "";
+
+    // Stash orders (the website's order page). New in 1.6.0; every key has a default so older settings files load as before.
+
+    /** Take orders from the Stash Manager website: build shulkers from the stash and deliver them to the delivery container. */
+    public boolean acceptOrders = false;
+    /** The delivery container: where finished shulkers are put. Set with `stash delivery`. deliveryDimension is blank when none is set. */
+    public String deliveryDimension = "";
+    public int deliveryX, deliveryY, deliveryZ;
+    /** Orders may take from shulkers with a custom name, and use empty named ones as bases. Off: named shulkers are left alone. */
+    public boolean useNamedShulkers = true;
+    /** A container read within this many minutes is not read again when the sorter or an order starts, unless something marked it changed. 0: always read again. */
+    public int freshMinutes = 5;
 }

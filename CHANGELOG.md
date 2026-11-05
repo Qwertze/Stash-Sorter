@@ -5,6 +5,44 @@ All notable changes to Stash Sorter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.0-dev.1] - 2026-11-05
+
+A big test build: the Stash Manager website and stash orders, matching Qwerte 0.4.0-dev.1. Not fully tested in game yet.
+
+### Added
+- **Stash Manager link** (`stash manager on/off`, off; `stash manager url <url>`, `stash manager key <key>`,
+  `stash manager status`): sends an index of the saved stash to the Stash Manager server on your network, keeps a
+  heartbeat going and reads every container again when the website asks for a rescan. Works with sorting off. Only
+  changes are sent, checked every `stash manager scanInterval <seconds>` (10); `stash manager includeExcluded on/off`
+  lists excluded containers too. The key is never shown in command output or logs.
+- **Dashboard** (`stash manager dashboard on/off`, on): the website shows this plugin's settings and applies changes made
+  there, and has an Activity view of what the bot is doing. The website may run console commands only after
+  `stash manager dashboard console on`, and change proxy and other plugins' settings only after
+  `stash manager dashboard proxy on`. Both can only be turned on in the proxy terminal. Secrets are never sent to the
+  website.
+- **Orders** (`stash orders on/off`, off; `stash orders` shows why orders can't run, if anything stops them): the bot
+  takes orders placed on the website. It gathers the items from the stash, loose stacks first and then out of
+  shulkers, packs them into empty shulkers (up to 54 per order) and puts them into the delivery container. Leftovers go
+  back where they came from, and so do the shulkers it unpacked. Orders come before sorting, and the two never run at
+  once. An order pauses while a player controls the bot, in the queue or while offline, and is saved with its plan so it
+  carries on after a reconnect or restart. A cancel from the website stops it at the next safe point.
+- **Delivery container** (`stash delivery here`, `stash delivery <x> <y> <z> [dimension]`, `stash delivery clear`,
+  `stash delivery`): where finished orders go. It may be outside the stash area. It is never sorted, compacted or
+  indexed, and never listed by search, whisper search or the index file. Its position is only printed in the terminal
+  and the website console.
+- `useNamedShulkers` (on): orders may take items out of shulkers with a custom name.
+- `freshMinutes` (5): a container read within that many minutes isn't read again when sorting or an order starts,
+  unless something marked it changed. 0 reads everything every time.
+- **Split durability** (signs mode, `splitDurability`): used gear goes to containers signed "used", and compacting never
+  mixes used and full items.
+
+### Changed
+- `stash mark` refuses typed coordinates that are unloaded and more than 128 blocks away, and says when a container is
+  outside the stash area.
+- Activity titles never contain coordinates; positions only appear in the detail line, which the website blurs in
+  streamer mode.
+- Existing settings files load unchanged; every new setting has a default.
+
 ## [1.4.0-dev.2] - 2026-10-16
 
 ### Added

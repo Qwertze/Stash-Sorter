@@ -242,6 +242,19 @@ container is read again as usual. This also happens after `stash off` with a shu
 - It gives up after 10 minutes or three failed walks back, and then reports the shulker like any other it couldn't pick
   up.
 
+## Stash Manager and orders
+The [Stash Manager server](https://github.com/Qwertze/Qwertze/tree/dev/stash-manager-server) is a small website for
+your network that shows the stash, takes orders and can show this plugin's settings and console. New and still being
+tested (1.6.0-dev).
+
+1. Start the server and copy the API key from its console or its Link addon panel.
+2. `stash manager url http://<server>:8765`, `stash manager key <key>`, `stash manager on`.
+3. For orders, with the bot looking at a chest or barrel run `stash delivery here` (or give `x y z`), then `stash orders on`. `stash orders`
+   tells you what is stopping orders, if anything.
+
+The website may run console commands only after `stash manager dashboard console on`, and change proxy settings only
+after `stash manager dashboard proxy on`; both can only be turned on in the proxy terminal.
+
 ## Building
 Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in
 `build/libs/`.

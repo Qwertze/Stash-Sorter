@@ -3,6 +3,7 @@ package com.porter.qwertestash.command;
 import com.aquarius.command.api.Command;
 import com.aquarius.command.api.CommandCategory;
 import com.aquarius.command.api.CommandContext;
+import com.aquarius.command.api.CommandSources;
 import com.aquarius.command.api.CommandUsage;
 import com.aquarius.discord.Embed;
 import com.aquarius.mc.block.BlockPos;
@@ -10,15 +11,18 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.porter.qwertestash.StashConfig.LogLevel;
 import com.porter.qwertestash.StashConfig.Mode;
 import com.porter.qwertestash.module.AutoDrop;
+import com.porter.qwertestash.module.StashManager;
 import com.porter.qwertestash.module.StashSorter;
 import com.porter.qwertestash.module.StashTracker;
 import com.porter.qwertestash.stash.Containers;
+import com.porter.qwertestash.stash.DeliverySpot;
 import com.porter.qwertestash.stash.Stash;
 import com.porter.qwertestash.stash.Stash.Box;
 import com.porter.qwertestash.stash.StashIndex;
 import com.porter.qwertestash.stash.Stashes;
 import org.jspecify.annotations.Nullable;
 
+import java.net.URI;
 import java.util.List;
 
 import static com.aquarius.Globals.CACHE;
@@ -96,7 +100,20 @@ public class StashCommand extends Command {
                 "autoDrop range <blocks>",
                 "whisper on/off",
                 "whitelist add/del <player>",
-                "prefix <word>/clear"
+                "prefix <word>/clear",
+                "manager on/off",
+                "manager url <url>",
+                "manager key <key>",
+                "manager status",
+                "manager includeExcluded on/off",
+                "manager scanInterval <seconds>",
+                "manager dashboard on/off",
+                "orders on/off",
+                "orders",
+                "delivery here",
+                "delivery <x> <y> <z> [dimension]",
+                "delivery clear",
+                "delivery"
             )
             .build();
     }
@@ -108,6 +125,8 @@ public class StashCommand extends Command {
                 boolean on = getToggle(c, "toggle");
                 StashSorter sorter = MODULE.get(StashSorter.class);
                 sorter.clearProblem();
+                // A read the Stash Manager started is ended first, so turning sorting on starts a full run
+                sorter.takeOver(on);
                 CONFIG.sorting = on;
                 sorter.syncEnabledFromConfig();
 
@@ -385,6 +404,88 @@ public class StashCommand extends Command {
                     CONFIG.whitelist.removeIf(p -> p.equalsIgnoreCase(player));
                     c.getSource().getEmbed().title("Removed " + player);
                 }))))
+            .then(literal("manager")
+                .then(literal("status").executes(c -> {
+                    managerStatus(c.getSource().getEmbed());
+                }))
+                .then(literal("url").then(argument("url", greedyString()).executes(c -> {
+                    c.getSource().setSensitiveInput(true);
+                    String url = getString(c, "url").trim();
+                    URI parsed = StashManager.parse(url);
+                    if (parsed == null) {
+                        c.getSource().getEmbed().title("Bad Server Address").description("Use a http or https address without a query, fragment or login, like http://127.0.0.1:8765.").errorColor();
+                        return;
+                    }
+                    CONFIG.managerUrl = parsed.toString();
+                    c.getSource().getEmbed().title("Stash Manager Server Set").description(CONFIG.managerUrl).primaryColor();
+                })))
+                .then(literal("key").then(argument("key", greedyString()).executes(c -> {
+                    c.getSource().setSensitiveInput(true);
+                    // Never echoed: the reply only says it was set, and shows the last four characters
+                    CONFIG.managerKey = getString(c, "key").trim();
+                    c.getSource().getEmbed().title("Stash Manager Key Set").description("Key " + StashManager.maskKey(CONFIG.managerKey) + ".").primaryColor();
+                })))
+                .then(literal("includeExcluded").then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.managerIncludeExcluded = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Stash Manager: Include Excluded " + toggleStrCaps(CONFIG.managerIncludeExcluded));
+                })))
+                .then(literal("dashboard")
+                    .then(literal("console").requires(c -> Command.validateCommandSource(c, CommandSources.TERMINAL)).then(argument("toggle", toggle()).executes(c -> {
+                        CONFIG.dashboardConsole = getToggle(c, "toggle");
+                        MODULE.get(StashManager.class).updateDashboard();
+                        c.getSource().getEmbed().title("Dashboard Console " + toggleStrCaps(CONFIG.dashboardConsole))
+                            .description(CONFIG.dashboardConsole ? "The website can run console commands here (not the dangerous ones: multi, update, jvmArgs, auth and the like)." : "The website can not run console commands here.");
+                    })))
+                    .then(literal("proxy").requires(c -> Command.validateCommandSource(c, CommandSources.TERMINAL)).then(argument("toggle", toggle()).executes(c -> {
+                        CONFIG.dashboardProxy = getToggle(c, "toggle");
+                        MODULE.get(StashManager.class).updateDashboard();
+                        c.getSource().getEmbed().title("Dashboard Proxy Settings " + toggleStrCaps(CONFIG.dashboardProxy))
+                            .description(CONFIG.dashboardProxy ? "The website can change the proxy's and other plugins' settings." : "The website can not change the proxy's or other plugins' settings.");
+                    })))
+                    .then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.dashboard = getToggle(c, "toggle");
+                    MODULE.get(StashManager.class).updateDashboard();
+                    c.getSource().getEmbed().title("Stash Manager Dashboard " + toggleStrCaps(CONFIG.dashboard))
+                        .description(CONFIG.dashboard ? "The website can show and change these settings and run commands here, while the manager is on." : "The website no longer reaches this proxy.");
+                    })))
+                .then(literal("scanInterval").then(argument("seconds", integer(2, 600)).executes(c -> {
+                    CONFIG.managerScanInterval = getInteger(c, "seconds");
+                    c.getSource().getEmbed().title("Stash Manager Scan Interval Set").description(CONFIG.managerScanInterval + " seconds.");
+                })))
+                .then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.manager = getToggle(c, "toggle");
+                    MODULE.get(StashManager.class).syncEnabledFromConfig();
+                    c.getSource().getEmbed().title("Stash Manager " + toggleStrCaps(CONFIG.manager));
+                    if (CONFIG.manager && StashManager.parse(CONFIG.managerUrl) != null && (CONFIG.managerKey == null || CONFIG.managerKey.isBlank())) {
+                        c.getSource().getEmbed().description("No API key yet: set it with `stash manager key <key>` (the server prints it on its console).");
+                    }
+                })))
+            .then(literal("orders")
+                .executes(c -> {
+                    ordersStatus(c.getSource().getEmbed());
+                })
+                .then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.acceptOrders = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Accepting Orders " + toggleStrCaps(CONFIG.acceptOrders))
+                        .description(CONFIG.acceptOrders ? ordersHint() : "The bot takes no new orders; one in hand is parked and resumed when this is turned on again.").primaryColor();
+                })))
+            .then(literal("delivery")
+                .executes(c -> {
+                    deliveryShow(c.getSource());
+                })
+                .then(literal("here").executes(c -> {
+                    deliveryHere(c.getSource());
+                }))
+                .then(literal("clear").executes(c -> {
+                    deliveryClear(c.getSource());
+                }))
+                .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer())
+                    .executes(c -> {
+                        deliverySet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), null);
+                    })
+                    .then(argument("dimension", word()).executes(c -> {
+                        deliverySet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), getString(c, "dimension"));
+                    }))))))
             .then(literal("prefix")
                 .then(literal("clear").executes(c -> {
                     CONFIG.prefix = "";
@@ -593,6 +694,138 @@ public class StashCommand extends Command {
         embed.title("Search: " + query).description(out.toString().stripTrailing()).primaryColor();
     }
 
+
+    // Stash orders
+
+    /**
+     * Whether this command's output may carry the delivery container's position. It is only shown where the command was
+     * typed: the proxy terminal, or the dashboard console. Discord and API output never has it, so nothing that gets
+     * mirrored elsewhere (logEmbed to a channel) leaks it.
+     */
+    private static boolean showCoordinates(CommandContext ctx) {
+        com.aquarius.command.api.CommandSource source = ctx.getSource();
+        return source == CommandSources.TERMINAL || source instanceof com.porter.qwertestash.manager.DashboardCommandSource;
+    }
+
+    private static String ordersHint() {
+        StringBuilder out = new StringBuilder("The bot takes orders from the website");
+        if (!CONFIG.manager) out.append(" once the Stash Manager is on (`stash manager on`)");
+        if (!DeliverySpot.isSet()) out.append("; set the delivery container first (`stash delivery here`)");
+        return out.append('.').toString();
+    }
+
+    private static void ordersStatus(Embed embed) {
+        StashManager.OrdersStatus status = MODULE.get(StashManager.class).ordersStatus();
+        embed.title("Stash Orders").primaryColor()
+            .addField("Accepting Orders", toggleStr(CONFIG.acceptOrders))
+            .addField("Current Order", status.current() == null ? "none" : status.current())
+            .addField("Waiting On The Website", status.pending() < 0 ? "unknown (no heartbeat yet)" : String.valueOf(status.pending()))
+            .addField("Blocker", status.blocker() == null ? "none, ready for an order" : status.blocker())
+            .addField("Delivery Container", DeliverySpot.isSet() ? "set (`stash delivery` shows it)" : "not set");
+    }
+
+    private static void deliveryShow(CommandContext ctx) {
+        DeliverySpot.Spot spot = DeliverySpot.get();
+        Embed embed = ctx.getEmbed();
+        if (spot == null) {
+            embed.title("No Delivery Container").description("Look at a chest or barrel and run `stash delivery here`, or give its position with `stash delivery <x> <y> <z> [dimension]`.").primaryColor();
+            return;
+        }
+        embed.title("Delivery Container").description(DeliverySpot.describe(spot, showCoordinates(ctx))).primaryColor();
+    }
+
+    private static void deliveryClear(CommandContext ctx) {
+        boolean was = DeliverySpot.isSet();
+        DeliverySpot.clear();
+        ctx.getEmbed().title(was ? "Delivery Container Cleared" : "No Delivery Container")
+            .description(was ? "Orders can not be taken until a new one is set." : "None was set.").primaryColor();
+    }
+
+    private static void deliveryHere(CommandContext ctx) {
+        Embed embed = ctx.getEmbed();
+        String dimension = Stash.currentDimension();
+        if (!CACHE.getPlayerCache().isAlive() || dimension == null) {
+            embed.title("Not In Game").description("The bot has to be in the game, looking at the container.").errorColor();
+            return;
+        }
+        var hit = com.aquarius.feature.player.raycast.RaycastHelper.playerBlockRaycast(DeliverySpot.LOOK_REACH, false);
+        if (hit == null || !hit.hit()) {
+            embed.title("No Container In Reach").description("The bot is not looking at a block within " + (int) DeliverySpot.LOOK_REACH + " blocks. Aim at a chest or barrel first.").errorColor();
+            return;
+        }
+        BlockPos pos = new BlockPos(hit.x(), hit.y(), hit.z());
+        if (!Containers.isContainer(pos, true)) {
+            embed.title("Not A Container").description("The block the bot is looking at is not a chest or barrel.").errorColor();
+            return;
+        }
+        BlockPos at = Containers.makeBox(pos).pos;
+        DeliverySpot.set(dimension, at.x(), at.y(), at.z());
+        embed.title("Delivery Container Set").description(DeliverySpot.describe(DeliverySpot.get(), showCoordinates(ctx)) + ". Finished order shulkers are put in here." + (CONFIG.acceptOrders ? "" : " Turn orders on with `stash orders on`.")).primaryColor();
+    }
+
+    private static void deliverySet(CommandContext ctx, int x, int y, int z, @Nullable String dimensionArg) {
+        Embed embed = ctx.getEmbed();
+        String here = Stash.currentDimension();
+        String dimension = dimensionArg == null ? here : dimensionArg.trim().toLowerCase(java.util.Locale.ROOT);
+        if (dimension == null || dimension.isBlank()) {
+            embed.title("Which Dimension?").description("The bot's dimension is not known right now: add it, like `stash delivery <x> <y> <z> overworld`.").errorColor();
+            return;
+        }
+        if (!dimension.matches("[a-z0-9_.:/-]{1,64}")) {
+            embed.title("Bad Dimension").description("Use a name like overworld, the_nether or the_end.").errorColor();
+            return;
+        }
+        if (Math.abs(x) > 30_000_000 || Math.abs(z) > 30_000_000 || y < -2048 || y > 2048) {
+            embed.title("Bad Position").description("That position is outside the world.").errorColor();
+            return;
+        }
+
+        BlockPos pos = new BlockPos(x, y, z);
+        String note = "";
+        boolean inThisDimension = here != null && com.porter.qwertestash.orders.OrderBlocker.sameDimension(here, dimension);
+        if (!inThisDimension) {
+            note = " The bot is not in that dimension, so I could not check that it is a container.";
+        }
+        else if (!Containers.isLoaded(pos)) {
+            note = " Warning: that position is not loaded (out of range), so I could not check that it is a container.";
+        }
+        else if (!Containers.isContainer(pos, true)) {
+            embed.title("Not A Container").description("There is no chest or barrel at that position. Check the coordinates (with negative ones, round down: -5.3 is block -6).").errorColor();
+            return;
+        }
+        else pos = Containers.makeBox(pos).pos;
+
+        DeliverySpot.set(dimension, pos.x(), pos.y(), pos.z());
+        embed.title("Delivery Container Set").description(DeliverySpot.describe(DeliverySpot.get(), showCoordinates(ctx)) + "." + note).primaryColor();
+    }
+
+    /** The Stash Manager in one line each: never the key itself. */
+    private static String managerLine() {
+        StashManager manager = MODULE.get(StashManager.class);
+        return toggleStr(CONFIG.manager) + " - " + (CONFIG.manager ? manager.status() : "off") + ", " + CONFIG.managerUrl + ", key " + StashManager.maskKey(CONFIG.managerKey)
+            + ", stash name \"" + CONFIG.stashName + "\" (each bot needs its own)";
+    }
+
+    private static void managerStatus(Embed embed) {
+        StashManager manager = MODULE.get(StashManager.class);
+        long at = manager.lastPushedAt();
+        String last = at == 0 ? "never" : ((System.currentTimeMillis() - at) / 1000) + "s ago";
+        String error = manager.lastError();
+        String player = manager.player();
+        embed.title("Stash Manager").primaryColor()
+            .addField("State", toggleStr(CONFIG.manager) + " - " + (CONFIG.manager ? manager.status() : "off"))
+            .addField("Server", CONFIG.managerUrl)
+            .addField("Key", StashManager.maskKey(CONFIG.managerKey))
+            .addField("Stash Name / Player", "\"" + CONFIG.stashName + "\" / " + (player.isEmpty() ? "unknown" : player)
+                + " (each bot on the website needs its own stash name; set it with `stash name <name>`)")
+            .addField("Last Index Push", last)
+            .addField("Item Types", manager.itemTypes() < 0 ? "none yet" : String.valueOf(manager.itemTypes()))
+            .addField("Last Error", error == null ? "none" : error)
+            .addField("Include Excluded", toggleStr(CONFIG.managerIncludeExcluded))
+            .addField("Scan Interval", CONFIG.managerScanInterval + " seconds")
+            .addField("Dashboard", toggleStr(CONFIG.dashboard) + " - " + manager.dashboardStatus() + "; console commands " + toggleStr(CONFIG.dashboardConsole) + ", proxy settings " + toggleStr(CONFIG.dashboardProxy) + " (both only change in the proxy terminal: `stash manager dashboard console|proxy on|off`)");
+    }
+
     private static String orphanLine() {
         Stash stash = Stashes.current();
         if (stash == null || stash.orphans.isEmpty()) return "none";
@@ -649,6 +882,7 @@ public class StashCommand extends Command {
             .addField("Orphaned Shulkers", orphanLine())
             .addField("Watch Signs", toggleStr(CONFIG.watchSigns) + " (changes used after " + CONFIG.signSettleSeconds + "s, a sign gone or blank for 60s; needs tracking on)")
             .addField("Auto Drop", toggleStr(CONFIG.autoDrop) + " (gives back what a player dropped near the bot, within " + (int) CONFIG.autoDropRange + " blocks)")
+            .addField("Stash Manager", managerLine())
             .addField("Tracking", toggleStr(CONFIG.tracking))
             .addField("Whisper Search", toggleStr(CONFIG.whisperSearch) + ", prefix \"" + CONFIG.prefix + "\", whitelist " + (CONFIG.whitelist.isEmpty() ? "empty" : String.join(", ", CONFIG.whitelist)));
     }

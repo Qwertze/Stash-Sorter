@@ -46,6 +46,12 @@ dependencies {
     compileOnly(aquariusJar)
     annotationProcessor(aquariusJar)
 
+    // Unit tests run against the same jar (gson, the item types) plus JUnit
+    testImplementation(aquariusJar)
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
     // To bundle a runtime dependency *into* your plugin jar, declare it here and relocate
     // it in the shadowJar block below, e.g.:
     // implementation("com.github.ben-manes.caffeine:caffeine:3.2.0")
@@ -85,6 +91,19 @@ val generateTemplates = tasks.register<Copy>("generateTemplates") {
 
 sourceSets.named("main") {
     java.srcDir(generateTemplates.map { it.destinationDir })
+}
+
+tasks.test {
+    useJUnitPlatform()
+    // The integration test against a real Stash Manager server runs only when given a jar: -PstashManagerJar=<path>
+    providers.gradleProperty("stashManagerJar").orNull?.let { systemProperty("stashManagerJar", it) }
+    providers.gradleProperty("stashManagerPort").orNull?.let { systemProperty("stashManagerPort", it) }
+    providers.gradleProperty("stashManagerData").orNull?.let { systemProperty("stashManagerData", it) }
+    testLogging {
+        events("failed", "skipped")
+        showStandardStreams = false
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
 
 tasks.withType<JavaCompile>().configureEach {

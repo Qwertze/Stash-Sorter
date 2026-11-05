@@ -83,6 +83,7 @@ final class Alerts {
      * Queues the alert for every whitelisted player, unless one like it was sent lately or the bot is not online.
      */
     static synchronized void raise(ModuleUtils sender, String text) {
+        com.porter.qwertestash.manager.ActivityFeed.INSTANCE.event(sender.getClass().getSimpleName().equals("StashSorter") ? "Stash Sorter" : sender.getClass().getSimpleName(), "warn", text);
         if (CONFIG.whitelist.isEmpty() || !online()) return;
 
         String message = plain(text);
