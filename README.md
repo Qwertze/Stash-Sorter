@@ -97,6 +97,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash tracking on/off` | Keep the stash up to date when containers are opened (on) |
 | `stash whisper on/off` | Whisper search (off) |
 | `stash whitelist add/del <player>` | Who can search by whisper |
+| `stash whitelist` or `stash whitelist list` | Shows the whitelisted players (other status output only gives how many) |
 | `stash prefix <word>` / `clear` | Whispers starting with this are searches (`find`) |
 
 Slots: 1-9 is the hotbar, 10-36 the inventory from the top left.
@@ -251,9 +252,40 @@ tested (1.6.0-dev).
 2. `stash manager url http://<server>:8765`, `stash manager key <key>`, `stash manager on`.
 3. For orders, with the bot looking at a chest or barrel run `stash delivery here` (or give `x y z`), then `stash orders on`. `stash orders`
    tells you what is stopping orders, if anything.
+4. For orders that name their shulkers, with the bot looking at an anvil run `stash anvil here` (or
+   `stash anvil <x> <y> <z> [dimension]`). `stash anvil` shows it and `stash anvil clear` removes it. The bot renames
+   each shulker there before delivering it, for about 1 XP level each. Without an anvil, or without enough levels, the
+   shulkers are delivered unnamed and the order says so. Like the delivery container, the anvil's position is only
+   shown in the proxy terminal and the website console. Since 1.8.1 setting one is optional: without one the bot looks
+   for an anvil standing in the stash area, and failing that puts one down from the stash, and remembers it either way
+   (`stash anvil` says whether it was set, found or placed). With no anvil anywhere the shulkers are delivered unnamed
+   with "no anvils available to rename with".
 
 The website may run console commands only after `stash manager dashboard console on`, and change proxy settings only
 after `stash manager dashboard proxy on`; both can only be turned on in the proxy terminal.
+
+## Crafting shulker boxes
+New in 1.8.0, off by default. When an order needs an empty shulker (to build a shulker in, or for an empty-shulker line)
+or compaction does, and the stash has none, the bot can craft a plain shulker box from what the stash holds: 2 shulker
+shells and a chest, the chest from 8 planks of any kind, the planks from logs. Kits never craft.
+
+1. With the bot looking at a crafting table run `stash craftingtable here` (or `stash craftingtable <x> <y> <z>
+   [dimension]`). `stash craftingtable` shows it, `stash craftingtable clear` removes it. Its position is only shown in
+   the proxy terminal and the website console.
+2. `stash crafting on`. `stash crafting` shows whether it is on, whether a table is set, and how many were crafted this
+   hour.
+
+What it takes: loose stacks and what lies inside shulkers, from the containers an order may take from, never what
+another line of the order needs. Named and enchanted stacks are used like plain ones; damaged items, anything that holds
+something, shulker boxes and the items on `stash craftNeverUse add <item>` never are. It crafts at most `craftMaxPerOrder`
+(27) for one order, `craftMaxPerHour` (54) an hour, and `craftMaxOpsPerTask` (128) grid fills in one go; these and
+`craftNeverUse` can be changed on the website. The bot needs free carry slots for the inputs, the steps between and the
+shulker boxes it makes, and makes room first if it has to. What is left over goes back where it came from. The window is
+never closed with something in its grid; if there is no room to take it back out, the table is left open and you get an
+alert.
+
+When a shulker box can't be crafted, the order says why ("no empty shulker; couldn't craft one: needs a crafting table",
+"... shulker shells can't be crafted", "... not enough planks ...", "... cap reached ...").
 
 ## Building
 Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in

@@ -87,6 +87,14 @@ public final class BinTracker {
 
     /** What to fetch next: the first lot not in the shulker and not carried whole, or null when everything is in hand. */
     public static @Nullable Need nextNeed(List<Order.Lot> lots, List<Held> packed, List<Held> carried) {
+        return nextNeed(lots, packed, carried, java.util.Set.of());
+    }
+
+    /**
+     * What to fetch next, leaving out the lots whose key is in {@code skip} (1.8.0: a load with no source is left out, and
+     * the rest of the bin is still gathered), or null when everything else is in hand.
+     */
+    public static @Nullable Need nextNeed(List<Order.Lot> lots, List<Held> packed, List<Held> carried, java.util.Set<String> skip) {
         List<Order.Lot> open = notPacked(lots, packed);
         List<Held> pool = new ArrayList<>(carried);
         List<Order.Lot> missing = new ArrayList<>();
@@ -102,7 +110,7 @@ public final class BinTracker {
                 }
             }
             if (exact != null) pool.remove(exact);
-            else {
+            else if (!skip.contains(lot.key())) {
                 missing.add(lot);
                 missingAt.add(lotIndex.get(i));
             }
@@ -134,5 +142,15 @@ public final class BinTracker {
     /** A finished shulker: it holds exactly the bin's totals, by item key. */
     public static boolean finished(List<Order.Lot> lots, List<Held> contents) {
         return lotTotals(lots).equals(totals(contents));
+    }
+    /** Lots of a key in {@code skip} that are neither in the shulker nor carried whole: what the bin goes without. */
+    public static int skipped(List<Order.Lot> lots, List<Held> packed, List<Held> carried, java.util.Set<String> skip) {
+        if (skip.isEmpty()) return 0;
+        List<Order.Lot> open = notPacked(lots, packed);
+        List<Order.Lot> left = new ArrayList<>();
+        for (int i : unmatched(open, carried)) left.add(open.get(i));
+        int n = 0;
+        for (Order.Lot lot : left) if (skip.contains(lot.key())) n++;
+        return n;
     }
 }

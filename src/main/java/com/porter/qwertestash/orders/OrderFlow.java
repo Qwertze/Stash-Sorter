@@ -76,9 +76,57 @@ public final class OrderFlow {
         @Nullable String savedId();
 
         void say(String text);
+
+        /**
+         * Why the shulker of this unit can't be named now (no anvil set, the block there is not an anvil, too few XP levels),
+         * or null when the anvil can be tried. A host that can't name shulkers says so.
+         */
+        default @Nullable String namingProblem(Unit unit) {
+            return "this bot can't name shulkers";
+        }
+
+        /** The custom name the shulker in this carry slot has, or null. */
+        default @Nullable String nameOn(Unit unit, int slot) {
+            return null;
+        }
+
+        /**
+         * Why a shulker may not be put down now (shulker handling is paused), or null. Only building a bin puts one down:
+         * this holds Build steps alone, while delivering, naming and fetching shulkers already made go on.
+         */
+        default @Nullable String buildPauseReason() {
+            return null;
+        }
+
+        /**
+         * An order is about to be planned (claimed, or resumed from its saved plan): what the host gave up on for now
+         * (containers stalled, trips that came back empty) is forgotten, so the plan and the run see the same sources.
+         */
+        default void planning() {
+        }
+
+        /** Crafting is on (and this host can craft): units without an empty shulker get a Craft step first. */
+        default boolean craftingOn() {
+            return false;
+        }
+
+        /** An empty shulker for this bin is at hand (carried, or in the stash to be fetched). */
+        default boolean emptyAvailable(Unit unit) {
+            return true;
+        }
+
+        /** Why a shulker box can't be crafted for this unit now (no table, a cap, too few inputs), or null when it can be tried. */
+        default @Nullable String craftProblem(Unit unit) {
+            return "this bot can't craft";
+        }
+
+        /** How many shulker boxes to craft on this trip, for this unit and the ones after it that will need one too (at least 1). */
+        default int craftCount(Unit unit) {
+            return 1;
+        }
     }
 
-    public sealed interface Intent permits Idle, Build, Fetch, Deliver {
+    public sealed interface Intent permits Idle, Build, Fetch, Name, Deliver, Craft {
     }
 
     /** Nothing for the host to do for the order now. */
@@ -93,8 +141,22 @@ public final class OrderFlow {
     public record Fetch(Unit unit) implements Intent {
     }
 
+    /**
+     * Walk to the anvil and give the finished shulker in this carry slot its name, then put it back in the same slot. The host
+     * reports {@link #named} or {@link #nameFailed}; whatever happens, the shulker is delivered next.
+     */
+    public record Name(Unit unit, int slot, String name) implements Intent {
+    }
+
     /** Walk to the delivery container and put the finished shulker in; {@code verify}: only look whether it is there. */
     public record Deliver(Unit unit, int slot, boolean verify) implements Intent {
+    }
+
+    /**
+     * Craft {@code count} plain shulker boxes (this unit has no empty shulker): gather the inputs, make them at the crafting
+     * table, put the rest back. The host reports {@link #craftStarted}, then {@link #crafted} or {@link #craftFailed}.
+     */
+    public record Craft(Unit unit, int count) implements Intent {
     }
 
     public enum State { Running, Delivered, Failed, Cancelled }
@@ -117,6 +179,11 @@ public final class OrderFlow {
         public int deliveringBase;
         public int shulkersDelivered;
         public Map<String, Integer> delivered = new LinkedHashMap<>();
+        /** Shulkers delivered without the name the order wanted, and why (each reason once). */
+        public int unnamed;
+        public List<String> unnamedReasons = new ArrayList<>();
+        /** Shulker boxes crafted for this order so far: they count towards its cap (1.8.0; 0 in older saves). */
+        public int crafted;
 
         public static final class UnitSave {
             /** 0 Shulker, 1 Empty, 2 Bin. */
@@ -125,6 +192,11 @@ public final class OrderFlow {
             public List<String> lotKeys = new ArrayList<>();
             public List<String> lotVariants = new ArrayList<>();
             public List<Integer> lotCounts = new ArrayList<>();
+            /** The name the order wants on it ("" for none), and how naming went (kept for the unit being delivered). */
+            public String name = "";
+            public boolean nameDone;
+            public String nameFailure = "";
+            public String namedKey = "";
         }
     }
 
@@ -133,6 +205,13 @@ public final class OrderFlow {
     public static final int MAX_FULL_TRIES = 2;
     public static final int MAX_STARTS = 8;
     public static final int MAX_BEGINS = 3;
+    /** Times the anvil is tried for one shulker before it is delivered unnamed (a try cut short by the server, say). */
+    public static final int MAX_NAME_TRIES = 2;
+    /** Craft trips for one unit before it is given up. */
+    public static final int MAX_CRAFT_TRIES = 2;
+    public static final String PLAIN_SHULKER = "minecraft:shulker_box";
+    /** What a unit given up for want of an empty shulker says when crafting one did not work either. */
+    public static final String NO_EMPTY_CRAFT = "no empty shulker; couldn't craft one: ";
 
     private final Host host;
     private final LongSupplier clock;
@@ -144,10 +223,13 @@ public final class OrderFlow {
     private int shulkersDelivered;
     private final Map<String, Integer> delivered = new LinkedHashMap<>();
     private final List<String> problems = new ArrayList<>();
+    private int unnamed;
+    private final List<String> unnamedReasons = new ArrayList<>();
+    private int crafted;
     private String message = "";
     private String phase = "starting";
     private boolean cancelRequested, parked, planned, full;
-    private long pausedSince, offeredAt, rereadProgressAt;
+    private long pausedSince, buildPausedSince, offeredAt, rereadProgressAt;
     private int lastStale = Integer.MAX_VALUE;
     private int skips;
 
@@ -178,6 +260,11 @@ public final class OrderFlow {
 
     public @Nullable String orderId() {
         return order == null ? null : order.id;
+    }
+
+    /** The order is to be parked (the bot goes offline, orders were turned off) and has not been yet. */
+    public boolean parkRequested() {
+        return parked && running();
     }
 
     /** The server asked for this order to be stopped and it has not been yet. */
@@ -244,7 +331,21 @@ public final class OrderFlow {
         if (!u.have || !u.confirmed || host.finishedSlot(u) != -1) return;
         for (var e : u.content.entrySet()) delivered.merge(e.getKey(), e.getValue(), Integer::sum);
         shulkersDelivered++;
+        countUnnamed(u);
         advance();
+    }
+
+    /** A delivered shulker that should have had a name and has none counts towards the order's one note about it. */
+    private void countUnnamed(Unit u) {
+        if (u.name == null || u.nameDone) return;
+        unnamed++;
+        String why = u.nameFailure == null ? "naming didn't finish" : u.nameFailure;
+        if (!unnamedReasons.contains(why)) unnamedReasons.add(why);
+    }
+
+    /** The order's note about shulkers delivered without their names, or null. */
+    public @Nullable String unnamedNote() {
+        return ShulkerNames.unnamedNote(unnamed, unnamedReasons);
     }
 
     /** Forgets the order here (leaving the world, parking). The saved state is kept for a resume. */
@@ -256,8 +357,11 @@ public final class OrderFlow {
         shulkersDelivered = 0;
         delivered.clear();
         problems.clear();
+        unnamed = 0;
+        unnamedReasons.clear();
+        crafted = 0;
         cancelRequested = parked = planned = full = false;
-        pausedSince = 0;
+        pausedSince = buildPausedSince = 0;
         state = State.Running;
         message = "";
         phase = "starting";
@@ -280,9 +384,12 @@ public final class OrderFlow {
         shulkersDelivered = 0;
         delivered.clear();
         problems.clear();
+        unnamed = 0;
+        unnamedReasons.clear();
+        crafted = 0;
         message = "";
         cancelRequested = parked = planned = full = false;
-        pausedSince = 0;
+        pausedSince = buildPausedSince = 0;
         offeredAt = clock.getAsLong();
         rereadProgressAt = offeredAt;
         lastStale = Integer.MAX_VALUE;
@@ -302,6 +409,7 @@ public final class OrderFlow {
     private @Nullable String completePlan() {
         Order o = order;
         if (o == null) return "no order";
+        host.planning();
 
         List<Unit> plan = new ArrayList<>();
         int start = 0;
@@ -316,7 +424,13 @@ public final class OrderFlow {
                     String v = i < p.lotVariants.size() ? p.lotVariants.get(i) : "";
                     lots.add(new Order.Lot(p.lotKeys.get(i), v == null || v.isEmpty() ? null : v, p.lotCounts.get(i)));
                 }
-                plan.add(new Unit(p.kind == 0 ? Unit.Kind.Shulker : p.kind == 1 ? Unit.Kind.Empty : Unit.Kind.Bin, p.key, lots));
+                Unit u = new Unit(p.kind == 0 ? Unit.Kind.Shulker : p.kind == 1 ? Unit.Kind.Empty : Unit.Kind.Bin, p.key, lots);
+                // The names were saved with the plan; a plan saved before names existed takes them from the order
+                u.name = p.name != null && !p.name.isBlank() ? p.name : o.names == null ? null : o.names.nameFor(plan.size());
+                u.nameDone = p.nameDone;
+                u.nameFailure = p.nameFailure == null || p.nameFailure.isEmpty() ? null : p.nameFailure;
+                u.namedKey = p.namedKey == null || p.namedKey.isEmpty() ? null : p.namedKey;
+                plan.add(u);
             }
             start = Math.min(saved.done, plan.size());
             // A shulker may have gone into the delivery container just before the bot went offline: the container is looked at
@@ -330,12 +444,17 @@ public final class OrderFlow {
             // What was delivered before counts even if the rest cannot be done now
             shulkersDelivered = saved.shulkersDelivered;
             delivered.putAll(saved.delivered);
+            unnamed = saved.unnamed;
+            if (saved.unnamedReasons != null) unnamedReasons.addAll(saved.unnamedReasons);
+            crafted = Math.max(0, saved.crafted);
         }
         else {
             StockPlanner.Plan fresh = host.plan(o);
             if (fresh.failure() != null) return fresh.failure();
             plan.addAll(fresh.units());
             notes.addAll(fresh.notes());
+            // The i-th shulker of the plan (shulker lines, then empty shulkers, then bins) gets the i-th name
+            if (o.names != null) for (int i = 0; i < plan.size(); i++) plan.get(i).name = o.names.nameFor(i);
         }
 
         String why = host.checkEmpties(new ArrayList<>(plan.subList(start, plan.size())));
@@ -361,6 +480,7 @@ public final class OrderFlow {
                     p.lotVariants.add(lot.variant() == null ? "" : lot.variant());
                     p.lotCounts.add(lot.count());
                 }
+                p.name = u.name == null ? "" : u.name;
                 s.units.add(p);
             }
             host.save(s);
@@ -418,7 +538,7 @@ public final class OrderFlow {
         if (state == State.Running) {
             if (!host.gate()) {
                 if (pausedSince == 0) pausedSince = now;
-                else if (now - pausedSince > PAUSE_TIMEOUT_MS) finish(State.Failed, "the bot was held up for too long");
+                else if (now - pausedSince > PAUSE_TIMEOUT_MS) finish(State.Failed, "the bot was held up for too long (" + host.pauseReason() + ")");
                 else phase = "paused: " + host.pauseReason();
             }
             else pausedSince = 0;
@@ -442,6 +562,13 @@ public final class OrderFlow {
         if (s == null || index >= units.size() || units.get(index) != u) return;
         s.deliveringIndex = index;
         s.deliveringBase = u.base;
+        if (index < s.units.size()) {
+            // How naming went, so a resume that finds it in the delivery container counts it right
+            Saved.UnitSave p = s.units.get(index);
+            p.nameDone = u.nameDone;
+            p.nameFailure = u.nameFailure == null ? "" : u.nameFailure;
+            p.namedKey = u.namedKey == null ? "" : u.namedKey;
+        }
         host.save(s);
     }
 
@@ -464,6 +591,34 @@ public final class OrderFlow {
     /** The bin's finished shulker exists. */
     public void built(Unit u) {
         u.built = true;
+    }
+
+    /**
+     * The bin could not be finished, but its shulker holds part of it: it is delivered as it is, not thrown back. From now on
+     * the unit is what the shulker holds ({@code packed}, saved with the plan so a restart still knows the shulker for this
+     * unit's), and the order's end note says it came short; "delivered less than asked" lists the lines.
+     */
+    public void builtShort(Unit u, List<Order.Lot> packed, String reason) {
+        if (packed.isEmpty()) return;
+        u.lots.clear();
+        u.lots.addAll(packed);
+        u.built = true;
+        int at = units.indexOf(u);
+        problems.add("shulker " + (at + 1) + " delivered short: " + reason);
+        Order o = order;
+        Saved s = o == null ? null : host.saved(o.id);
+        if (s != null && at >= 0 && at < s.units.size()) {
+            Saved.UnitSave p = s.units.get(at);
+            p.lotKeys.clear();
+            p.lotVariants.clear();
+            p.lotCounts.clear();
+            for (Order.Lot lot : packed) {
+                p.lotKeys.add(lot.key());
+                p.lotVariants.add(lot.variant() == null ? "" : lot.variant());
+                p.lotCounts.add(lot.count());
+            }
+            host.save(s);
+        }
     }
 
     /**
@@ -513,7 +668,7 @@ public final class OrderFlow {
             long now = clock.getAsLong();
             if (pausedSince == 0) pausedSince = now;
             else if (now - pausedSince > PAUSE_TIMEOUT_MS) {
-                finish(State.Failed, "the bot was held up for too long");
+                finish(State.Failed, "the bot was held up for too long (" + host.pauseReason() + ")");
                 return new Idle();
             }
             phase = "paused: " + host.pauseReason();
@@ -560,6 +715,11 @@ public final class OrderFlow {
                 // Back in the inventory: whatever was seen in the container was not it
                 u.confirmed = false;
                 u.verifying = false;
+                // Named first, if the order wants a name on it; naming never holds the order up
+                if (u.name != null && !u.nameDone && u.nameFailure == null) {
+                    Name name = naming(u, slot);
+                    if (name != null) return name;
+                }
                 if (full) {
                     full = false;
                     u.fullTries++;
@@ -572,6 +732,11 @@ public final class OrderFlow {
                     finish(shulkersDelivered > 0 ? State.Delivered : State.Failed, "couldn't put the shulker into the delivery container (" + shulkersDelivered + "/" + units.size() + " delivered)");
                     return new Idle();
                 }
+                // The stack about to go in decides: one that carries the name is not counted as unnamed
+                if (u.name != null && !u.nameDone) {
+                    String wanted = ShulkerNames.normalise(u.name);
+                    if (wanted != null && wanted.equals(host.nameOn(u, slot))) u.nameDone = true;
+                }
                 phase = "delivering " + (index + 1) + "/" + units.size();
                 return new Deliver(u, slot, false);
             }
@@ -581,6 +746,7 @@ public final class OrderFlow {
                 if (u.confirmed) {
                     for (var e : u.content.entrySet()) delivered.merge(e.getKey(), e.getValue(), Integer::sum);
                     shulkersDelivered++;
+                    countUnnamed(u);
                     advance();
                 }
                 else if (!u.verified) {
@@ -599,6 +765,25 @@ public final class OrderFlow {
                     skip("lost a finished shulker");
                     continue;
                 }
+                // Building puts a shulker down: it waits while shulker handling is paused (as long as PAUSE_TIMEOUT_MS allows)
+                String paused = host.buildPauseReason();
+                if (paused != null) {
+                    long now = clock.getAsLong();
+                    if (buildPausedSince == 0) buildPausedSince = now;
+                    else if (now - buildPausedSince > PAUSE_TIMEOUT_MS) {
+                        finish(shulkersDelivered > 0 ? State.Delivered : State.Failed, "the bot was held up for too long (" + paused + ")");
+                        return new Idle();
+                    }
+                    phase = "paused: " + paused;
+                    return new Idle();
+                }
+                buildPausedSince = 0;
+                // No empty shulker for it: one is crafted first, when crafting is on
+                if (host.craftingOn() && !host.emptyAvailable(u)) {
+                    Craft c = crafting(u);
+                    if (c != null) return c;
+                    continue;
+                }
                 phase = "building " + (index + 1) + "/" + units.size();
                 return new Build(u);
             }
@@ -608,6 +793,12 @@ public final class OrderFlow {
                 continue;
             }
             if (!host.canFetch(u)) {
+                // An empty plain shulker box that is not in the stash is crafted, when crafting is on
+                if (u.kind == Unit.Kind.Empty && PLAIN_SHULKER.equals(u.key) && host.craftingOn()) {
+                    Craft c = crafting(u);
+                    if (c != null) return c;
+                    continue;
+                }
                 skip(u.kind == Unit.Kind.Shulker ? "a packed shulker is no longer in the stash" : "no empty shulker of that kind is left");
                 continue;
             }
@@ -616,6 +807,115 @@ public final class OrderFlow {
             return new Fetch(u);
         }
         return new Idle();
+    }
+
+    /** The Craft step for a unit with no empty shulker, or null when it was given up (skipped, with the reason). */
+    private @Nullable Craft crafting(Unit u) {
+        String why = u.craftFailure;
+        if (why == null && u.craftTries >= MAX_CRAFT_TRIES) why = "it didn't work in " + MAX_CRAFT_TRIES + " tries";
+        if (why == null) why = host.craftProblem(u);
+        if (why != null) {
+            skip(NO_EMPTY_CRAFT + why);
+            return null;
+        }
+        phase = "crafting a shulker for " + (index + 1) + "/" + units.size();
+        return new Craft(u, Math.max(1, host.craftCount(u)));
+    }
+
+    /** The host has started gathering for a craft of this unit: only trips really started count towards MAX_CRAFT_TRIES. */
+    public void craftStarted(Unit u) {
+        u.craftTries++;
+    }
+
+    /** {@code n} shulker boxes were crafted for the order (counted towards its cap, saved at once). */
+    public void crafted(Unit u, int n) {
+        if (n <= 0) return;
+        crafted += n;
+        u.craftFailure = null;
+        Order o = order;
+        Saved s = o == null ? null : host.saved(o.id);
+        if (s != null) {
+            s.crafted = crafted;
+            host.save(s);
+        }
+    }
+
+    /**
+     * Crafting for this unit didn't work. @param retry it was cut short (the bot gave way, the window closed) or may work from
+     * a fresh look at the stash: tried once more while MAX_CRAFT_TRIES allows; otherwise the unit is given up with this reason
+     */
+    public void craftFailed(Unit u, String reason, boolean retry) {
+        if (retry && u.craftTries < MAX_CRAFT_TRIES) return;
+        u.craftFailure = reason;
+    }
+
+    /** Shulker boxes crafted for this order so far. */
+    public int craftedCount() {
+        return crafted;
+    }
+
+    /** "crafted 2 Shulker Box", or null when none was. */
+    public @Nullable String craftedNote() {
+        return crafted <= 0 ? null : "crafted " + crafted + " Shulker Box";
+    }
+
+    /** The anvil step for this shulker, or null when it is named already or will go unnamed (the reason is kept). */
+    private @Nullable Name naming(Unit u, int slot) {
+        String name = ShulkerNames.normalise(u.name);
+        if (name == null) {
+            u.nameFailure = "a name that breaks the rules";
+            return null;
+        }
+        if (name.equals(host.nameOn(u, slot))) {
+            u.nameDone = true;
+            return null;
+        }
+        if (u.nameTries >= MAX_NAME_TRIES) {
+            u.nameFailure = "naming didn't finish";
+            return null;
+        }
+        String why = host.namingProblem(u);
+        if (why != null) {
+            u.nameFailure = why;
+            return null;
+        }
+        phase = "naming " + (index + 1) + "/" + units.size();
+        return new Name(u, slot, name);
+    }
+
+    /** The host has started the trip to the anvil for this shulker: only trips really made count towards MAX_NAME_TRIES. */
+    public void namingStarted(Unit u) {
+        u.nameTries++;
+    }
+
+    /** The shulker came back from the anvil with its name. Saved at once, so a restart before delivery still knows it. */
+    public void named(Unit u) {
+        u.nameDone = true;
+        u.nameFailure = null;
+        saveNaming(u);
+    }
+
+    /**
+     * The anvil could not name it. @param retry it was cut short (the window closed, the bot gave way) and may be tried once
+     * more; otherwise it is delivered unnamed with this reason
+     */
+    public void nameFailed(Unit u, String reason, boolean retry) {
+        if (retry && u.nameTries < MAX_NAME_TRIES) return;
+        u.nameFailure = reason;
+        saveNaming(u);
+    }
+
+    /** Writes how naming went for this unit into the saved plan. */
+    private void saveNaming(Unit u) {
+        Order o = order;
+        Saved s = o == null ? null : host.saved(o.id);
+        int at = units.indexOf(u);
+        if (s == null || at < 0 || at >= s.units.size()) return;
+        Saved.UnitSave p = s.units.get(at);
+        p.nameDone = u.nameDone;
+        p.nameFailure = u.nameFailure == null ? "" : u.nameFailure;
+        p.namedKey = u.namedKey == null ? "" : u.namedKey;
+        host.save(s);
     }
 
     private void advance() {
@@ -628,6 +928,9 @@ public final class OrderFlow {
             s.shulkersDelivered = shulkersDelivered;
             s.delivered.clear();
             s.delivered.putAll(delivered);
+            s.unnamed = unnamed;
+            s.unnamedReasons = new ArrayList<>(unnamedReasons);
+            s.crafted = crafted;
             host.save(s);
         }
     }
@@ -643,16 +946,76 @@ public final class OrderFlow {
             if (got < e.getValue()) shortLines.add(e.getKey() + " " + got + "/" + e.getValue());
         }
 
-        String note = shortLines.isEmpty() ? "" : "delivered less than asked: " + String.join(", ", shortLines.size() > 6 ? shortLines.subList(0, 6) : shortLines) + (shortLines.size() > 6 ? ", ..." : "");
-        if (!problems.isEmpty()) note += (note.isEmpty() ? "" : "; ") + String.join(", ", problems.size() > 3 ? problems.subList(0, 3) : problems);
         boolean anything = shulkersDelivered > 0;
-        finish(anything ? State.Delivered : State.Failed, anything ? note : (note.isEmpty() ? "nothing could be delivered" : "nothing could be delivered: " + note));
+        // The unnamed note is added by finish, at the end and whole
+        finish(anything ? State.Delivered : State.Failed, endNote(anything, problems, shortLines));
+    }
+
+    /** The server keeps this much of an order's message. */
+    static final int MESSAGE_MAX = 300;
+
+    /**
+     * The message an order ends with, main reason first so the server's cut never loses it: why shulkers were given up
+     * (newest first, "replanned" notes last), then what came up short. Cut at {@link #MESSAGE_MAX} on a word.
+     */
+    static String endNote(boolean anything, List<String> problems, List<String> shortLines) {
+        return endNote(anything, problems, shortLines, null);
+    }
+
+    /** @param unnamed the one note about shulkers delivered without their names, after the reasons shulkers were given up */
+    static String endNote(boolean anything, List<String> problems, List<String> shortLines, @Nullable String unnamed) {
+        List<String> reasons = new ArrayList<>();
+        for (int i = problems.size() - 1; i >= 0; i--) if (!problems.get(i).startsWith("replanned") && !reasons.contains(problems.get(i))) reasons.add(problems.get(i));
+        if (unnamed != null) reasons.add(unnamed);
+        for (String p : problems) if (p.startsWith("replanned") && !reasons.contains(p)) reasons.add(p);
+        StringBuilder b = new StringBuilder(anything ? "" : "nothing could be delivered");
+        if (!reasons.isEmpty()) b.append(b.isEmpty() ? "" : ": ").append(String.join("; ", reasons));
+        if (!shortLines.isEmpty()) {
+            b.append(b.isEmpty() ? "" : "; ").append("delivered less than asked: ").append(String.join(", ", shortLines.size() > 6 ? shortLines.subList(0, 6) : shortLines));
+            if (shortLines.size() > 6) b.append(", ...");
+        }
+        return cut(b.toString());
+    }
+
+    private static String cut(String note) {
+        return cutTo(note, MESSAGE_MAX);
+    }
+
+    /** At most {@code max} characters, cut on a word with " ..." when it is longer. */
+    static String cutTo(String note, int max) {
+        if (note.length() <= max) return note;
+        int cut = note.lastIndexOf(' ', max - 4);
+        return note.substring(0, cut > max / 2 ? cut : Math.max(0, max - 4)) + " ...";
+    }
+
+    /** The message with the unnamed note added once at its end, whole, the rest cut to make room: within MESSAGE_MAX. */
+    static String withUnnamedNote(String text, @Nullable String note) {
+        return withNotes(text, note, null);
+    }
+
+    /**
+     * The message with the unnamed note and the crafted note added once at its end, whole, the rest cut to make room: within
+     * MESSAGE_MAX.
+     */
+    static String withNotes(String text, @Nullable String unnamedNote, @Nullable String craftedNote) {
+        List<String> tail = new ArrayList<>();
+        if (unnamedNote != null && !text.contains(ShulkerNames.UNNAMED_MARK)) tail.add(unnamedNote);
+        if (craftedNote != null && !text.contains(craftedNote)) tail.add(craftedNote);
+        if (tail.isEmpty()) return cut(text);
+        String note = String.join("; ", tail);
+        if (text.isEmpty()) return cut(note);
+        int room = MESSAGE_MAX - note.length() - 2;
+        if (room < 20) return cut(note);
+        return cutTo(text, room) + "; " + note;
     }
 
     /** Ends the order here with this outcome; the server is told by the next {@link #report()}. */
     public void finish(State end, String text) {
         if (order == null || state != State.Running) return;
         settleConfirmed();
+        // Every way an order ends carries the one note about shulkers that went without their names
+        // Added once: endNote may already hold it (perhaps cut short at MESSAGE_MAX); the whole message stays within MESSAGE_MAX
+        text = withNotes(text, unnamedNote(), craftedNote());
         state = end;
         message = text;
         phase = end.name().toLowerCase();

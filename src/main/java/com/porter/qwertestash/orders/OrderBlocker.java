@@ -51,6 +51,30 @@ public final class OrderBlocker {
         return null;
     }
 
+    /** The start of every reason shulker handling is held back with; an order bin given up for it is tried again. */
+    public static final String SHULKER_PAUSED = "shulker handling is paused";
+
+    /**
+     * Why the sorter may not put shulkers down right now, or null: after a shulker it could not pick up, while one left
+     * standing is being finished, or for a few minutes after a shulker problem. Orders wait for this instead of failing.
+     * @param ticksLeft game ticks until the pause after a problem ends (0 or less: none)
+     * @param why       what the problem was, for the pause after one ("" if not known)
+     */
+    public static @Nullable String shulkerPause(boolean dropLost, boolean resumePending, long ticksLeft, @Nullable String why) {
+        if (dropLost) return SHULKER_PAUSED + ": a shulker could not be picked up";
+        if (resumePending) return SHULKER_PAUSED + ": finishing a shulker left standing";
+        if (ticksLeft > 0) {
+            long minutes = Math.max(1, (ticksLeft + 20 * 60 - 1) / (20 * 60));
+            return SHULKER_PAUSED + ": " + (why == null || why.isBlank() ? "after a shulker problem" : why) + ", trying again in " + minutes + " min";
+        }
+        return null;
+    }
+
+    /** A bin given up for a reason that passes: tried again instead of replanned or skipped. */
+    public static boolean retryableBuildFailure(@Nullable String failure) {
+        return failure == null || failure.startsWith(SHULKER_PAUSED);
+    }
+
     /** "minecraft:overworld" and "overworld" are the same dimension. */
     public static boolean sameDimension(@Nullable String a, @Nullable String b) {
         if (a == null || b == null) return false;

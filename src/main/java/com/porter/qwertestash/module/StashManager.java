@@ -16,6 +16,7 @@ import com.porter.qwertestash.manager.ManagerIndex;
 import com.porter.qwertestash.orders.OrderBlocker;
 import com.porter.qwertestash.orders.OrderDriver;
 import com.porter.qwertestash.orders.OrderFlow;
+import com.porter.qwertestash.stash.AnvilSpot;
 import com.porter.qwertestash.stash.DeliverySpot;
 import com.porter.qwertestash.stash.Stash;
 import com.porter.qwertestash.stash.Stash.Box;
@@ -109,6 +110,10 @@ public class StashManager extends Module {
     private @Nullable String blocker = "starting";
     private long blockerAt;
     private String blockerSig = "";
+    // What the heartbeat says about naming order shulkers, worked out on the tick once a second
+    private volatile ManagerIndex.Naming naming = new ManagerIndex.Naming(false, -1);
+    // And about crafting: the setting, and whether a crafting table is set
+    private volatile ManagerIndex.Crafting crafting = new ManagerIndex.Crafting(false, false);
     private boolean orderDriven;
     private long lastOrderDrive;
     private boolean heartbeatSeen;
@@ -180,6 +185,9 @@ public class StashManager extends Module {
                 String line = s.statusLineNoPositions();
                 boolean problem = s.problem() != null || s.driveProblem() != null;
                 out.add(new ActivityFeed.Item("Stash Sorter", "plugin", line, s.activityDetail(), s.readProgress(), problem ? "warn" : "info"));
+                // A craft under way has a card of its own: what is made, from what (no positions)
+                String craftTitle = s.craftCardTitle();
+                if (craftTitle != null) out.add(new ActivityFeed.Item("Stash Crafting", "plugin", craftTitle, s.craftCardDetail(), null, "info"));
             }
         } catch (RuntimeException | LinkageError e) {
             // The sorter is left out
@@ -453,11 +461,9 @@ public class StashManager extends Module {
         return playerShown;
     }
 
-    /** "not set", or the key as asterisks and its last four characters. The key itself is never shown or logged. */
+    /** "set" or "not set": no part of the key is ever shown or logged. */
     public static String maskKey(@Nullable String key) {
-        if (key == null || key.isBlank()) return "not set";
-        String k = key.trim();
-        return k.length() < 12 ? "****" : "****" + k.substring(k.length() - 4);
+        return key == null || key.isBlank() ? "not set" : "set";
     }
 
     /** A usable http or https base address without a query, fragment, credentials or trailing slash, else null. */
@@ -575,7 +581,7 @@ public class StashManager extends Module {
         long done = rescanDone;
         DeliverySpot.Spot spot = DeliverySpot.get();
         ManagerIndex.Delivery delivery = spot == null ? null : new ManagerIndex.Delivery(spot.x(), spot.y(), spot.z(), spot.dimension());
-        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery), key, (code, body) -> {
+        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting), key, (code, body) -> {
             if (code != 200) return false;
             heartbeatSeen = true;
             driver().onHeartbeat(body);
@@ -649,7 +655,13 @@ public class StashManager extends Module {
             blocker = next;
             DeliverySpot.Spot spot = DeliverySpot.get();
             // A change of the blocker or of the delivery container is sent in a heartbeat of its own, not at the next 15 second beat
-            blockerSig = (next == null ? "" : next) + "|" + (spot == null ? "-" : String.valueOf(spot.hashCode()));
+            ManagerIndex.Naming namingState = namingNow();
+            naming = namingState;
+            // So is a change of the anvil or of the bot's XP level
+            ManagerIndex.Crafting craftingState = new ManagerIndex.Crafting(CONFIG.enableCrafting, com.porter.qwertestash.stash.CraftingTableSpot.usable());
+            crafting = craftingState;
+            blockerSig = (next == null ? "" : next) + "|" + (spot == null ? "-" : String.valueOf(spot.hashCode())) + "|" + namingState.anvil() + "/" + namingState.xpLevels() + "/" + namingState.anvilSource()
+                + "|" + craftingState.enabled() + "/" + craftingState.table();
             driver();
             ordersStatus = new OrdersStatus(flow.summary(), heartbeatSeen ? driver().pending() : -1, next);
         }
@@ -682,6 +694,17 @@ public class StashManager extends Module {
             String why = s.driveProblem();
             if (why != null) flow.finish(OrderFlow.State.Failed, "the stash sorter couldn't run: " + why);
         }
+    }
+
+    /** The heartbeat's naming field: whether the anvil can be used, and the bot's XP level (-1 when not in game). */
+    private static ManagerIndex.Naming namingNow() {
+        int level = -1;
+        try {
+            if (Alerts.online()) level = Math.max(0, CACHE.getPlayerCache().getThePlayer().getLevel());
+        } catch (RuntimeException | LinkageError e) {
+            // Not known
+        }
+        return new ManagerIndex.Naming(AnvilSpot.usable(), level, AnvilSpot.source());
     }
 
     private OrderBlocker.Snapshot snapshot(StashSorter s, OrderFlow flow, @Nullable Stash stash) {

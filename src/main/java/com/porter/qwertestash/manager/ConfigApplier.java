@@ -219,6 +219,6 @@ public final class ConfigApplier {
 
     /** Lists of item ids are kept lower case. */
     private static boolean spec(Field f) {
-        return f.getName().equals("compactExclude");
+        return f.getName().equals("compactExclude") || f.getName().equals("craftNeverUse");
     }
 }

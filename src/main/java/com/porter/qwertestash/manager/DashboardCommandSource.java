@@ -44,16 +44,9 @@ public final class DashboardCommandSource implements CommandSource {
         return true;
     }
 
-    /**
-     * With the proxy's permission system on, the dashboard is an operator who may use module and info commands but not the
-     * management ones (command.manage is denied), instead of the fully trusted subject the terminal gets. With it off the
-     * gate in {@link CommandGate} and the owner opt-in are what limit a dashboard command.
-     */
-    @Override
-    public com.aquarius.feature.permissions.Subject resolveSubject(CommandContext ctx) {
-        return new com.aquarius.feature.permissions.Subject(null, "Dashboard", com.aquarius.feature.permissions.Role.OPERATOR,
-            java.util.Set.of("command.module", "command.info"), java.util.Set.of("command.manage"), "self", "control", false);
-    }
+    // No resolveSubject override: like the terminal and Discord, the dashboard gets the proxy's fully trusted subject, so
+    // its console runs every command the terminal can (the owner turned it on in the terminal with `stash manager
+    // dashboard console on`)
 
     @Override
     public void logEmbed(CommandContext ctx, Embed embed) {

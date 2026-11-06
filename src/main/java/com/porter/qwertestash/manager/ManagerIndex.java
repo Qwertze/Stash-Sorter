@@ -186,6 +186,35 @@ public final class ManagerIndex {
      * @param orderBlocker why orders cannot be taken right now, or null when they can (PROTOCOL.md "delivery status")
      */
     public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery) {
+        return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, null);
+    }
+
+    /**
+     * Whether the bot can name order shulkers (PROTOCOL.md "Shulker names"): {@code anvil} is true when an anvil is set and,
+     * if its chunk is loaded, it is an anvil; {@code xpLevels} is the bot's level, or -1 when it is not known. No position.
+     */
+    public record Naming(boolean anvil, int xpLevels, @Nullable String anvilSource) {
+        public Naming(boolean anvil, int xpLevels) {
+            this(anvil, xpLevels, null);
+        }
+    }
+
+    /**
+     * Whether the bot crafts shulker boxes for orders (PROTOCOL.md "Crafting"): {@code enabled} is the setting, {@code table}
+     * whether a crafting table is set (and, if its chunk is loaded, is one). No position.
+     */
+    public record Crafting(boolean enabled, boolean table) {
+    }
+
+    /** @param naming sent as {@code naming}; null leaves the field out (a bot without naming support) */
+    public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
+                                   @Nullable Naming naming) {
+        return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, naming, null);
+    }
+
+    /** @param crafting sent as {@code crafting}; null leaves the field out (a bot without crafting support) */
+    public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
+                                   @Nullable Naming naming, @Nullable Crafting crafting) {
         JsonObject o = new JsonObject();
         o.addProperty("server", b.server());
         o.addProperty("stash", b.stash());
@@ -205,6 +234,20 @@ public final class ManagerIndex {
         }
         if (orderBlocker == null || orderBlocker.isEmpty()) o.add("orderBlocker", JsonNull.INSTANCE);
         else o.addProperty("orderBlocker", clamp(orderBlocker, 100));
+        if (naming != null) {
+            JsonObject n = new JsonObject();
+            n.addProperty("anvil", naming.anvil());
+            n.addProperty("xpLevels", Math.max(-1, naming.xpLevels()));
+            // How the anvil came to be (1.8.1): "set", "found", "placed" or "none". Never where it is
+            if (naming.anvilSource() != null) n.addProperty("anvilSource", naming.anvilSource());
+            o.add("naming", n);
+        }
+        if (crafting != null) {
+            JsonObject c = new JsonObject();
+            c.addProperty("enabled", crafting.enabled());
+            c.addProperty("table", crafting.table());
+            o.add("crafting", c);
+        }
         return GSON_NULLS.toJson(o).getBytes(StandardCharsets.UTF_8);
     }
 
@@ -289,6 +332,14 @@ public final class ManagerIndex {
      * contents), or null for anything else. The same key addShulker files it under, so an order's {@code shulker} line finds it.
      */
     public static @Nullable String shulkerKey(Item item) {
+        return shulkerKey(item, false);
+    }
+
+    /**
+     * @param withoutName the key the shulker would have without its custom name: a packed shulker an order renamed is still
+     *                    known by the key it was ordered by (when it had no name before)
+     */
+    public static @Nullable String shulkerKey(Item item, boolean withoutName) {
         if (!item.isShulker() || item.contents == null || item.contents.isEmpty()) return null;
         StringBuilder canon = new StringBuilder();
         int at = 0;
@@ -303,7 +354,7 @@ public final class ManagerIndex {
             any = true;
         }
         if (!any) return null;
-        return "s:" + sha1(clamp(item.indexKey(), MAX_TEXT) + "|" + canon).substring(0, 10);
+        return "s:" + sha1(clamp(withoutName ? item.keyWithoutName() : item.indexKey(), MAX_TEXT) + "|" + canon).substring(0, 10);
     }
 
     /** A top-level shulker with something in it, grouped with identical ones. */

@@ -174,6 +174,11 @@ public class Stash {
     }
 
     public @Nullable Area area;
+    /**
+     * The dimension the stash's containers stand in, recorded when one is first read (null in files saved before 1.7.2,
+     * until the next read). Containers are never forgotten as broken unless the bot is in this dimension.
+     */
+    public @Nullable String dimension;
     /** A corner set on its own with {@code area here1} / {@code here2}, waiting for the other. */
     public int @Nullable [] cornerA, cornerB;
 

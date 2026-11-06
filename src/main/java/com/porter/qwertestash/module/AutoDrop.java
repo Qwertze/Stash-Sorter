@@ -93,15 +93,22 @@ public class AutoDrop extends Module {
         final UUID player;
         final String name, why;
         final long at;
+        // Where the item appeared, and when (ms)
+        final double x, y, z;
+        final long spawnAt;
         // What the item is, read from the item entity once its data has arrived, so it is known even if the cache
         // has already forgotten the entity when it is picked up
         volatile @Nullable ItemStack stack;
 
-        Attribution(UUID player, String name, String why, long at) {
+        Attribution(UUID player, String name, String why, long at, Spawn spawn) {
             this.player = player;
             this.name = name;
             this.why = why;
             this.at = at;
+            this.x = spawn.x();
+            this.y = spawn.y();
+            this.z = spawn.z();
+            this.spawnAt = spawn.at();
         }
     }
 
@@ -138,13 +145,18 @@ public class AutoDrop extends Module {
         int slot = -1, countBefore, ticks, aims;
         float yaw, pitch;
         @Nullable RequestFuture future;
+        // Where (cell) and when (ms) the item appeared, so one that dropped from a shulker of ours just broken is told apart
+        final BlockPos spawnCell;
+        final long spawnAt;
 
-        Return(UUID player, String name, String why, ItemStack template, int amount) {
-            this.player = player;
-            this.name = name;
-            this.why = why;
+        Return(Attribution who, ItemStack template, int amount) {
+            this.player = who.player;
+            this.name = who.name;
+            this.why = who.why;
             this.template = template;
             this.amount = amount;
+            this.spawnCell = cell(who.x, who.y, who.z);
+            this.spawnAt = who.spawnAt;
         }
     }
 
@@ -347,7 +359,7 @@ public class AutoDrop extends Module {
 
     private void mark(Spawn spawn, EntityPlayer player, String why) {
         String name = CACHE.getTabListCache().get(player.getUuid()).map(PlayerListEntry::getName).orElse(player.getUuid().toString());
-        attributions.put(spawn.id(), new Attribution(player.getUuid(), name, why, System.currentTimeMillis()));
+        attributions.put(spawn.id(), new Attribution(player.getUuid(), name, why, System.currentTimeMillis(), spawn));
     }
 
     /**
@@ -374,7 +386,7 @@ public class AutoDrop extends Module {
         if (item.id.equals("ender_pearl")) return;
 
         if (returns.size() >= MAX_QUEUE) return;
-        Return ret = new Return(who.player, who.name, who.why, stack, Math.max(1, packet.getItemCount()));
+        Return ret = new Return(who, stack, Math.max(1, packet.getItemCount()));
         List<ItemStack> inventory = CACHE.getPlayerCache().getPlayerInventory();
         for (int i = 0; i < 46 && i < inventory.size(); i++) {
             ItemStack there = inventory.get(i);
@@ -423,6 +435,14 @@ public class AutoDrop extends Module {
         if (now - r.at > RETURN_TTL_MS) {
             returns.poll();
             LOG.info("Qwerte Stash: couldn't give {} back to {} in time, keeping it.", what, r.name);
+            return;
+        }
+        // A shulker that is very likely the bot's own (of the colour being collected, or dropped next to a shulker of ours just
+        // broken) is never given away, whatever made it look thrown or broken by the player: kept, and the sorter carries on
+        if (r.stage != Stage.Done && label != null
+            && sorter().ownsShulker(label.id, label.isShulker(), true, r.spawnCell.x(), r.spawnCell.y(), r.spawnCell.z(), r.spawnAt)) {
+            returns.poll();
+            LOG.warn("Qwerte Stash: the {} picked up looks like the bot's own shulker, keeping it instead of giving it back to {} ({}).", what, r.name, r.why);
             return;
         }
         if (now < nextReturnAt) return;

@@ -194,4 +194,35 @@ public class StashConfig {
     public boolean useNamedShulkers = true;
     /** A container read within this many minutes is not read again when the sorter or an order starts, unless something marked it changed. 0: always read again. */
     public int freshMinutes = 5;
+
+    // Shulker names for orders. New in 1.7.0; the keys have defaults so older settings files load as before.
+
+    /**
+     * The anvil order shulkers are named at: set with `stash anvil`. anvilDimension is blank when none is set. It is not a
+     * container (never sorted or indexed), and may be outside the stash area.
+     */
+    public String anvilDimension = "";
+    public int anvilX, anvilY, anvilZ;
+    /**
+     * How the anvil above came to be (1.8.1): "set" with `stash anvil` (also blank, for settings from before), "found" by the
+     * bot standing in the stash area, or "placed" by the bot from an anvil in the stash.
+     */
+    public String anvilSource = "";
+
+    // Crafting (1.8.0, phase 1: plain shulker boxes for orders and compaction). Every key has a default so older settings files
+    // load as before, with crafting off.
+
+    /** Craft a plain shulker box when an order or compaction needs an empty one and the stash has none. */
+    public boolean enableCrafting = false;
+    /** Shulker boxes one order may have crafted. */
+    public int craftMaxPerOrder = 27;
+    /** Grid fills one craft task may make (a shulker box from logs is 1 + 1 + 2 fills). */
+    public int craftMaxOpsPerTask = 128;
+    /** Shulker boxes crafted in any one hour. */
+    public int craftMaxPerHour = 54;
+    /** Item ids never taken from the stash to craft with, like diamond_block. */
+    public List<String> craftNeverUse = new ArrayList<>();
+    /** The crafting table: set with `stash craftingtable`. craftingTableDimension is blank when none is set. Never sorted or indexed. */
+    public String craftingTableDimension = "";
+    public int craftingTableX, craftingTableY, craftingTableZ;
 }

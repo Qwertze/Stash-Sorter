@@ -151,7 +151,12 @@ class OrderServerIntegrationTest {
     }
 
     private static JsonObject placeOrder(String lines) throws Exception {
-        JsonObject o = json(post("/api/v1/orders", "{\"server\":\"" + SERVER + "\",\"stash\":\"" + STASH + "\",\"lines\":" + lines + ",\"note\":\"\"}"));
+        return placeOrder(lines, null);
+    }
+
+    /** @param names the order's names field as JSON, or null for none. The website sends no note any more. */
+    private static JsonObject placeOrder(String lines, String names) throws Exception {
+        JsonObject o = json(post("/api/v1/orders", "{\"server\":\"" + SERVER + "\",\"stash\":\"" + STASH + "\",\"lines\":" + lines + (names == null ? "" : ",\"names\":" + names) + "}"));
         return o.getAsJsonObject("order");
     }
 
@@ -450,5 +455,55 @@ class OrderServerIntegrationTest {
         assertEquals("delivered", done.get("status").getAsString(), done.toString());
         assertEquals(2, done.getAsJsonObject("result").get("shulkers").getAsInt());
         assertEquals(2, first.sim.delivery.size());
+    }
+
+    /**
+     * Shulker names (contract of 2026-11-05): the claim hands the bot the order's names, the bot names its shulkers in plan
+     * order, and the heartbeat's naming field shows on the stash list. A server from before names (it leaves names out of the
+     * order it returns) skips the naming checks instead of failing.
+     */
+    @Test
+    @Order(9)
+    void theClaimCarriesTheNamesAndTheBotNamesItsShulkers() throws Exception {
+        Bot bot = new Bot();
+        bot.blocker = null;
+        // The naming field of the heartbeat
+        ManagerHttp.Response beat = call("/api/v1/heartbeat", ManagerIndex.heartbeat(bot.built(), -1, null, null, new ManagerIndex.Delivery(120, 64, -340, "minecraft:overworld"),
+            new ManagerIndex.Naming(true, 12)));
+        assertEquals(200, beat.code(), beat.body());
+        JsonObject entry = stashEntry();
+        if (entry.has("naming") && !entry.get("naming").isJsonNull()) {
+            assertTrue(entry.getAsJsonObject("naming").get("anvil").getAsBoolean());
+            assertEquals(12, entry.getAsJsonObject("naming").get("xpLevels").getAsInt());
+            assertFalse(entry.getAsJsonObject("naming").toString().contains("120"), "no position in naming");
+        }
+
+        JsonObject placed = placeOrder("[{\"type\":\"item\",\"key\":\"" + D + "\",\"count\":" + 64 * 28 + "}]", "{\"mode\":\"each\",\"names\":[\"  First  \",\"Second\"]}");
+        String id = placed.get("id").getAsString();
+        Assumptions.assumeTrue(placed.has("names") && !placed.get("names").isJsonNull(), "this server does not keep names yet: " + placed);
+        assertFalse(placed.has("note"), "orders carry no note any more: " + placed);
+        // The server trims them
+        assertEquals("First", placed.getAsJsonObject("names").getAsJsonArray("names").get(0).getAsString());
+
+        bot.heartbeat();
+        bot.pump();
+        assertTrue(bot.sim.flow.running(), "the order was not claimed: " + bot.events);
+        assertEquals("First", bot.sim.flow.units().get(0).name);
+        assertEquals("Second", bot.sim.flow.units().get(1).name);
+        bot.tickUntil(() -> !bot.sim.flow.holdsOrder(), 40);
+        JsonObject done = orderState(id);
+        assertEquals("delivered", done.get("status").getAsString(), done.toString());
+        assertEquals(List.of("First", "Second"), bot.sim.named);
+        assertEquals("First", bot.sim.delivery.get(0).name());
+
+        // Without an anvil: delivered all the same, with the one note
+        bot.sim.anvil = false;
+        String plain = placeOrder("[{\"type\":\"item\",\"key\":\"" + D + "\",\"count\":10}]", "{\"mode\":\"all\",\"name\":\"Kit\"}").get("id").getAsString();
+        bot.heartbeat();
+        bot.pump();
+        bot.tickUntil(() -> !bot.sim.flow.holdsOrder(), 30);
+        JsonObject unnamed = orderState(plain);
+        assertEquals("delivered", unnamed.get("status").getAsString(), unnamed.toString());
+        assertTrue(unnamed.toString().contains("1 shulker(s) delivered unnamed: no anvil set"), unnamed.toString());
     }
 }

@@ -164,6 +164,24 @@ public final class SettingsSpec {
         add("deliveryX", "Delivery X", orders, "Set with `stash delivery`.").locked("set with `stash delivery`").hidden = true;
         add("deliveryY", "Delivery Y", orders, "Set with `stash delivery`.").locked("set with `stash delivery`").hidden = true;
         add("deliveryZ", "Delivery Z", orders, "Set with `stash delivery`.").locked("set with `stash delivery`").hidden = true;
+        // Nor is the anvil's, set with `stash anvil`
+        add("anvilDimension", "Anvil dimension", orders, "Set with `stash anvil`.").locked("set with `stash anvil`").hidden = true;
+        add("anvilX", "Anvil X", orders, "Set with `stash anvil`.").locked("set with `stash anvil`").hidden = true;
+        add("anvilY", "Anvil Y", orders, "Set with `stash anvil`.").locked("set with `stash anvil`").hidden = true;
+        add("anvilZ", "Anvil Z", orders, "Set with `stash anvil`.").locked("set with `stash anvil`").hidden = true;
+        add("anvilSource", "Anvil source", orders, "Set with `stash anvil`, or found or placed by the bot.").locked("set with `stash anvil`, or found or placed by the bot").hidden = true;
+
+        String crafting = "Crafting";
+        add("enableCrafting", "Crafting", crafting, "Craft a plain shulker box from the stash (shells, a chest, planks, logs) when an order or compaction needs an empty one and there is none. Needs a crafting table (`stash craftingtable here`).").cmd("crafting {v}");
+        add("craftMaxPerOrder", "Most per order", crafting, "Shulker boxes one order may have crafted.").range(0, 54).whole();
+        add("craftMaxOpsPerTask", "Most grid fills per task", crafting, "Grid fills one craft task may make.").range(1, 512).whole();
+        add("craftMaxPerHour", "Most per hour", crafting, "Shulker boxes crafted in any one hour.").range(0, 540).whole();
+        add("craftNeverUse", "Never craft with", crafting, "Item ids never taken from the stash to craft with, like diamond_block.").pattern("[a-z0-9_]{1,64}").length(64);
+        // The crafting table is set with `stash craftingtable` and its position is not shown on the website
+        add("craftingTableDimension", "Crafting table dimension", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
+        add("craftingTableX", "Crafting table X", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
+        add("craftingTableY", "Crafting table Y", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
+        add("craftingTableZ", "Crafting table Z", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
 
         String manager = "Stash Manager";
         add("manager", "Stash Manager", manager, "Send the stash index to the Stash Manager server and answer its rescans.").cmd("manager {v}");

@@ -37,6 +37,8 @@ public final class Item {
     public boolean block;
     public boolean fullBlock;
     public boolean damaged;
+    /** Carries block-entity data (a chest or barrel item picked with its contents, a filled beehive...): never a crafting input. */
+    public boolean blockData;
     public List<String> tags = new ArrayList<>();
     public List<String> enchants = new ArrayList<>();
     /** The same enchantments with their levels, as "name:level". */
@@ -58,6 +60,9 @@ public final class Item {
     public @Nullable String variant;
     /** For an item inside a shulker: its slot there (the list drops empty slots). -1 anywhere else and in older saves. */
     public int slot = -1;
+
+    /** For a stack with a custom name: the key it would have without it (see {@link #keyWithoutName()}). Not saved. */
+    public transient @Nullable String unnamedKey;
 
     /** The stack this was read from, while it's still in front of us. Not saved. */
     public transient @Nullable ItemStack raw;
@@ -86,7 +91,10 @@ public final class Item {
         var customName = components.get(DataComponentTypes.CUSTOM_NAME);
         item.customName = customName != null;
         item.name = prettyName(data.name());
-        if (customName != null) item.customText = ComponentSerializer.serializePlain(customName);
+        if (customName != null) {
+            item.customText = ComponentSerializer.serializePlain(customName);
+            item.unnamedKey = com.porter.qwertestash.manager.ItemKeys.keyWithoutName(data.name(), stack.getDataComponentsOrEmpty(), data.name().endsWith("shulker_box"));
+        }
 
         Integer max = components.get(DataComponentTypes.MAX_STACK_SIZE);
         item.maxStack = max != null ? max : data.stackSize();
@@ -98,6 +106,7 @@ public final class Item {
 
         Integer damage = components.get(DataComponentTypes.DAMAGE);
         item.damaged = damage != null && damage > 0;
+        item.blockData = components.get(DataComponentTypes.BLOCK_ENTITY_DATA) != null;
 
         if (data.itemTags() != null) for (ItemTags tag : data.itemTags()) item.tags.add(tag.name());
         item.bundle = data.itemTags() != null && data.itemTags().contains(ItemTags.BUNDLES);
@@ -255,6 +264,11 @@ public final class Item {
         if (!id.equals(other.id)) return false;
         if (raw != null && other.raw != null) return Objects.equals(raw.getDataComponents(), other.raw.getDataComponents());
         return Objects.equals(customText, other.customText) && enchants.equals(other.enchants) && Objects.equals(potion, other.potion) && contents.size() == other.contents.size();
+    }
+
+    /** The key without the custom name: the index key for a stack without one, or one read before this existed. */
+    public String keyWithoutName() {
+        return unnamedKey != null ? unnamedKey : indexKey();
     }
 
     /**

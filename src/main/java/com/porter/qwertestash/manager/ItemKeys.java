@@ -37,6 +37,18 @@ public final class ItemKeys {
      * @param shulker a shulker box: block_entity_data is left out too
      */
     public static Keys of(String id, DataComponents components, boolean shulker) {
+        return of(id, components, shulker, false);
+    }
+
+    /**
+     * The key the stack would have without its custom name: an order shulker renamed at the anvil is still known by the key
+     * it was planned with.
+     */
+    public static String keyWithoutName(String id, DataComponents components, boolean shulker) {
+        return of(id, components, shulker, true).key();
+    }
+
+    private static Keys of(String id, DataComponents components, boolean shulker, boolean withoutName) {
         String base = "minecraft:" + id;
         if (components == null) return new Keys(base, base);
         Map<DataComponentType<?>, DataComponent<?, ?>> all = components.getDataComponents();
@@ -45,7 +57,7 @@ public final class ItemKeys {
         List<DataComponent<?, ?>> shown = new ArrayList<>();
         List<DataComponent<?, ?>> full = new ArrayList<>();
         for (DataComponent<?, ?> c : all.values()) {
-            if (c == null) continue;
+            if (c == null || (withoutName && c.getType() == DataComponentTypes.CUSTOM_NAME)) continue;
             full.add(c);
             if (!left(c.getType(), shulker)) shown.add(c);
         }

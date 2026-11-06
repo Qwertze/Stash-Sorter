@@ -15,6 +15,8 @@ import com.porter.qwertestash.module.StashManager;
 import com.porter.qwertestash.module.StashSorter;
 import com.porter.qwertestash.module.StashTracker;
 import com.porter.qwertestash.stash.Containers;
+import com.porter.qwertestash.stash.AnvilSpot;
+import com.porter.qwertestash.stash.CraftingTableSpot;
 import com.porter.qwertestash.stash.DeliverySpot;
 import com.porter.qwertestash.stash.Stash;
 import com.porter.qwertestash.stash.Stash.Box;
@@ -100,6 +102,7 @@ public class StashCommand extends Command {
                 "autoDrop range <blocks>",
                 "whisper on/off",
                 "whitelist add/del <player>",
+                "whitelist [list]",
                 "prefix <word>/clear",
                 "manager on/off",
                 "manager url <url>",
@@ -113,7 +116,18 @@ public class StashCommand extends Command {
                 "delivery here",
                 "delivery <x> <y> <z> [dimension]",
                 "delivery clear",
-                "delivery"
+                "delivery",
+                "anvil here",
+                "anvil <x> <y> <z> [dimension]",
+                "anvil clear",
+                "anvil",
+                "crafting on/off",
+                "crafting",
+                "craftingtable here",
+                "craftingtable <x> <y> <z> [dimension]",
+                "craftingtable clear",
+                "craftingtable",
+                "craftNeverUse add/remove <item id>/list"
             )
             .build();
     }
@@ -394,6 +408,13 @@ public class StashCommand extends Command {
                 c.getSource().getEmbed().title("Whisper Search " + toggleStrCaps(CONFIG.whisperSearch));
             })))
             .then(literal("whitelist")
+                // The names only when asked for: every other stash command shows just how many there are
+                .executes(c -> {
+                    whitelistShow(c.getSource().getEmbed());
+                })
+                .then(literal("list").executes(c -> {
+                    whitelistShow(c.getSource().getEmbed());
+                }))
                 .then(literal("add").then(argument("player", word()).executes(c -> {
                     String player = getString(c, "player");
                     if (CONFIG.whitelist.stream().noneMatch(p -> p.equalsIgnoreCase(player))) CONFIG.whitelist.add(player);
@@ -434,7 +455,7 @@ public class StashCommand extends Command {
                         CONFIG.dashboardConsole = getToggle(c, "toggle");
                         MODULE.get(StashManager.class).updateDashboard();
                         c.getSource().getEmbed().title("Dashboard Console " + toggleStrCaps(CONFIG.dashboardConsole))
-                            .description(CONFIG.dashboardConsole ? "The website can run console commands here (not the dangerous ones: multi, update, jvmArgs, auth and the like)." : "The website can not run console commands here.");
+                            .description(CONFIG.dashboardConsole ? "The website can run console commands here, like the terminal (commands only the terminal may run still refuse it)." : "The website can not run console commands here.");
                     })))
                     .then(literal("proxy").requires(c -> Command.validateCommandSource(c, CommandSources.TERMINAL)).then(argument("toggle", toggle()).executes(c -> {
                         CONFIG.dashboardProxy = getToggle(c, "toggle");
@@ -485,6 +506,72 @@ public class StashCommand extends Command {
                     })
                     .then(argument("dimension", word()).executes(c -> {
                         deliverySet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), getString(c, "dimension"));
+                    }))))))
+            .then(literal("anvil")
+                .executes(c -> {
+                    anvilShow(c.getSource());
+                })
+                .then(literal("here").executes(c -> {
+                    anvilHere(c.getSource());
+                }))
+                .then(literal("clear").executes(c -> {
+                    anvilClear(c.getSource());
+                }))
+                .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer())
+                    .executes(c -> {
+                        anvilSet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), null);
+                    })
+                    .then(argument("dimension", word()).executes(c -> {
+                        anvilSet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), getString(c, "dimension"));
+                    }))))))
+            .then(literal("crafting")
+                .executes(c -> {
+                    craftingStatus(c.getSource().getEmbed());
+                })
+                .then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.enableCrafting = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Crafting " + toggleStrCaps(CONFIG.enableCrafting))
+                        .description(CONFIG.enableCrafting
+                            ? "A plain shulker box is crafted when an order or compaction needs an empty one and the stash has none." + (CraftingTableSpot.isSet() ? "" : " Set the crafting table first: `stash craftingtable here`.")
+                            : "Nothing is crafted.").primaryColor();
+                })))
+            .then(literal("craftNeverUse")
+                .then(literal("add").then(argument("item", word()).executes(c -> {
+                    String id = itemId(getString(c, "item"));
+                    if (!CONFIG.craftNeverUse.contains(id)) {
+                        // Copied, never changed in place: the bot tick reads the list meanwhile
+                        List<String> next = new java.util.ArrayList<>(CONFIG.craftNeverUse);
+                        next.add(id);
+                        CONFIG.craftNeverUse = next;
+                    }
+                    c.getSource().getEmbed().title("Never Crafting With " + id);
+                })))
+                .then(literal("remove").then(argument("item", word()).executes(c -> {
+                    String id = itemId(getString(c, "item"));
+                    List<String> next = new java.util.ArrayList<>(CONFIG.craftNeverUse);
+                    next.remove(id);
+                    CONFIG.craftNeverUse = next;
+                    c.getSource().getEmbed().title("Crafting With " + id + " Again");
+                })))
+                .then(literal("list").executes(c -> {
+                    c.getSource().getEmbed().title("Never Crafted With").description(CONFIG.craftNeverUse.isEmpty() ? "Nothing is on the list." : String.join(", ", CONFIG.craftNeverUse)).primaryColor();
+                })))
+            .then(literal("craftingtable")
+                .executes(c -> {
+                    tableShow(c.getSource());
+                })
+                .then(literal("here").executes(c -> {
+                    tableHere(c.getSource());
+                }))
+                .then(literal("clear").executes(c -> {
+                    tableClear(c.getSource());
+                }))
+                .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer())
+                    .executes(c -> {
+                        tableSet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), null);
+                    })
+                    .then(argument("dimension", word()).executes(c -> {
+                        tableSet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), getString(c, "dimension"));
                     }))))))
             .then(literal("prefix")
                 .then(literal("clear").executes(c -> {
@@ -714,6 +801,17 @@ public class StashCommand extends Command {
         return out.append('.').toString();
     }
 
+    /** "whitelist: 3 players": the status shows how many, never who (`stash whitelist list` does). */
+    static String whitelistCount() {
+        int n = CONFIG.whitelist.size();
+        return "whitelist: " + (n == 0 ? "empty" : n + (n == 1 ? " player" : " players"));
+    }
+
+    private static void whitelistShow(Embed embed) {
+        embed.title("Whisper Search Whitelist").primaryColor()
+            .description(CONFIG.whitelist.isEmpty() ? "Nobody yet. Add a player with `stash whitelist add <player>`." : String.join(", ", CONFIG.whitelist));
+    }
+
     private static void ordersStatus(Embed embed) {
         StashManager.OrdersStatus status = MODULE.get(StashManager.class).ordersStatus();
         embed.title("Stash Orders").primaryColor()
@@ -721,7 +819,90 @@ public class StashCommand extends Command {
             .addField("Current Order", status.current() == null ? "none" : status.current())
             .addField("Waiting On The Website", status.pending() < 0 ? "unknown (no heartbeat yet)" : String.valueOf(status.pending()))
             .addField("Blocker", status.blocker() == null ? "none, ready for an order" : status.blocker())
-            .addField("Delivery Container", DeliverySpot.isSet() ? "set (`stash delivery` shows it)" : "not set");
+            .addField("Delivery Container", DeliverySpot.isSet() ? "set (`stash delivery` shows it)" : "not set")
+            .addField("Anvil (Shulker Names)", AnvilSpot.isSet() ? AnvilSpot.source() + " (`stash anvil` shows it)" : "none yet: one is looked for in the stash area, or put down from the stash, when needed")
+            .addField("Crafting", toggleStr(CONFIG.enableCrafting) + ", crafting table " + (CraftingTableSpot.isSet() ? "set" : "not set"));
+    }
+
+    private static void craftingStatus(Embed embed) {
+        embed.title("Crafting").primaryColor()
+            .addField("Enabled", toggleStr(CONFIG.enableCrafting))
+            .addField("Crafting Table", CraftingTableSpot.isSet() ? "set (`stash craftingtable` shows it)" + (CraftingTableSpot.usable() ? "" : ", but the block there is not a crafting table now") : "not set: nothing can be crafted")
+            .addField("Crafted This Hour", MODULE.get(StashSorter.class).craftedLastHour() + " of " + CONFIG.craftMaxPerHour)
+            .addField("Caps", CONFIG.craftMaxPerOrder + " per order, " + CONFIG.craftMaxOpsPerTask + " grid fills per task, " + CONFIG.craftMaxPerHour + " per hour")
+            .addField("Never Used", CONFIG.craftNeverUse.isEmpty() ? "nothing listed" : String.join(", ", CONFIG.craftNeverUse))
+            .addField("What", "plain shulker boxes only, for orders (bins and empty-shulker lines) and compaction; from shells, a chest, planks or logs in the stash");
+    }
+
+    // The crafting table: set like the anvil, and shown only where the delivery container is
+
+    private static void tableShow(CommandContext ctx) {
+        CraftingTableSpot.Spot spot = CraftingTableSpot.get();
+        Embed embed = ctx.getEmbed();
+        if (spot == null) {
+            embed.title("No Crafting Table").description("Look at a crafting table and run `stash craftingtable here`, or give its position with `stash craftingtable <x> <y> <z> [dimension]`. Without one nothing is crafted.").primaryColor();
+            return;
+        }
+        embed.title("Crafting Table").description(CraftingTableSpot.describe(spot, showCoordinates(ctx)) + (CraftingTableSpot.usable() ? "" : ". Warning: the block there is not a crafting table now.")).primaryColor();
+    }
+
+    private static void tableClear(CommandContext ctx) {
+        boolean was = CraftingTableSpot.isSet();
+        CraftingTableSpot.clear();
+        ctx.getEmbed().title(was ? "Crafting Table Cleared" : "No Crafting Table")
+            .description(was ? "Nothing is crafted until a new one is set." : "None was set.").primaryColor();
+    }
+
+    private static void tableHere(CommandContext ctx) {
+        Embed embed = ctx.getEmbed();
+        String dimension = Stash.currentDimension();
+        if (!CACHE.getPlayerCache().isAlive() || dimension == null) {
+            embed.title("Not In Game").description("The bot has to be in the game, looking at the crafting table.").errorColor();
+            return;
+        }
+        var hit = com.aquarius.feature.player.raycast.RaycastHelper.playerBlockRaycast(DeliverySpot.LOOK_REACH, false);
+        if (hit == null || !hit.hit()) {
+            embed.title("No Crafting Table In Reach").description("The bot is not looking at a block within " + (int) DeliverySpot.LOOK_REACH + " blocks. Aim at a crafting table first.").errorColor();
+            return;
+        }
+        BlockPos pos = new BlockPos(hit.x(), hit.y(), hit.z());
+        if (!CraftingTableSpot.isTable(pos)) {
+            embed.title("Not A Crafting Table").description("The block the bot is looking at is not a crafting table.").errorColor();
+            return;
+        }
+        CraftingTableSpot.set(dimension, pos.x(), pos.y(), pos.z());
+        embed.title("Crafting Table Set").description(CraftingTableSpot.describe(CraftingTableSpot.get(), showCoordinates(ctx)) + "." + (CONFIG.enableCrafting ? "" : " Turn crafting on with `stash crafting on`.")).primaryColor();
+    }
+
+    private static void tableSet(CommandContext ctx, int x, int y, int z, @Nullable String dimensionArg) {
+        Embed embed = ctx.getEmbed();
+        String here = Stash.currentDimension();
+        String dimension = dimensionArg == null ? here : dimensionArg.trim().toLowerCase(java.util.Locale.ROOT);
+        if (dimension == null || dimension.isBlank()) {
+            embed.title("Which Dimension?").description("The bot's dimension is not known right now: add it, like `stash craftingtable <x> <y> <z> overworld`.").errorColor();
+            return;
+        }
+        if (!dimension.matches("[a-z0-9_.:/-]{1,64}")) {
+            embed.title("Bad Dimension").description("Use a name like overworld, the_nether or the_end.").errorColor();
+            return;
+        }
+        if (Math.abs(x) > 30_000_000 || Math.abs(z) > 30_000_000 || y < -2048 || y > 2048) {
+            embed.title("Bad Position").description("That position is outside the world.").errorColor();
+            return;
+        }
+
+        BlockPos pos = new BlockPos(x, y, z);
+        String note = "";
+        boolean inThisDimension = here != null && com.porter.qwertestash.orders.OrderBlocker.sameDimension(here, dimension);
+        if (!inThisDimension) note = " The bot is not in that dimension, so I could not check that it is a crafting table.";
+        else if (!Containers.isLoaded(pos)) note = " Warning: that position is not loaded (out of range), so I could not check that it is a crafting table.";
+        else if (!CraftingTableSpot.isTable(pos)) {
+            embed.title("Not A Crafting Table").description("There is no crafting table at that position. Check the coordinates (with negative ones, round down: -5.3 is block -6).").errorColor();
+            return;
+        }
+
+        CraftingTableSpot.set(dimension, pos.x(), pos.y(), pos.z());
+        embed.title("Crafting Table Set").description(CraftingTableSpot.describe(CraftingTableSpot.get(), showCoordinates(ctx)) + "." + note).primaryColor();
     }
 
     private static void deliveryShow(CommandContext ctx) {
@@ -797,6 +978,82 @@ public class StashCommand extends Command {
 
         DeliverySpot.set(dimension, pos.x(), pos.y(), pos.z());
         embed.title("Delivery Container Set").description(DeliverySpot.describe(DeliverySpot.get(), showCoordinates(ctx)) + "." + note).primaryColor();
+    }
+
+    // The anvil order shulkers are named at: set like the delivery container, and shown only where it is
+
+    private static void anvilShow(CommandContext ctx) {
+        AnvilSpot.Spot spot = AnvilSpot.get();
+        Embed embed = ctx.getEmbed();
+        if (spot == null) {
+            embed.title("No Anvil").description("None set, found or placed yet. When an order wants its shulkers named the bot looks for an anvil standing in the stash area, and failing that puts one down from the stash; with neither they are delivered unnamed. To choose one, look at an anvil and run `stash anvil here`, or give its position with `stash anvil <x> <y> <z> [dimension]`.").primaryColor();
+            return;
+        }
+        String how = switch (AnvilSpot.source()) {
+            case AnvilSpot.FOUND -> "found by the bot in the stash area";
+            case AnvilSpot.PLACED -> "put down by the bot from the stash";
+            default -> "set with `stash anvil`";
+        };
+        embed.title("Anvil").description(AnvilSpot.describe(spot, showCoordinates(ctx)) + ", " + how + (AnvilSpot.usable() ? "" : ". Warning: the block there is not an anvil now; another is looked for when one is needed.")).primaryColor();
+    }
+
+    private static void anvilClear(CommandContext ctx) {
+        boolean was = AnvilSpot.isSet();
+        AnvilSpot.clear();
+        ctx.getEmbed().title(was ? "Anvil Cleared" : "No Anvil")
+            .description(was ? "Shulkers an order wants named are delivered unnamed until a new one is set." : "None was set.").primaryColor();
+    }
+
+    private static void anvilHere(CommandContext ctx) {
+        Embed embed = ctx.getEmbed();
+        String dimension = Stash.currentDimension();
+        if (!CACHE.getPlayerCache().isAlive() || dimension == null) {
+            embed.title("Not In Game").description("The bot has to be in the game, looking at the anvil.").errorColor();
+            return;
+        }
+        var hit = com.aquarius.feature.player.raycast.RaycastHelper.playerBlockRaycast(DeliverySpot.LOOK_REACH, false);
+        if (hit == null || !hit.hit()) {
+            embed.title("No Anvil In Reach").description("The bot is not looking at a block within " + (int) DeliverySpot.LOOK_REACH + " blocks. Aim at an anvil first.").errorColor();
+            return;
+        }
+        BlockPos pos = new BlockPos(hit.x(), hit.y(), hit.z());
+        if (!AnvilSpot.isAnvil(pos)) {
+            embed.title("Not An Anvil").description("The block the bot is looking at is not an anvil (anvil, chipped or damaged).").errorColor();
+            return;
+        }
+        AnvilSpot.set(dimension, pos.x(), pos.y(), pos.z());
+        embed.title("Anvil Set").description(AnvilSpot.describe(AnvilSpot.get(), showCoordinates(ctx)) + ". Shulkers an order wants named are named here before they are delivered (about 1 XP level each).").primaryColor();
+    }
+
+    private static void anvilSet(CommandContext ctx, int x, int y, int z, @Nullable String dimensionArg) {
+        Embed embed = ctx.getEmbed();
+        String here = Stash.currentDimension();
+        String dimension = dimensionArg == null ? here : dimensionArg.trim().toLowerCase(java.util.Locale.ROOT);
+        if (dimension == null || dimension.isBlank()) {
+            embed.title("Which Dimension?").description("The bot's dimension is not known right now: add it, like `stash anvil <x> <y> <z> overworld`.").errorColor();
+            return;
+        }
+        if (!dimension.matches("[a-z0-9_.:/-]{1,64}")) {
+            embed.title("Bad Dimension").description("Use a name like overworld, the_nether or the_end.").errorColor();
+            return;
+        }
+        if (Math.abs(x) > 30_000_000 || Math.abs(z) > 30_000_000 || y < -2048 || y > 2048) {
+            embed.title("Bad Position").description("That position is outside the world.").errorColor();
+            return;
+        }
+
+        BlockPos pos = new BlockPos(x, y, z);
+        String note = "";
+        boolean inThisDimension = here != null && com.porter.qwertestash.orders.OrderBlocker.sameDimension(here, dimension);
+        if (!inThisDimension) note = " The bot is not in that dimension, so I could not check that it is an anvil.";
+        else if (!Containers.isLoaded(pos)) note = " Warning: that position is not loaded (out of range), so I could not check that it is an anvil.";
+        else if (!AnvilSpot.isAnvil(pos)) {
+            embed.title("Not An Anvil").description("There is no anvil at that position. Check the coordinates (with negative ones, round down: -5.3 is block -6).").errorColor();
+            return;
+        }
+
+        AnvilSpot.set(dimension, pos.x(), pos.y(), pos.z());
+        embed.title("Anvil Set").description(AnvilSpot.describe(AnvilSpot.get(), showCoordinates(ctx)) + "." + note).primaryColor();
     }
 
     /** The Stash Manager in one line each: never the key itself. */
@@ -884,6 +1141,6 @@ public class StashCommand extends Command {
             .addField("Auto Drop", toggleStr(CONFIG.autoDrop) + " (gives back what a player dropped near the bot, within " + (int) CONFIG.autoDropRange + " blocks)")
             .addField("Stash Manager", managerLine())
             .addField("Tracking", toggleStr(CONFIG.tracking))
-            .addField("Whisper Search", toggleStr(CONFIG.whisperSearch) + ", prefix \"" + CONFIG.prefix + "\", whitelist " + (CONFIG.whitelist.isEmpty() ? "empty" : String.join(", ", CONFIG.whitelist)));
+            .addField("Whisper Search", toggleStr(CONFIG.whisperSearch) + ", prefix \"" + CONFIG.prefix + "\", " + whitelistCount() + " (`stash whitelist list` shows them)");
     }
 }

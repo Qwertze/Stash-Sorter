@@ -465,7 +465,7 @@ public final class DashboardLink {
             result.addProperty("error", command == null || command.isBlank() ? "no command" : "the command is too long or has control characters");
             return;
         }
-        ConsoleRunner.Outcome out = ConsoleRunner.run(command.trim(), true, late -> {
+        ConsoleRunner.Outcome out = ConsoleRunner.run(command.trim(), late -> {
             // Output the command logs after it has returned goes on the same job
             JsonObject more = new JsonObject();
             more.addProperty("id", id);

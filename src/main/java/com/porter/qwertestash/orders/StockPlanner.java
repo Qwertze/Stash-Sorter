@@ -185,6 +185,30 @@ public final class StockPlanner {
         return fit != null ? fit : biggest;
     }
 
+    /**
+     * The loads of a shulker planned once more from a fresh survey, the way {@link #plan} counts stock: loose stacks
+     * first, then what lies inside shulkers. What is not there any more is dropped; at most {@link Order#SLOTS} loads.
+     */
+    public static List<Order.Lot> trim(List<Order.Lot> lots, Survey survey) {
+        Map<String, Long> totals = new java.util.LinkedHashMap<>();
+        for (Order.Lot lot : lots) totals.merge(lot.key(), (long) lot.count(), Long::sum);
+        Map<Var, Long> used = new IdentityHashMap<>();
+        List<Order.Lot> out = new ArrayList<>();
+        for (var e : totals.entrySet()) {
+            String key = e.getKey();
+            long loose = survey.available().getOrDefault(key, 0L), inShulkers = survey.shulkerAvailable().getOrDefault(key, 0L);
+            long usable = Math.min(e.getValue(), loose + inShulkers);
+            if (usable <= 0) continue;
+            long fromLoose = Math.min(usable, loose);
+            int max = Math.max(1, survey.maxStack().getOrDefault(key, 64));
+            List<Order.Lot> mine = new ArrayList<>(allocate(key, fromLoose, max, survey.variants().getOrDefault(key, List.of()), used));
+            if (usable > fromLoose) mine.addAll(allocate(key, usable - fromLoose, max, survey.shulkerVariants().getOrDefault(key, List.of()), used));
+            out.addAll(coalesce(mine, max));
+        }
+        if (out.size() > Order.SLOTS) out = new ArrayList<>(out.subList(0, Order.SLOTS));
+        return out;
+    }
+
     /** Slot loads for a line of {@code total} items: one stack at a time, each from the best fitting variant. */
     public static List<Order.Lot> allocate(String key, long total, int max, List<Var> variants, Map<Var, Long> used) {
         List<Order.Lot> out = new ArrayList<>();

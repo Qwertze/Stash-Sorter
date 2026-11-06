@@ -31,28 +31,11 @@ public final class ConsoleRunner {
     public record Outcome(boolean ok, boolean sensitive, JsonObject output, @Nullable String error) {
     }
 
-    /** Runs a command without the console gate: for the commands a settings change maps to. */
-    public static Outcome run(String command, Consumer<JsonObject> late) {
-        return run(command, false, late);
-    }
-
     /**
-     * @param gate refuse the commands the dashboard console may not run (see {@link CommandGate})
+     * Runs a command as the terminal would, with the dashboard as its source. Commands the proxy only allows from the
+     * terminal itself still refuse it.
      */
-    public static Outcome run(String command, boolean gate, Consumer<JsonObject> late) {
-        if (gate) {
-            String refused;
-            try {
-                refused = CommandGate.check(command, COMMAND);
-            } catch (RuntimeException | LinkageError e) {
-                refused = "the command could not be checked";
-            }
-            if (refused != null) {
-                LOG.warn("Qwerte Stash: a dashboard command was refused: {}", refused);
-                JsonObject out = DashboardCommandSource.output(null, List.of("Refused: " + refused + "."));
-                return new Outcome(false, false, out, refused);
-            }
-        }
+    public static Outcome run(String command, Consumer<JsonObject> late) {
         DashboardCommandSource source = new DashboardCommandSource(late);
         CommandContext ctx;
         String failure = null;

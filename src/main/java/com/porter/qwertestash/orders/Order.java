@@ -42,10 +42,17 @@ public final class Order {
 
     public final String id;
     public final List<Line> lines;
+    /** The names the order's shulkers get, or null for none. */
+    public final @Nullable ShulkerNames names;
 
     public Order(String id, List<Line> lines) {
+        this(id, lines, null);
+    }
+
+    public Order(String id, List<Line> lines, @Nullable ShulkerNames names) {
         this.id = id;
         this.lines = lines;
+        this.names = names;
     }
 
     /** Reads an order object from the server. Null when it has no id or no usable line. */
@@ -71,7 +78,8 @@ public final class Order {
         } catch (RuntimeException ex) {
             return null;
         }
-        return id.isEmpty() || lines.isEmpty() ? null : new Order(id, lines);
+        // A broken names field is read as no names: naming never fails an order
+        return id.isEmpty() || lines.isEmpty() ? null : new Order(id, lines, ShulkerNames.parse(o.get("names")));
     }
 
     /** The total asked for per line key, lines with the same key merged. */
