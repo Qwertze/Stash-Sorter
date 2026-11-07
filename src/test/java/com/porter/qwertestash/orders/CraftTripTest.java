@@ -34,6 +34,8 @@ class CraftTripTest {
         final Map<String, Integer> inv = new HashMap<>();
         final List<Recipes.Recipe> recipes;
         int pendingIn = -1;
+        /** Grid width: 3 for the table, 2 for the inventory's grid. */
+        int width = 3;
 
         FakeTable(List<Recipes.Recipe> recipes) {
             this.recipes = recipes;
@@ -72,7 +74,7 @@ class CraftTripTest {
         Recipes.@Nullable Recipe result() {
             if (!gives || pendingIn > 0) return null;
             for (Recipes.Recipe r : recipes) {
-                int[] at = CraftGrid.slots(r);
+                int[] at = CraftGrid.slots(r, width);
                 boolean ok = true;
                 boolean[] used = new boolean[10];
                 for (int i = 0; i < at.length && ok; i++) {

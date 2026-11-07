@@ -38,7 +38,7 @@ public final class ManagerIndex {
     }
 
     /** What is worked out once per key. */
-    private record Info(String key, String id, String name, String englishName, int maxStack, List<String> details, boolean enchanted) {
+    private record Info(String key, String id, String name, String englishName, int maxStack, List<String> details, boolean enchanted, int damage, int maxDamage) {
     }
 
     private static final class Agg {
@@ -80,7 +80,7 @@ public final class ManagerIndex {
         int known = 0, total = 0, stale = 0;
         for (Box box : stash.boxes) {
             // The delivery container is where orders are put, not part of the stash being indexed
-            if (box.delivery || (box.excluded && !includeExcluded)) continue;
+            if (box.delivery || !stash.inScope(box) || (box.excluded && !includeExcluded)) continue;
             total++;
             if (box.stale) stale++;
             Item[] contents = box.contents;
@@ -110,6 +110,11 @@ public final class ManagerIndex {
             for (String d : i.details()) details.add(d);
             o.add("details", details);
             o.addProperty("enchanted", i.enchanted());
+            // Only a damaged, damageable item has them (a damaged stack has a key of its own with split durability on)
+            if (i.damage() > 0) {
+                o.addProperty("damage", i.damage());
+                o.addProperty("maxDamage", i.maxDamage());
+            }
             // The plugin has no creative tabs: every item goes in "other"
             o.addProperty("tab", "other");
             o.addProperty("tabOrder", OTHER_ORDER);
@@ -161,6 +166,11 @@ public final class ManagerIndex {
             known, total, stale, sorted.size());
     }
 
+    /** {damage, maxDamage} to send for an item, or {0, 0} to send neither: only damageable (maxDamage > 0) and damaged (damage > 0). */
+    static int[] durability(int damage, int maxDamage) {
+        return maxDamage > 0 && damage > 0 ? new int[] {damage, maxDamage} : new int[] {0, 0};
+    }
+
     /** "overworld" as "minecraft:overworld"; a name with a namespace is left alone. Empty when unknown. */
     public static String namespaced(@Nullable String dimension) {
         if (dimension == null || dimension.isBlank()) return "";
@@ -203,7 +213,10 @@ public final class ManagerIndex {
      * Whether the bot crafts shulker boxes for orders (PROTOCOL.md "Crafting"): {@code enabled} is the setting, {@code table}
      * whether a crafting table is set (and, if its chunk is loaded, is one). No position.
      */
-    public record Crafting(boolean enabled, boolean table) {
+    public record Crafting(boolean enabled, boolean table, @Nullable String tableSource) {
+        public Crafting(boolean enabled, boolean table) {
+            this(enabled, table, null);
+        }
     }
 
     /** @param naming sent as {@code naming}; null leaves the field out (a bot without naming support) */
@@ -212,10 +225,32 @@ public final class ManagerIndex {
         return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, naming, null);
     }
 
+    /**
+     * The delivery storage (1.9.0, PROTOCOL.md "deliveryStorage"): how many chests there are (a double chest counts once), how
+     * many of them are known to be full, whether another can be put up now, and why not. No positions.
+     * @param autoExpand the setting
+     * @param blocked    why no chest can be put up (or the order is held up by the storage), or null
+     */
+    public record DeliveryStorage(boolean autoExpand, int chests, int full, boolean canExpand, @Nullable String blocked) {
+    }
+
     /** @param crafting sent as {@code crafting}; null leaves the field out (a bot without crafting support) */
     public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
                                    @Nullable Naming naming, @Nullable Crafting crafting) {
+        return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, naming, crafting, null);
+    }
+
+    /** @param storage sent as {@code deliveryStorage}; null leaves the field out (a bot without delivery storage, or none set) */
+    public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
+                                   @Nullable Naming naming, @Nullable Crafting crafting, @Nullable DeliveryStorage storage) {
+        return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, naming, crafting, storage, null);
+    }
+
+    /** @param deliveryHash sent as {@code deliveryHash} (1.11.0, the hash of the delivery contents report); null leaves the field out */
+    public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
+                                   @Nullable Naming naming, @Nullable Crafting crafting, @Nullable DeliveryStorage storage, @Nullable String deliveryHash) {
         JsonObject o = new JsonObject();
+        if (deliveryHash != null && !deliveryHash.isEmpty()) o.addProperty("deliveryHash", clamp(deliveryHash, 64));
         o.addProperty("server", b.server());
         o.addProperty("stash", b.stash());
         o.addProperty("player", b.player());
@@ -246,7 +281,19 @@ public final class ManagerIndex {
             JsonObject c = new JsonObject();
             c.addProperty("enabled", crafting.enabled());
             c.addProperty("table", crafting.table());
+            // How the table came to be (1.10.0): "set", "found", "placed", "crafted" or "none". Never where it is
+            if (crafting.tableSource() != null) c.addProperty("tableSource", crafting.tableSource());
             o.add("crafting", c);
+        }
+        if (storage != null) {
+            JsonObject d = new JsonObject();
+            d.addProperty("autoExpand", storage.autoExpand());
+            d.addProperty("chests", Math.max(0, storage.chests()));
+            d.addProperty("full", Math.max(0, Math.min(storage.full(), storage.chests())));
+            d.addProperty("canExpand", storage.canExpand());
+            if (storage.blocked() == null || storage.blocked().isEmpty()) d.add("blocked", JsonNull.INSTANCE);
+            else d.addProperty("blocked", clamp(storage.blocked(), 160));
+            o.add("deliveryStorage", d);
         }
         return GSON_NULLS.toJson(o).getBytes(StandardCharsets.UTF_8);
     }
@@ -322,7 +369,8 @@ public final class ManagerIndex {
         }
         if (item.potion != null) details.add(title(item.potion));
         boolean enchanted = item.enchants != null && !item.enchants.isEmpty();
-        info = new Info(key, clamp("minecraft:" + item.id, MAX_TEXT), clamp(name, MAX_TEXT), clamp(en, MAX_TEXT), Math.max(1, item.maxStack), details, enchanted);
+        info = new Info(key, clamp("minecraft:" + item.id, MAX_TEXT), clamp(name, MAX_TEXT), clamp(en, MAX_TEXT), Math.max(1, item.maxStack), details, enchanted,
+            durability(item.damage, item.maxDamage)[0], durability(item.damage, item.maxDamage)[1]);
         infos.put(key, info);
         return info;
     }

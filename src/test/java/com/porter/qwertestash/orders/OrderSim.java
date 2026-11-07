@@ -38,6 +38,41 @@ final class OrderSim implements OrderFlow.Host {
     final List<String> named = new ArrayList<>();
     int anvilTrips;
 
+    // Delivery storage (1.9.0): with a book the sim has chests of chestCap shulkers each, put up above one another
+    DeliveryBook book;
+    boolean autoExpand;
+    @Nullable String expandBlocker;
+    int chestCap = 2, expansions, rechecks;
+    /** The host can't start an Expand or a Recheck (it does nothing for them). */
+    boolean refuseStarts;
+    final Map<DeliveryBook.Pos, Integer> inChest = new HashMap<>();
+
+    /** The sim's storage is one chest at (0, 64, 0) with this many shulkers of room. */
+    OrderSim storage(int cap) {
+        book = new DeliveryBook();
+        chestCap = cap;
+        book.syncPrimary(List.of(new DeliveryBook.Pos(0, 64, 0)));
+        return this;
+    }
+
+    /** A player takes everything out of the chest (the lid is seen open and shut). */
+    void claim(DeliveryBook.Pos p) {
+        DeliveryBook.Entry e = book.find(p);
+        for (DeliveryBook.Pos q : e.parts()) inChest.put(q, 0);
+        book.onViewers(p, 1, false);
+        book.onViewers(p, 0, false);
+    }
+
+    @Override
+    public DeliveryRoom deliveryRoom() {
+        return book == null ? DeliveryRoom.ROOM : book.room(autoExpand, expandBlocker, now, DeliveryBook.RECHECK_MS);
+    }
+
+    @Override
+    public int deliveryChests() {
+        return book == null ? 1 : Math.max(1, book.chests());
+    }
+
     long now = 1_000_000;
     boolean gate = true, deliverySet = true, deliveryUnreachable;
     boolean rereading;
@@ -421,6 +456,28 @@ final class OrderSim implements OrderFlow.Host {
             }
             return true;
         }
+        if (intent instanceof OrderFlow.Expand x) {
+            last = "expand";
+            if (refuseStarts) return true;
+            flow.expandStarted(x.unit());
+            expansions++;
+            DeliveryBook.Entry top = book.topRow().get(0);
+            List<DeliveryBook.Pos> up = new ArrayList<>();
+            for (DeliveryBook.Pos p : top.parts()) up.add(new DeliveryBook.Pos(p.x(), p.y() + 1, p.z()));
+            book.add(up);
+            return true;
+        }
+        if (intent instanceof OrderFlow.Recheck r) {
+            last = "recheck";
+            if (refuseStarts) return true;
+            rechecks++;
+            DeliveryBook.Entry e = book.find(r.at());
+            int held = 0;
+            for (DeliveryBook.Pos q : e.parts()) held = Math.max(held, inChest.getOrDefault(q, 0));
+            if (held < chestCap) book.markRoom(e, now);
+            else book.markFull(e, now);
+            return true;
+        }
         if (intent instanceof OrderFlow.Deliver d) {
             Unit u = d.unit();
             last = d.verify() ? "verify" : "deliver";
@@ -432,7 +489,17 @@ final class OrderSim implements OrderFlow.Host {
             }
             u.base = (int) delivery.stream().filter(c -> matches(u, c)).count();
             flow.deliveryStarted(u);
-            if (delivery.size() >= deliveryCapacity) {
+            if (book != null) {
+                DeliveryBook.Entry chest = book.firstUsable();
+                DeliveryBook.Pos at = chest.first();
+                if (inChest.getOrDefault(at, 0) >= chestCap) {
+                    book.markFull(chest, now);
+                    flow.deliveryFull();
+                    return true;
+                }
+                inChest.merge(at, 1, Integer::sum);
+            }
+            else if (delivery.size() >= deliveryCapacity) {
                 flow.deliveryFull();
                 return true;
             }

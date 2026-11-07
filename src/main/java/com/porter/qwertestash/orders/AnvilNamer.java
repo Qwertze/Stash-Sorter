@@ -30,6 +30,15 @@ public final class AnvilNamer {
         /** Right-clicks the anvil. */
         boolean open();
 
+        /** The container delay holds the open click back this tick (the open timeouts and retry pause do not run meanwhile). */
+        default boolean openPaused() {
+            return false;
+        }
+
+        /** The anvil window has just been seen open. */
+        default void opened() {
+        }
+
         /** Inventory clicks of ours are still going out. */
         boolean busy();
 
@@ -187,10 +196,18 @@ public final class AnvilNamer {
             case Open -> {
                 if (port.anvilOpen()) {
                     go(Step.Place);
+                    port.opened();
                     return;
                 }
                 if (port.otherWindowOpen()) {
                     port.close();
+                    return;
+                }
+                // Held back by the container delay: no click, and no tick counts against the open timeouts or the retry pause
+                if (port.openPaused()) {
+                    ticks--;
+                    stepTicks--;
+                    sinceClick--;
                     return;
                 }
                 if (stepTicks > OPEN_TICKS || (tries >= OPEN_TRIES && sinceClick > OPEN_RETRY_TICKS)) {

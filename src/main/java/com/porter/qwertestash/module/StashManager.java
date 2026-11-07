@@ -3,6 +3,8 @@ package com.porter.qwertestash.module;
 import com.aquarius.event.client.ClientBotTick;
 import com.aquarius.event.client.ClientDisconnectEvent;
 import com.aquarius.module.api.Module;
+import com.aquarius.network.codec.PacketHandlerCodec;
+import com.aquarius.network.codec.PacketHandlerStateCodec;
 import com.github.rfresh2.EventConsumer;
 import com.porter.qwertestash.manager.ActivityFeed;
 import com.porter.qwertestash.manager.ConfigApplier;
@@ -10,9 +12,12 @@ import com.porter.qwertestash.manager.ConfigSchema;
 import com.porter.qwertestash.manager.ProxyEnv;
 import com.porter.qwertestash.manager.ProxyPolicy;
 import com.porter.qwertestash.manager.ConsoleRunner;
+import com.porter.qwertestash.manager.DeliveryContents;
 import com.porter.qwertestash.manager.DashboardLink;
 import com.porter.qwertestash.manager.ManagerHttp;
 import com.porter.qwertestash.manager.ManagerIndex;
+import com.porter.qwertestash.manager.ViewerFeed;
+import com.porter.qwertestash.manager.ViewerGame;
 import com.porter.qwertestash.orders.OrderBlocker;
 import com.porter.qwertestash.orders.OrderDriver;
 import com.porter.qwertestash.orders.OrderFlow;
@@ -21,6 +26,11 @@ import com.porter.qwertestash.stash.DeliverySpot;
 import com.porter.qwertestash.stash.Stash;
 import com.porter.qwertestash.stash.Stash.Box;
 import com.porter.qwertestash.stash.Stashes;
+import org.geysermc.mcprotocollib.protocol.data.game.PlayerListEntry;
+import org.geysermc.mcprotocollib.protocol.data.ProtocolState;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundForgetLevelChunkPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSectionBlocksUpdatePacket;
 import org.jspecify.annotations.Nullable;
 
 import java.io.ByteArrayOutputStream;
@@ -114,6 +124,14 @@ public class StashManager extends Module {
     private volatile ManagerIndex.Naming naming = new ManagerIndex.Naming(false, -1);
     // And about crafting: the setting, and whether a crafting table is set
     private volatile ManagerIndex.Crafting crafting = new ManagerIndex.Crafting(false, false);
+    // And about the delivery storage (1.9.0): chests, full ones, whether another can be put up (null: no delivery container set)
+    private volatile ManagerIndex.@Nullable DeliveryStorage storage;
+    // And what is in those chests (1.11.0): the report as last built (once a second), and when it is sent
+    private DeliveryContents.@Nullable Built deliveryReport;
+    private long deliveryBuiltAt, deliveryCheckedAt;
+    private List<DeliveryContents.Chest> deliveryChests = List.of();
+    private String deliveryWho = "";
+    private final DeliveryContents.Schedule deliverySchedule = new DeliveryContents.Schedule();
     private boolean orderDriven;
     private long lastOrderDrive;
     private boolean heartbeatSeen;
@@ -165,7 +183,71 @@ public class StashManager extends Module {
         hook(list, () -> list.add(of(com.aquarius.event.player.SpectatorConnectedEvent.class, e -> ActivityFeed.INSTANCE.event("Players", "info", "A spectator joined"))));
         hook(list, () -> list.add(of(com.aquarius.event.player.SpectatorDisconnectedEvent.class, e -> ActivityFeed.INSTANCE.event("Players", "info", "A spectator left"))));
         hook(list, () -> list.add(of(com.aquarius.event.update.UpdateAvailableEvent.class, e -> ActivityFeed.INSTANCE.event("Proxy", "info", "An update is available"))));
+        // The live viewer: the chat ring (kept always, 50 lines) and the hint that a chunk's columns changed
+        hook(list, () -> list.add(of(com.aquarius.event.chat.PublicChatEvent.class, e -> chat("public", name(e.sender()), null, e.message()))));
+        hook(list, () -> list.add(of(com.aquarius.event.chat.WhisperChatEvent.class, e -> chat("whisper", name(e.sender()), name(e.receiver()), e.message()))));
+        hook(list, () -> list.add(of(com.aquarius.event.chat.SystemChatEvent.class, e -> chat("system", "", null, e.message()))));
+        hook(list, () -> list.add(of(com.aquarius.event.chat.DeathMessageChatEvent.class, e -> chat("death", "", null, e.message()))));
+        hook(list, () -> list.add(of(com.aquarius.event.client.ChunkDataEvent.class, e -> {
+            ViewerFeed v = viewerFeed();
+            if (v != null && v.isActive()) v.markDirty(e.x(), e.z());
+        })));
         return list;
+    }
+
+    private static void chat(String kind, @Nullable String sender, @Nullable String to, @Nullable String message) {
+        try {
+            ViewerFeed.CHAT.add(kind, sender, to, message);
+        } catch (RuntimeException e) {
+            // The viewer's chat is best effort
+        }
+    }
+
+    private static @Nullable String name(@Nullable PlayerListEntry entry) {
+        return entry == null ? null : entry.getName();
+    }
+
+    private @Nullable ViewerFeed viewerFeed() {
+        DashboardLink l = link;
+        return l == null ? null : l.viewer();
+    }
+
+    /** Block changes mark the chunk for the live viewer. Seen only, never changed; costs one flag read when nobody watches. */
+    @Override
+    public PacketHandlerCodec registerClientPacketHandlerCodec() {
+        return PacketHandlerCodec.clientBuilder()
+            .setId("qwerte-stash-viewer")
+            .setPriority(-1000)
+            .state(ProtocolState.GAME, PacketHandlerStateCodec.clientBuilder()
+                .inbound(ClientboundBlockUpdatePacket.class, (packet, session) -> {
+                    try {
+                        ViewerFeed v = viewerFeed();
+                        if (v != null && v.isActive()) v.markDirty(packet.getEntry().getX() >> 4, packet.getEntry().getZ() >> 4);
+                    } catch (RuntimeException e) {
+                        // Only a hint
+                    }
+                    return packet;
+                })
+                .inbound(ClientboundForgetLevelChunkPacket.class, (packet, session) -> {
+                    try {
+                        ViewerFeed v = viewerFeed();
+                        if (v != null && v.isActive()) v.markUnloaded(packet.getX(), packet.getZ());
+                    } catch (RuntimeException e) {
+                        // Only a hint
+                    }
+                    return packet;
+                })
+                .inbound(ClientboundSectionBlocksUpdatePacket.class, (packet, session) -> {
+                    try {
+                        ViewerFeed v = viewerFeed();
+                        if (v != null && v.isActive()) v.markDirty(packet.getChunkX(), packet.getChunkZ());
+                    } catch (RuntimeException e) {
+                        // Only a hint
+                    }
+                    return packet;
+                })
+                .build())
+            .build();
     }
 
     private static void hook(List<EventConsumer<?>> list, Runnable add) {
@@ -221,7 +303,7 @@ public class StashManager extends Module {
     }
 
     // The dashboard link: on while the manager is on and the dashboard setting is
-    private DashboardLink link;
+    private volatile DashboardLink link;
 
     /**
      * Starts or stops the dashboard link to match the settings. Safe from any thread. A link stopped from one of its own
@@ -376,9 +458,16 @@ public class StashManager extends Module {
         public boolean wanted() {
             return CONFIG.manager && CONFIG.dashboard;
         }
+
+        @Override
+        public ViewerFeed.Game viewerGame() {
+            return new ViewerGame();
+        }
     }
 
     private void disconnected() {
+        ViewerFeed v = viewerFeed();
+        if (v != null) v.resync();
         stopDriving();
         forgetOrder();
         reset();
@@ -428,6 +517,11 @@ public class StashManager extends Module {
         backoff = 0;
         lastPushedId = null;
         needIndex = false;
+        deliveryReport = null;
+        deliveryBuiltAt = deliveryCheckedAt = 0;
+        deliveryChests = List.of();
+        deliveryWho = "";
+        deliverySchedule.reset();
         sentSig = "";
         lastLogged = "";
         warnedKey = warnedUrl = false;
@@ -545,6 +639,8 @@ public class StashManager extends Module {
         if (built == null || !built.server().equals(ManagerIndex.clamp(stash.server, 256)) || !built.stash().equals(ManagerIndex.clamp(stash.name, 256))
             || !built.player().equals(ManagerIndex.clamp(name, 256))) return;
 
+        refreshDelivery(stash, name, now);
+
         // Another bot owns this stash name: one heartbeat a minute finds out when that changes
         if (conflictOwner != null) {
             if (now < conflictRetryAt) return;
@@ -568,7 +664,10 @@ public class StashManager extends Module {
             });
         }
         else if (now - lastHeartbeat >= HEARTBEAT_MS || !sig().equals(sentSig)) beat(base, key, built, now);
-        else orderStep(base, key, built, now);
+        else if (!orderStep(base, key, built, now) && !inFlight && deliveryReport != null && deliverySchedule.due(scheduleKey(deliveryReport), now)) {
+            // Last in line: the index, the heartbeat and the order's requests all go first
+            sendDelivery(base, key, deliveryReport, now);
+        }
     }
 
     private String sig() {
@@ -581,7 +680,7 @@ public class StashManager extends Module {
         long done = rescanDone;
         DeliverySpot.Spot spot = DeliverySpot.get();
         ManagerIndex.Delivery delivery = spot == null ? null : new ManagerIndex.Delivery(spot.x(), spot.y(), spot.z(), spot.dimension());
-        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting), key, (code, body) -> {
+        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash()), key, (code, body) -> {
             if (code != 200) return false;
             heartbeatSeen = true;
             driver().onHeartbeat(body);
@@ -591,10 +690,68 @@ public class StashManager extends Module {
                 sentSig = sig();
             }
             needIndex = ManagerIndex.needsIndex(body);
+            // Only a server that answers with a needDelivery key (true or false) knows the delivery report
+            deliverySchedule.supported(DeliveryContents.supportsDelivery(body));
+            if (deliveryReport != null && DeliveryContents.needsDelivery(body)) deliverySchedule.ask();
             long id = ManagerIndex.rescanId(body);
             if (id >= 0) startRescan(id);
             return true;
         });
+    }
+
+    /**
+     * Keeps the delivery contents report current. Once a second the chests are looked at (cheap: their read times, fullness and
+     * the identity of the arrays the last read replaced); the report is only rebuilt when one of those changed, or every 10 s.
+     */
+    private void refreshDelivery(Stash stash, String name, long now) {
+        if (now - deliveryCheckedAt < 1000) return;
+        deliveryCheckedAt = now;
+        try {
+            if (!DeliverySpot.isSet()) {
+                deliveryReport = null;
+                deliveryChests = List.of();
+                return;
+            }
+            List<DeliveryContents.Chest> chests = DeliveryContents.collect(stash);
+            String who = stash.server + "|" + stash.name + "|" + name;
+            if (deliveryReport != null && who.equals(deliveryWho) && chests.equals(deliveryChests) && now - deliveryBuiltAt < 10_000) return;
+            deliveryChests = chests;
+            deliveryWho = who;
+            deliveryBuiltAt = now;
+            deliveryReport = DeliveryContents.build(stash.server, stash.name, name, chests);
+        } catch (RuntimeException e) {
+            LOG.debug("{}couldn't build the delivery contents: {}", PREFIX, e.toString());
+            deliveryReport = null;
+        }
+    }
+
+    /** What was sent is remembered per stash and hash (a different stash with the same contents is still sent). */
+    private static String scheduleKey(DeliveryContents.Built r) {
+        return r.server() + "|" + r.stash() + "|" + r.hash();
+    }
+
+    /**
+     * POST /api/v1/delivery, signed like the index. Never part of the index; no positions in it. It is soft: whatever the answer
+     * (an old server's unsigned 404 included) it never feeds the manager's backoff or the status; it has a retry timer of its own.
+     */
+    private final DeliveryContents.SentLog deliveryLog = new DeliveryContents.SentLog();
+
+    private void sendDelivery(URI base, String key, DeliveryContents.Built report, long now) {
+        deliverySchedule.attempt(now);
+        send(base, "/api/v1/delivery", report.json(), key, (code, body) -> {
+            if (code == 200) {
+                deliverySchedule.sent(scheduleKey(report));
+                if (deliveryLog.sent(System.currentTimeMillis())) LOG.info("{}{}", PREFIX, DeliveryContents.SentLog.line(report.chests()));
+            } else if (code == 400 || code == 413) {
+                LOG.debug("{}the server refused the delivery contents ({}).", PREFIX, code);
+                deliverySchedule.rejected(scheduleKey(report));
+                deliveryLog.failed();
+            } else {
+                deliverySchedule.failed(System.currentTimeMillis());
+                deliveryLog.failed();
+            }
+            return true;
+        }, true);
     }
 
     /** The bot account's name, from the profile the server gave it. */
@@ -658,10 +815,13 @@ public class StashManager extends Module {
             ManagerIndex.Naming namingState = namingNow();
             naming = namingState;
             // So is a change of the anvil or of the bot's XP level
-            ManagerIndex.Crafting craftingState = new ManagerIndex.Crafting(CONFIG.enableCrafting, com.porter.qwertestash.stash.CraftingTableSpot.usable());
+            ManagerIndex.Crafting craftingState = new ManagerIndex.Crafting(CONFIG.enableCrafting, com.porter.qwertestash.stash.CraftingTableSpot.usable(), com.porter.qwertestash.stash.CraftingTableSpot.source());
             crafting = craftingState;
+            ManagerIndex.DeliveryStorage storageState = s.deliveryStorage();
+            storage = storageState;
             blockerSig = (next == null ? "" : next) + "|" + (spot == null ? "-" : String.valueOf(spot.hashCode())) + "|" + namingState.anvil() + "/" + namingState.xpLevels() + "/" + namingState.anvilSource()
-                + "|" + craftingState.enabled() + "/" + craftingState.table();
+                + "|" + craftingState.enabled() + "/" + craftingState.table() + "/" + craftingState.tableSource()
+                + "|" + (storageState == null ? "-" : storageState.autoExpand() + "/" + storageState.chests() + "/" + storageState.full() + "/" + storageState.canExpand() + "/" + storageState.blocked());
             driver();
             ordersStatus = new OrdersStatus(flow.summary(), heartbeatSeen ? driver().pending() : -1, next);
         }
@@ -755,7 +915,7 @@ public class StashManager extends Module {
         fp = fp * 31 + Stashes.version;
         fp = fp * 31 + stash.boxes.size();
         int stale = 0;
-        for (Box box : stash.boxes) if (box.stale && (include || !box.excluded)) stale++;
+        for (Box box : stash.boxes) if (box.stale && stash.inScope(box) && (include || !box.excluded)) stale++;
         fp = fp * 31 + stale;
         String dimension = Stash.currentDimension();
         fp = fp * 31 + (dimension == null ? 0 : dimension.hashCode());
@@ -888,6 +1048,11 @@ public class StashManager extends Module {
     }
 
     private void send(URI base, String path, byte[] body, String key, Reply reply) {
+        send(base, path, body, key, reply, false);
+    }
+
+    /** @param soft the answer never feeds the backoff or the status (only a 409 owner conflict is acted on) */
+    private void send(URI base, String path, byte[] body, String key, Reply reply, boolean soft) {
         URI url;
         try {
             url = URI.create(base + path);
@@ -918,7 +1083,7 @@ public class StashManager extends Module {
                 results.add(() -> {
                     if (gen != generation) return;
                     inFlight = false;
-                    handle(finalCode, finalText, finalError, reply);
+                    handle(finalCode, finalText, finalError, reply, soft);
                 });
             });
         } catch (RuntimeException e) {
@@ -936,7 +1101,7 @@ public class StashManager extends Module {
     }
 
     /** A reply, on the tick. */
-    private void handle(int code, String body, @Nullable String error, Reply reply) {
+    private void handle(int code, String body, @Nullable String error, Reply reply, boolean soft) {
         // 409 with the ownership error: this stash name belongs to another player. Told apart from every other 409 by the
         // error field, so an order status 409 later ("already finished") is not taken for it
         if (code == 409) {
@@ -945,6 +1110,15 @@ public class StashManager extends Module {
                 ownerRefused(owner);
                 return;
             }
+        }
+
+        if (soft) {
+            try {
+                reply.done(code, body);
+            } catch (RuntimeException e) {
+                LOG.debug("{}couldn't handle a soft reply: {}", PREFIX, e.toString());
+            }
+            return;
         }
 
         boolean ok;
@@ -985,6 +1159,7 @@ public class StashManager extends Module {
         nextAttemptAt = 0;
         lastPushedId = null;
         needIndex = false;
+        deliverySchedule.forget();
         lastError = "stash name '" + CONFIG.stashName + "' is used by " + owner;
         setStatus("stash name taken by " + owner);
         String text = "stash name '" + CONFIG.stashName + "' is used by " + owner + ": pick another stash name (each bot needs its own, `stash name <name>`).";

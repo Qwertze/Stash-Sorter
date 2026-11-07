@@ -22,6 +22,9 @@ public final class CraftingTableSpot {
         }
     }
 
+    /** Set with `stash craftingtable`; found standing in the stash area; placed by the bot from one in the stash; crafted and placed. */
+    public static final String SET = "set", FOUND = "found", PLACED = "placed", CRAFTED = "crafted", NONE = "none";
+
     // One immutable value that every thread reads whole (the four config fields are written one by one)
     private static volatile @Nullable Spot current;
     private static volatile boolean loaded;
@@ -43,7 +46,21 @@ public final class CraftingTableSpot {
         return get() != null;
     }
 
+    /** "set", "found", "placed", "crafted", or "none" when there is no table (settings from before 1.10.0 read as "set"). */
+    public static String source() {
+        if (get() == null) return NONE;
+        String s = CONFIG.craftingTableSource;
+        return FOUND.equals(s) || PLACED.equals(s) || CRAFTED.equals(s) ? s : SET;
+    }
+
+    /** Set by hand (`stash craftingtable`). */
     public static synchronized void set(String dimension, int x, int y, int z) {
+        remember(dimension, x, y, z, SET);
+    }
+
+    /** Remembered as set, found, placed or crafted. */
+    public static synchronized void remember(String dimension, int x, int y, int z, String source) {
+        CONFIG.craftingTableSource = source;
         CONFIG.craftingTableX = x;
         CONFIG.craftingTableY = y;
         CONFIG.craftingTableZ = z;
@@ -54,6 +71,7 @@ public final class CraftingTableSpot {
 
     public static synchronized void clear() {
         CONFIG.craftingTableDimension = "";
+        CONFIG.craftingTableSource = "";
         CONFIG.craftingTableX = CONFIG.craftingTableY = CONFIG.craftingTableZ = 0;
         current = null;
         loaded = true;

@@ -35,6 +35,15 @@ public final class CraftTrip {
         /** Right-clicks the table. */
         boolean open();
 
+        /** The container delay holds the open click back this tick (the open timeouts and retry pause do not run meanwhile). */
+        default boolean openPaused() {
+            return false;
+        }
+
+        /** The table window has just been seen open. */
+        default void opened() {
+        }
+
         /** Inventory clicks of ours are still going out. */
         boolean busy();
 
@@ -112,7 +121,12 @@ public final class CraftTrip {
         MISSING = "the inputs aren't all in the inventory", GRID = "the grid didn't fill as it should",
         TOO_LONG = "the trip to the crafting table took too long";
 
+    /** Grid slots of the inventory's 2x2 crafting grid (window slots 1-4; 5-8 are the armour). */
+    public static final int INVENTORY_GRID = 4, TABLE_GRID = 9;
+
     private final Port port;
+    /** 9 for a crafting table, {@link #INVENTORY_GRID} for the inventory's own grid (no walking, no window opened or closed). */
+    private final int gridSlots;
     private final List<CraftPlanner.Step> steps;
     private final String item;
     private Step step = Step.Walk;
@@ -125,7 +139,18 @@ public final class CraftTrip {
     private @Nullable Outcome outcome, pending;
 
     public CraftTrip(Port port, CraftPlanner.Plan plan) {
+        this(port, plan, TABLE_GRID);
+    }
+
+    /**
+     * @param gridSlots {@link #TABLE_GRID}, or {@link #INVENTORY_GRID}: the trip then starts where the bot stands, "tableOpen" means
+     *                  the inventory window is the current one, and the grid is emptied wherever the bot is (a window of another
+     *                  module open meanwhile only delays that)
+     */
+    public CraftTrip(Port port, CraftPlanner.Plan plan, int gridSlots) {
         this.port = port;
+        this.gridSlots = gridSlots;
+        if (inventoryGrid()) this.step = Step.Open;
         this.steps = plan.steps();
         this.item = plan.item();
         this.limit = TRIP_BASE_TICKS + TRIP_FILL_TICKS * Math.max(1, plan.fills());
@@ -138,6 +163,15 @@ public final class CraftTrip {
 
     public Step step() {
         return step;
+    }
+
+    private boolean inventoryGrid() {
+        return gridSlots == INVENTORY_GRID;
+    }
+
+    /** The grid may hold something of ours (the inventory's keeps its items whatever window is open). */
+    private boolean gridLive() {
+        return inventoryGrid() || port.tableOpen();
     }
 
     /** How many of the wanted item were made so far. */
@@ -160,13 +194,13 @@ public final class CraftTrip {
     }
 
     private boolean gridEmpty() {
-        for (int s = 1; s <= 9; s++) if (port.itemAt(s) != null) return false;
+        for (int s = 1; s <= gridSlots; s++) if (port.itemAt(s) != null) return false;
         return true;
     }
 
     private int gridTotal() {
         int n = 0;
-        for (int s = 1; s <= 9; s++) if (port.itemAt(s) != null) n += port.countAt(s);
+        for (int s = 1; s <= gridSlots; s++) if (port.itemAt(s) != null) n += port.countAt(s);
         return n;
     }
 
@@ -187,14 +221,14 @@ public final class CraftTrip {
     /** Ends with this outcome: anything in the grid is taken back out first, then the window closed. */
     private void end(@Nullable String failure, boolean retry, boolean tableBad) {
         pending = new Outcome(failure, retry, tableBad, false, made);
-        go(port.tableOpen() && !gridEmpty() ? Step.Retrieve : Step.Close);
+        go(gridLive() && !gridEmpty() ? Step.Retrieve : Step.Close);
     }
 
     /** Stops the trip now (the bot gives way, the order ends): the grid is emptied, the window closed, the try may be made again. */
     public void abort(String why) {
         if (step == Step.Done) return;
         if (pending == null) pending = new Outcome(why, true, false, false, made);
-        if (step != Step.Retrieve && step != Step.Close) go(port.tableOpen() && !gridEmpty() ? Step.Retrieve : Step.Close);
+        if (step != Step.Retrieve && step != Step.Close) go(gridLive() && !gridEmpty() ? Step.Retrieve : Step.Close);
     }
 
     public void tick() {
@@ -206,7 +240,7 @@ public final class CraftTrip {
         if (ticks > limit && pending == null) end(TOO_LONG, false, false);
         if (ticks > limit + RETRIEVE_TICKS + CLOSE_TICKS) {
             Outcome was = pending;
-            boolean left = port.tableOpen() && (!gridEmpty() || port.holdingCursor());
+            boolean left = gridLive() && (!gridEmpty() || port.holdingCursor());
             outcome = new Outcome(was == null || was.failure() == null ? TOO_LONG : was.failure(), false, was != null && was.tableBad(), left, made);
             step = Step.Done;
             return;
@@ -239,6 +273,7 @@ public final class CraftTrip {
             }
             case Open -> {
                 if (port.tableOpen()) {
+                    port.opened();
                     // Something left in the grid (not ours, or from before) is taken out before anything is put in
                     if (!gridEmpty()) {
                         placedAny = true;
@@ -251,6 +286,13 @@ public final class CraftTrip {
                 }
                 if (port.otherWindowOpen()) {
                     port.close();
+                    return;
+                }
+                // Held back by the container delay: no click, and no tick counts against the open timeouts or the retry pause
+                if (port.openPaused()) {
+                    ticks--;
+                    stepTicks--;
+                    sinceClick--;
                     return;
                 }
                 if (stepTicks > OPEN_TICKS || (tries >= OPEN_TRIES && sinceClick > OPEN_RETRY_TICKS)) {
@@ -278,7 +320,7 @@ public final class CraftTrip {
                 }
                 CraftPlanner.Step st = steps.get(at);
                 if (fillsLeft < 0) fillsLeft = st.fills();
-                batch = CraftGrid.batch(st.recipe(), port.carried(), fillsLeft, MAX_PER_SLOT);
+                batch = CraftGrid.batch(st.recipe(), port.carried(), fillsLeft, MAX_PER_SLOT, inventoryGrid() ? 2 : 3);
                 if (batch == null) {
                     end(MISSING + " (" + Recipes.pretty(st.recipe().result()) + ")", false, false);
                     return;
@@ -295,7 +337,7 @@ public final class CraftTrip {
                 }
                 if (port.busy() || sinceClick < SETTLE_TICKS) return;
                 CraftGrid.Batch b = batch;
-                for (int s = 1; s <= 9; s++) {
+                for (int s = 1; s <= gridSlots; s++) {
                     String want = b.item()[s];
                     String there = port.itemAt(s);
                     if (want == null) {
@@ -376,14 +418,16 @@ public final class CraftTrip {
                 go(Step.Prepare);
             }
             case Retrieve -> {
-                // Closed (by the server): it gave back what was in the grid
+                // Closed (by the server): it gave back what was in the grid. The inventory's grid keeps its items while another
+                // window is open: they are waited for, never given up on
                 if (!port.tableOpen()) {
-                    go(Step.Close);
+                    if (inventoryGrid()) stuckTimer();
+                    else go(Step.Close);
                     return;
                 }
                 if (port.busy() || sinceClick < SETTLE_TICKS) return;
                 int slot = -1;
-                for (int s = 1; s <= 9 && slot < 0; s++) if (port.itemAt(s) != null) slot = s;
+                for (int s = 1; s <= gridSlots && slot < 0; s++) if (port.itemAt(s) != null) slot = s;
                 if (slot < 0) {
                     // Cleared what was left from before: the trip carries on
                     if (pending == null) {
@@ -406,7 +450,7 @@ public final class CraftTrip {
             case Close -> {
                 if (port.busy()) return;
                 // Never closed with something in the grid, or on the cursor
-                if (port.tableOpen() && (!gridEmpty() || port.holdingCursor())) {
+                if (gridLive() && (!gridEmpty() || port.holdingCursor())) {
                     go(Step.Retrieve);
                     return;
                 }

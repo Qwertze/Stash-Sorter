@@ -37,6 +37,8 @@ public final class Item {
     public boolean block;
     public boolean fullBlock;
     public boolean damaged;
+    /** The damage value and the most damage the item takes (0 when it has none); saved, for the index's durability bar. */
+    public int damage, maxDamage;
     /** Carries block-entity data (a chest or barrel item picked with its contents, a filled beehive...): never a crafting input. */
     public boolean blockData;
     public List<String> tags = new ArrayList<>();
@@ -72,6 +74,18 @@ public final class Item {
     public transient boolean bundle;
 
     /**
+     * {damage, maxDamage} of a stack: the DAMAGE component (0 when missing or not above 0) and the MAX_DAMAGE component,
+     * the stack's own or else the item's default (0 when it isn't damageable).
+     */
+    public static int[] durability(ItemStack stack, ItemData data) {
+        var components = stack.getDataComponentsOrEmpty();
+        Integer damage = components.get(DataComponentTypes.DAMAGE);
+        Integer maxDamage = components.get(DataComponentTypes.MAX_DAMAGE);
+        if (maxDamage == null) maxDamage = data.components().get(DataComponentTypes.MAX_DAMAGE);
+        return new int[] {damage != null && damage > 0 ? damage : 0, maxDamage != null && maxDamage > 0 ? maxDamage : 0};
+    }
+
+    /**
      * The item for a stack, or null for an empty slot.
      */
     public static @Nullable Item of(@Nullable ItemStack stack) {
@@ -104,8 +118,10 @@ public final class Item {
         item.block = block != null;
         item.fullBlock = block != null && block.solidBlock();
 
-        Integer damage = components.get(DataComponentTypes.DAMAGE);
-        item.damaged = damage != null && damage > 0;
+        int[] dur = durability(stack, data);
+        item.damaged = dur[0] > 0;
+        item.damage = dur[0];
+        item.maxDamage = dur[1];
         item.blockData = components.get(DataComponentTypes.BLOCK_ENTITY_DATA) != null;
 
         if (data.itemTags() != null) for (ItemTags tag : data.itemTags()) item.tags.add(tag.name());

@@ -124,9 +124,22 @@ public final class OrderFlow {
         default int craftCount(Unit unit) {
             return 1;
         }
+
+        /**
+         * What the delivery storage can take now (1.9.0): a chest with room, a chest to look at again, another chest to put up,
+         * or nothing but waiting. The default is the old single container: always room (it is found full by delivering).
+         */
+        default DeliveryRoom deliveryRoom() {
+            return DeliveryRoom.ROOM;
+        }
+
+        /** How many chests the delivery storage has (1 for a host with the single delivery container). */
+        default int deliveryChests() {
+            return 1;
+        }
     }
 
-    public sealed interface Intent permits Idle, Build, Fetch, Name, Deliver, Craft {
+    public sealed interface Intent permits Idle, Build, Fetch, Name, Deliver, Craft, Expand, Recheck {
     }
 
     /** Nothing for the host to do for the order now. */
@@ -159,6 +172,20 @@ public final class OrderFlow {
     public record Craft(Unit unit, int count) implements Intent {
     }
 
+    /**
+     * Put another double chest up above the delivery storage (1.9.0) because every chest is full. The host reports nothing
+     * back: what it did shows in {@link Host#deliveryRoom()} on the next step (room, or why not).
+     */
+    public record Expand(Unit unit) implements Intent {
+    }
+
+    /**
+     * Open a delivery chest that was found full and may have been emptied since (a player was seen with it open, or it has
+     * been a while) and read what it holds. {@code at} is a block of that chest.
+     */
+    public record Recheck(Unit unit, DeliveryBook.Pos at) implements Intent {
+    }
+
     public enum State { Running, Delivered, Failed, Cancelled }
 
     /** A snapshot of the order for the server. */
@@ -177,6 +204,8 @@ public final class OrderFlow {
         /** The unit being put into the delivery container (or -1), and what the container held before: a restart looks first. */
         public int deliveringIndex = -1;
         public int deliveringBase;
+        /** Which chest of the delivery storage it was going into (x, y, z; 1.9.0), so a restart looks in that one; null for none or an old save. */
+        public int @Nullable [] deliveringAt;
         public int shulkersDelivered;
         public Map<String, Integer> delivered = new LinkedHashMap<>();
         /** Shulkers delivered without the name the order wanted, and why (each reason once). */
@@ -203,6 +232,20 @@ public final class OrderFlow {
     public static final long PAUSE_TIMEOUT_MS = 10 * 60 * 1000L;
     public static final long REREAD_TIMEOUT_MS = 10 * 60 * 1000L;
     public static final int MAX_FULL_TRIES = 2;
+    /**
+     * How long an order waits for room in the delivery storage (every chest full and none can be put up, or auto expand is off)
+     * before it ends. Longer than PAUSE_TIMEOUT_MS: what is waited for is a player claiming an earlier order, which takes
+     * longer than a queue or a player taking the controls; not unbounded, so a forgotten full chest does not hold the bot (and
+     * every order after this one) for ever. The finished shulkers stay in the inventory throughout and go back to the stash
+     * when the order ends.
+     */
+    public static final long SPACE_WAIT_TIMEOUT_MS = 2 * 60 * 60 * 1000L;
+    /** Times one shulker asks the delivery storage to grow before the order waits instead. */
+    public static final int MAX_EXPANDS = 6;
+    /** Expand or Recheck steps in a row the host may fail to start before the order waits a minute instead. */
+    public static final int MAX_SPINS = 30;
+    public static final long SPIN_HOLD_MS = 60_000L;
+    public static final String WAITING_FOR_SPACE = "waiting for delivery space: ";
     public static final int MAX_STARTS = 8;
     public static final int MAX_BEGINS = 3;
     /** Times the anvil is tried for one shulker before it is delivered unnamed (a try cut short by the server, say). */
@@ -229,7 +272,8 @@ public final class OrderFlow {
     private String message = "";
     private String phase = "starting";
     private boolean cancelRequested, parked, planned, full;
-    private long pausedSince, buildPausedSince, offeredAt, rereadProgressAt;
+    private long pausedSince, buildPausedSince, offeredAt, rereadProgressAt, spaceWaitSince, spinHoldUntil;
+    private @Nullable String lastWaitWhy;
     private int lastStale = Integer.MAX_VALUE;
     private int skips;
 
@@ -361,7 +405,8 @@ public final class OrderFlow {
         unnamedReasons.clear();
         crafted = 0;
         cancelRequested = parked = planned = full = false;
-        pausedSince = buildPausedSince = 0;
+        pausedSince = buildPausedSince = spaceWaitSince = spinHoldUntil = 0;
+        lastWaitWhy = null;
         state = State.Running;
         message = "";
         phase = "starting";
@@ -389,7 +434,8 @@ public final class OrderFlow {
         crafted = 0;
         message = "";
         cancelRequested = parked = planned = full = false;
-        pausedSince = buildPausedSince = 0;
+        pausedSince = buildPausedSince = spaceWaitSince = spinHoldUntil = 0;
+        lastWaitWhy = null;
         offeredAt = clock.getAsLong();
         rereadProgressAt = offeredAt;
         lastStale = Integer.MAX_VALUE;
@@ -583,6 +629,11 @@ public final class OrderFlow {
         if (u != null && u.have) u.confirmed = true;
     }
 
+    /** The host has started putting another chest up for this shulker: only runs really started count towards MAX_EXPANDS. */
+    public void expandStarted(Unit u) {
+        u.expands++;
+    }
+
     /** A bin is about to be built. @return false after too many tries */
     public boolean noteBuildStart(Unit u) {
         return ++u.begins <= MAX_BEGINS;
@@ -724,7 +775,52 @@ public final class OrderFlow {
                     full = false;
                     u.fullTries++;
                 }
-                if (u.fullTries >= MAX_FULL_TRIES) {
+                // The delivery storage (1.9.0): which chest has room, whether to look at a chest a player may have emptied,
+                // whether to put another up, or to wait. A host with the single container always says there is room.
+                DeliveryRoom room = host.deliveryRoom();
+                if (room.kind() == DeliveryRoom.Kind.RECHECK || room.kind() == DeliveryRoom.Kind.EXPAND) {
+                    long at = clock.getAsLong();
+                    if (at < spinHoldUntil) room = DeliveryRoom.waitFor("delivery storage full: could not start looking at or building a chest");
+                    else if (++u.spins > MAX_SPINS) {
+                        spinHoldUntil = at + SPIN_HOLD_MS;
+                        u.spins = 0;
+                        room = DeliveryRoom.waitFor("delivery storage full: could not start looking at or building a chest");
+                    }
+                }
+                else if (room.kind() == DeliveryRoom.Kind.ROOM) {
+                    u.expands = 0;
+                    u.spins = 0;
+                }
+                if (room.kind() == DeliveryRoom.Kind.RECHECK && room.recheck() != null) {
+                    phase = "checking delivery space";
+                    return new Recheck(u, room.recheck());
+                }
+                if (room.kind() == DeliveryRoom.Kind.EXPAND) {
+                    if (u.expands < MAX_EXPANDS) {
+                        phase = "adding delivery storage";
+                        return new Expand(u);
+                    }
+                    room = DeliveryRoom.waitFor("delivery storage full: could not put another chest up");
+                }
+                if (room.kind() == DeliveryRoom.Kind.WAIT) {
+                    long now = clock.getAsLong();
+                    String why = room.why() == null ? "delivery storage full" : room.why();
+                    // Another reason is another chance to put a chest up
+                    if (!why.equals(lastWaitWhy)) {
+                        if (lastWaitWhy != null) u.expands = 0;
+                        lastWaitWhy = why;
+                    }
+                    if (spaceWaitSince == 0) spaceWaitSince = now;
+                    else if (now - spaceWaitSince > SPACE_WAIT_TIMEOUT_MS) {
+                        finish(shulkersDelivered > 0 ? State.Delivered : State.Failed, "delivery container full (" + shulkersDelivered + "/" + units.size() + "): waited "
+                            + (SPACE_WAIT_TIMEOUT_MS / 60_000) + " min for space, " + why);
+                        return new Idle();
+                    }
+                    phase = "paused: " + WAITING_FOR_SPACE + why;
+                    return new Idle();
+                }
+                spaceWaitSince = 0;
+                if (u.fullTries >= MAX_FULL_TRIES + Math.max(0, host.deliveryChests() - 1)) {
                     finish(shulkersDelivered > 0 ? State.Delivered : State.Failed, "delivery container full (" + shulkersDelivered + "/" + units.size() + ")");
                     return new Idle();
                 }

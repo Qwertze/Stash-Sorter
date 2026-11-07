@@ -105,6 +105,7 @@ public final class SettingsSpec {
 
         String timing = "Timing and giving way";
         add("delayTicks", "Delay (ticks)", timing, "Ticks between inventory actions. Raise it if the server rejects clicks.").cmd("delay {v}").range(0, 40).whole();
+        add("containerDelay", "Container Delay", timing, "Extra ticks of pause around opening containers: a container is not opened until this many ticks after the last one was closed, and the first click in a freshly opened one waits this long too. 0 is as fast as possible. A higher value is slower but gentler on the server; 2b2t can kick or rubber-band when containers are opened very quickly.").cmd("containerDelay {v}").range(0, 100).whole();
         add("settleTicks", "Settle (ticks)", timing, "Ticks to wait after opening a container before reading it.").range(0, 100).whole();
         add("quietSeconds", "Quiet time (s)", timing, "Seconds other modules must have been idle before sorting starts or carries on.").cmd("quiet {v}").range(0, 60).whole();
         add("reservePearlSlot", "Reserve pearl slot", timing, "Never carry things in the first hotbar slot: PearlPlus keeps its pearls there.").cmd("pearlSlot {v}");
@@ -152,6 +153,7 @@ public final class SettingsSpec {
         String search = "Whisper search";
         add("whisperSearch", "Whisper search", search, "Answer searches whispered by whitelisted players.").cmd("whisper {v}");
         add("whitelist", "Whitelist", search, "Players who may search and get alerts.").pattern("[A-Za-z0-9_]{1,16}").length(16);
+        add("friends", "Friends", search, "Players (name or UUID) that do not count as someone near the bot: your own alts. They never hold back going back to a shulker or picking up ground items.").pattern("[A-Za-z0-9_-]{1,36}").length(36);
         add("prefix", "Prefix", search, "Whispers starting with this are searches. Blank treats every whitelisted whisper as a search.")
             .cmd("prefix {v}").blank("prefix clear").pattern("[A-Za-z0-9_.+\\-]*").length(32);
 
@@ -159,6 +161,7 @@ public final class SettingsSpec {
         add("acceptOrders", "Accept orders", orders, "Take orders from the website: the bot builds shulkers from the stash and delivers them to the delivery container (`stash delivery`). Needs the Stash Manager on. Orders come before sorting.").cmd("orders {v}");
         add("useNamedShulkers", "Use named shulkers", orders, "Orders may deliver shulkers that have a custom name. Off: named shulkers are left alone.");
         add("freshMinutes", "Fresh for (min)", orders, "A container read within this many minutes is not read again when the sorter or an order starts, unless something marked it changed. 0: read everything again every time.").range(0, 30).whole();
+        add("autoExpandDelivery", "Auto expand delivery storage", orders, "When every chest of the delivery storage is full, put another double chest up one block above the highest one (taken from the stash, or crafted when crafting is on) and keep filling the lowest chest with room. Off: an order waits for space. The chests' positions are not shown on the website.").cmd("delivery expand {v}");
         // The delivery container is set with `stash delivery` and its position is not shown on the website
         add("deliveryDimension", "Delivery dimension", orders, "Set with `stash delivery`.").locked("set with `stash delivery`").hidden = true;
         add("deliveryX", "Delivery X", orders, "Set with `stash delivery`.").locked("set with `stash delivery`").hidden = true;
@@ -182,6 +185,7 @@ public final class SettingsSpec {
         add("craftingTableX", "Crafting table X", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
         add("craftingTableY", "Crafting table Y", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
         add("craftingTableZ", "Crafting table Z", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
+        add("craftingTableSource", "Crafting table source", crafting, "Set with `stash craftingtable`, or found, placed or crafted by the bot.").locked("set with `stash craftingtable`, or found, placed or crafted by the bot").hidden = true;
 
         String manager = "Stash Manager";
         add("manager", "Stash Manager", manager, "Send the stash index to the Stash Manager server and answer its rescans.").cmd("manager {v}");

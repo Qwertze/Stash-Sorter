@@ -36,11 +36,15 @@ public class Stash {
         /** One entry per slot, null for an empty slot. Null when it hasn't been read yet. */
         public Item @Nullable [] contents;
         public boolean excluded;
+        /** Excluded by the sorter because the perimeter does not hold it (a read container outside it is kept, not deleted); undone when it does. */
+        public boolean outsideSkip;
         public boolean dropOff;
         /** Never a source of stacks or shulkers for compacting. */
         public boolean noCompact;
         /** The delivery container for stash orders: never sorted into, never a source, not in the index. Kept in step with the config. */
         public boolean delivery;
+        /** A chest of the delivery storage that the bot put up above the delivery container (1.9.0); also {@link #delivery}. */
+        public boolean deliveryExtra;
         /** When the contents were last read (ms since 1970), 0 if never or not known. A fresh read is not repeated on a restart. */
         public long readAt;
         /** Saved contents that have not been read again since the bot came online. */
@@ -61,6 +65,16 @@ public class Stash {
 
         public boolean known() {
             return contents != null;
+        }
+
+        /** The survey may read it: not the delivery container, not excluded (by the user or by the perimeter), unread or stale. */
+        public boolean wantsRead() {
+            return !delivery && !excluded && (!known() || stale);
+        }
+
+        /** `stash exclude` and `stash dropoff` change nothing on a box the perimeter skips (it would be skipped again at once). */
+        public boolean marksBlocked() {
+            return outsideSkip;
         }
 
         public int free() {
@@ -142,8 +156,16 @@ public class Stash {
         public @Nullable BlockPos lastGoodStand;
         /** The container the job was at, if it had one. */
         public @Nullable BlockPos target;
+        /** How often this shulker was gone back to after a problem (0: never). Read back so a restart keeps the cap and the quiet wait. */
+        public int recoveries;
         public @Nullable CompactState compact;
     }
+
+    /**
+     * The delivery storage (1.9.0): the delivery container and the double chests put up above it, which of them are full. Positions
+     * only; never shown on the website. Null in files saved before.
+     */
+    public List<com.porter.qwertestash.orders.DeliveryBook.Entry> deliveryStorage = new CopyOnWriteArrayList<>();
 
     /** The stash order being worked on: its plan and progress, so a restart carries on the same plan. Null when none. */
     public com.porter.qwertestash.orders.OrderFlow.@Nullable Saved activeOrder;
@@ -245,15 +267,142 @@ public class Stash {
     }
 
     /**
-     * Drops the containers outside the perimeter, with what is saved for them.
-     * @return how many
+     * Drops the never-read containers outside the perimeter (not the delivery one); read ones are kept and skipped ({@link #skipOutsideArea}).
+     * @return how many were dropped
      */
     public int dropOutsideArea() {
-        if (!hasArea()) return 0;
-        int before = boxes.size();
-        if (boxes.removeIf(box -> !boxInArea(box) && !box.delivery)) markDirty();
-        return before - boxes.size();
+        int removed = 0;
+        if (hasArea()) {
+            // Only a container that was never read goes: a read one is kept (with what is saved for it) and skipped
+            int before = boxes.size();
+            if (boxes.removeIf(box -> neverRead(box) && !userExcluded(box) && !boxInArea(box) && !box.delivery)) markDirty();
+            removed = before - boxes.size();
+        }
+        skipOutsideArea();
+        return removed;
     }
+
+    /** A rescan: every container that is not excluded is read again. */
+    public void markAllStale() {
+        for (Box box : boxes) if (!box.excluded) box.stale = true;
+    }
+
+    /**
+     * The one test for a container that counts for the stash as it is now: not a read container kept in the file but skipped
+     * because the perimeter does not hold it. Everything that lists, plans from or counts containers asks this (the sorter, orders,
+     * compacting and crafting also skip it through {@code excluded}, which {@link #skipOutsideArea} sets).
+     */
+    public boolean inScope(Box box) {
+        return !box.outsideSkip;
+    }
+
+    /**
+     * Keeps and skips: a container outside the perimeter that was read is marked excluded (so it is not surveyed, sorted or picked
+     * from) and stays in the file; one that the perimeter holds again, or any when there is no perimeter, is let back in. Never
+     * touches a container the user excluded, nor the delivery container.
+     * @return how many were newly skipped
+     */
+    public int skipOutsideArea() {
+        boolean area = hasArea();
+        int skipped = 0;
+        for (Box box : boxes) {
+            boolean outside = area && !box.delivery && !boxInArea(box);
+            if (outside && !box.excluded) {
+                box.excluded = true;
+                box.outsideSkip = true;
+                skipped++;
+                markDirty();
+            }
+            else if (!outside && box.outsideSkip) {
+                box.excluded = false;
+                box.outsideSkip = false;
+                markDirty();
+            }
+        }
+        return skipped;
+    }
+
+    /** Without a perimeter, a never-read container this far (blocks, flat) from every read one cannot belong to the stash. */
+    public static final int FOREIGN_BLOCKS = 20000;
+    /** How many read containers (not delivery ones) it takes to judge where the stash is. */
+    public static final int FOREIGN_REFERENCES = 5;
+
+    /** Excluded by the user (not by the sorter for being outside the perimeter): never deleted by any prune. */
+    public static boolean userExcluded(Box box) {
+        return box.excluded && !box.outsideSkip;
+    }
+
+    /** Never read: the contents are not known and were never read. */
+    public static boolean neverRead(Box box) {
+        return box.contents == null && box.readAt == 0;
+    }
+
+    /**
+     * Which containers cannot belong to this stash, for the caller to remove. Only containers that were never read are ever
+     * candidates (a read one was in the stash once, and is kept even when it looks strange). With a perimeter: never-read ones
+     * outside it (delivery containers excepted). With no perimeter: never-read ones more than {@link #FOREIGN_BLOCKS} from the nearest
+     * read, non-delivery container, and only when there are {@link #FOREIGN_REFERENCES} or more of those. Removes nothing itself.
+     */
+    public List<Box> foreignBoxes() {
+        List<Box> gone = new ArrayList<>();
+        if (hasArea()) {
+            for (Box box : boxes) if (neverRead(box) && !userExcluded(box) && !box.delivery && !boxInArea(box)) gone.add(box);
+        }
+        else if (area == null) {
+            List<Box> reference = new ArrayList<>();
+            for (Box box : boxes) if (!neverRead(box) && !box.delivery && !box.deliveryExtra) reference.add(box);
+            if (reference.size() >= FOREIGN_REFERENCES) {
+                for (Box box : boxes) {
+                    if (!neverRead(box) || userExcluded(box) || box.delivery || box.deliveryExtra) continue;
+                    double nearest = Double.MAX_VALUE;
+                    for (Box r : reference) nearest = Math.min(nearest, Math.hypot(box.pos.x() - r.pos.x(), box.pos.z() - r.pos.z()));
+                    if (nearest > FOREIGN_BLOCKS) gone.add(box);
+                }
+            }
+        }
+        return gone;
+    }
+
+    /**
+     * Whether a container can not be part of this stash: outside the perimeter, or (no perimeter) more than {@link #FOREIGN_BLOCKS}
+     * from every container that was read (needs one). Only distance and the perimeter count, never whether the chunk is loaded.
+     */
+    public boolean implausible(Box box) {
+        if (hasArea()) return !boxInArea(box) && !box.delivery;
+        if (area != null) return false;
+        double nearest = Double.MAX_VALUE;
+        for (Box r : boxes) {
+            if (neverRead(r) || r.delivery || r.deliveryExtra) continue;
+            nearest = Math.min(nearest, Math.hypot(box.pos.x() - r.pos.x(), box.pos.z() - r.pos.z()));
+        }
+        return nearest != Double.MAX_VALUE && nearest > FOREIGN_BLOCKS;
+    }
+
+    /**
+     * Copies the stash file beside itself before a save that removes containers, so nothing is lost for good. The newest three
+     * copies are kept, under their own name ({@code .prune-bak-}) so they never push out a copy of an unreadable file.
+     * @return false if no copy could be made (the caller must not go on to remove anything)
+     */
+    public boolean backUp() {
+        Path path = file(name, server);
+        if (!Files.exists(path)) return true;
+        try {
+            String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+            String prefix = path.getFileName() + ".prune-bak-";
+            Files.copy(path, path.resolveSibling(prefix + stamp), StandardCopyOption.REPLACE_EXISTING);
+            List<Path> copies = new ArrayList<>();
+            try (var files = Files.list(path.getParent())) {
+                files.filter(q -> q.getFileName().toString().startsWith(prefix)).forEach(copies::add);
+            }
+            copies.sort(Comparator.comparing((Path q) -> q.getFileName().toString()).reversed());
+            for (int i = 3; i < copies.size(); i++) Files.deleteIfExists(copies.get(i));
+            return true;
+        } catch (IOException | RuntimeException e) {
+            QwerteStashPlugin.LOG.error("Qwerte Stash: couldn't back up the stash file {}", path.getFileName(), e);
+            return false;
+        }
+    }
+
     public String name;
     public String server;
     // Copy-on-write: searches and commands iterate it from other threads while the sorter adds and drops boxes
@@ -455,6 +604,7 @@ public class Stash {
             Stash stash = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Stash.class);
             if (stash == null) return null;
             if (stash.orphans == null) stash.orphans = new ArrayList<>();
+            stash.deliveryStorage = stash.deliveryStorage == null ? new CopyOnWriteArrayList<>() : new CopyOnWriteArrayList<>(stash.deliveryStorage);
             if (stash.held == null) stash.held = new HashMap<>();
             stash.normalizeInFlight();
             stash.boxes = stash.boxes == null ? new CopyOnWriteArrayList<>() : new CopyOnWriteArrayList<>(stash.boxes);

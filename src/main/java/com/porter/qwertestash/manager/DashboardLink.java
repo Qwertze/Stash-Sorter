@@ -83,6 +83,11 @@ public final class DashboardLink {
 
         /** The link keeps running only while this is true; checked between requests. */
         boolean wanted();
+
+        /** What the live viewer reads from the game; null when there is none (then the viewer is never started). */
+        default ViewerFeed.@Nullable Game viewerGame() {
+            return null;
+        }
     }
 
     private final Host host;
@@ -94,6 +99,10 @@ public final class DashboardLink {
         return t;
     });
     private volatile HttpURLConnection pollConn;
+    /** The live viewer (its thread runs only while a browser watches). */
+    private volatile @Nullable ViewerFeed viewer;
+    /** What the server last asked of the viewer (null: nothing); the feed is started again from it when the server answers after a failure. */
+    private volatile ViewerFeed.@Nullable Params viewerWanted;
 
     // Shared between the threads
     private volatile boolean helloOk, watching, pushSoon, watchingActivity;
@@ -115,6 +124,46 @@ public final class DashboardLink {
     public DashboardLink(Host host) {
         this.host = host;
         apply.allowCoreThreadTimeOut(true);
+        ViewerFeed.Game game = host.viewerGame();
+        if (game != null) viewer = new ViewerFeed(game, this::postViewer, host.botId(), () -> viewerWanted = null);
+    }
+
+    /** The live viewer, or null when the host has none. */
+    public @Nullable ViewerFeed viewer() {
+        return viewer;
+    }
+
+    /** Posts one viewer frame (signed). Null when it couldn't be sent; a code other than 200 is passed on as it is. */
+    private ViewerFeed.@Nullable Reply postViewer(JsonObject body) {
+        // Stopped meanwhile (the link, or the feed): nothing more is sent
+        ViewerFeed feed = viewer;
+        if (!alive() || feed == null || !feed.isActive()) return null;
+        ManagerHttp.Response r = post("bot/viewer", body, 4_000);
+        if (r == null) return null;
+        if (r.code() != 200) {
+            long retry = 0;
+            if (r.code() == 429) {
+                try {
+                    JsonElement e = SafeJson.parse(r.body());
+                    if (e.isJsonObject() && e.getAsJsonObject().has("retryMs")) retry = e.getAsJsonObject().get("retryMs").getAsLong();
+                } catch (RuntimeException ignored) {
+                    // The default wait
+                }
+            }
+            return new ViewerFeed.Reply(r.code(), true, false, retry);
+        }
+        boolean watching = true, resync = false;
+        try {
+            JsonElement e = SafeJson.parse(r.body());
+            if (e.isJsonObject()) {
+                JsonObject o = e.getAsJsonObject();
+                if (o.has("watching") && o.get("watching").isJsonPrimitive()) watching = o.get("watching").getAsBoolean();
+                if (o.has("resync") && o.get("resync").isJsonPrimitive()) resync = o.get("resync").getAsBoolean();
+            }
+        } catch (RuntimeException ignored) {
+            // A 200 without a readable body: carry on
+        }
+        return new ViewerFeed.Reply(200, watching, resync, 0);
     }
 
     public String status() {
@@ -158,6 +207,8 @@ public final class DashboardLink {
         if (!running) return;
         running = false;
         status = "stopped";
+        ViewerFeed v = viewer;
+        if (v != null) v.stop();
         HttpURLConnection c = pollConn;
         if (c != null) {
             try {
@@ -287,6 +338,7 @@ public final class DashboardLink {
             try {
                 if (!helloOk || (!host.player().isBlank() && !Objects.equals(host.player(), helloPlayer)) || !scopeNames().equals(helloScopes) || !capsKey().equals(helloCaps)) {
                     if (!sayHello()) {
+                        stopViewer();
                         backoff = next(backoff);
                         sleep(backoff);
                         continue;
@@ -298,6 +350,7 @@ public final class DashboardLink {
                 String key = host.key();
                 if (base == null || key.isBlank()) {
                     helloOk = false;
+                    stopViewer();
                     sleep(5_000);
                     continue;
                 }
@@ -313,6 +366,8 @@ public final class DashboardLink {
                 else if (r.code() == 204) {
                     backoff = 0;
                     setStatus("linked");
+                    // The server answers and nothing changed: a viewer that stopped on a failure while it is still wanted starts again
+                    restartViewer();
                 }
                 else if (r.code() == 429) {
                     // Too many bots waiting at the server: poll gently
@@ -320,6 +375,7 @@ public final class DashboardLink {
                 }
                 else {
                     failed(r);
+                    stopViewer();
                     // The server may have forgotten this bot (409, 404): hello again
                     helloOk = false;
                     backoff = next(backoff);
@@ -329,6 +385,7 @@ public final class DashboardLink {
                 return;
             } catch (Throwable e) {
                 lastError = e.toString();
+                stopViewer();
                 try {
                     backoff = next(backoff);
                     sleep(backoff);
@@ -337,6 +394,18 @@ public final class DashboardLink {
                 }
             }
         }
+    }
+
+    /** The server can't be reached (or refused the poll): the viewer stops asking it for anything. */
+    private void stopViewer() {
+        ViewerFeed v = viewer;
+        if (v != null) v.stop();
+    }
+
+    private void restartViewer() {
+        ViewerFeed v = viewer;
+        ViewerFeed.Params wanted = viewerWanted;
+        if (v != null && wanted != null && !v.isActive()) v.update(true, wanted);
     }
 
     private static long next(long backoff) {
@@ -361,6 +430,12 @@ public final class DashboardLink {
         readNeed(o);
         if (o.has("watching") && o.get("watching").isJsonPrimitive()) watching = o.get("watching").getAsBoolean();
         if (o.has("watchingActivity") && o.get("watchingActivity").isJsonPrimitive()) watchingActivity = o.get("watchingActivity").getAsBoolean();
+        ViewerFeed v = viewer;
+        if (v != null && o.has("watchingViewer")) {
+            ViewerFeed.Params params = ViewerFeed.parse(o);
+            viewerWanted = params;
+            v.update(params != null, params);
+        }
         if (!o.has("jobs") || !o.get("jobs").isJsonArray()) return;
         for (JsonElement j : o.getAsJsonArray("jobs")) {
             if (!j.isJsonObject()) continue;

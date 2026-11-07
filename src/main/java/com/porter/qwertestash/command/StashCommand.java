@@ -69,6 +69,7 @@ public class StashCommand extends Command {
                 "height <blocks>",
                 "barrels on/off",
                 "delay <ticks>",
+                "containerDelay [ticks]",
                 "quiet <0-60>",
                 "pearlSlot on/off",
                 "watch on/off (needs tracking on)",
@@ -103,6 +104,8 @@ public class StashCommand extends Command {
                 "whisper on/off",
                 "whitelist add/del <player>",
                 "whitelist [list]",
+                "friends add/del <player or uuid>",
+                "friends [list]",
                 "prefix <word>/clear",
                 "manager on/off",
                 "manager url <url>",
@@ -116,6 +119,8 @@ public class StashCommand extends Command {
                 "delivery here",
                 "delivery <x> <y> <z> [dimension]",
                 "delivery clear",
+                "delivery expand on/off",
+                "delivery expand",
                 "delivery",
                 "anvil here",
                 "anvil <x> <y> <z> [dimension]",
@@ -280,6 +285,14 @@ public class StashCommand extends Command {
                 CONFIG.delayTicks = getInteger(c, "ticks");
                 c.getSource().getEmbed().title("Delay Set");
             })))
+            .then(literal("containerDelay")
+                .executes(c -> {
+                    c.getSource().getEmbed().title("Container Delay").description(CONFIG.containerDelay + " ticks (0 is as fast as possible).").primaryColor();
+                })
+                .then(argument("ticks", integer(0, 100)).executes(c -> {
+                    CONFIG.containerDelay = getInteger(c, "ticks");
+                    c.getSource().getEmbed().title("Container Delay Set").description(CONFIG.containerDelay + " ticks: a container is not opened until then after the last one was closed, and the first click in a new one waits as long.");
+                })))
             .then(literal("quiet").then(argument("seconds", integer(0, 60)).executes(c -> {
                 CONFIG.quietSeconds = getInteger(c, "seconds");
                 c.getSource().getEmbed().title("Quiet Time Set");
@@ -373,7 +386,8 @@ public class StashCommand extends Command {
                     c.getSource().getEmbed().title("No Stash Here Yet");
                     return;
                 }
-                for (Box box : stash.boxes) box.stale = true;
+                // A box that is excluded (by the user, or skipped for being outside the perimeter) is not read again
+                stash.markAllStale();
                 stash.save();
                 Stashes.version++;
                 Stashes.exploreVersion++;
@@ -417,12 +431,47 @@ public class StashCommand extends Command {
                 }))
                 .then(literal("add").then(argument("player", word()).executes(c -> {
                     String player = getString(c, "player");
-                    if (CONFIG.whitelist.stream().noneMatch(p -> p.equalsIgnoreCase(player))) CONFIG.whitelist.add(player);
+                    if (CONFIG.whitelist.stream().noneMatch(p -> p.equalsIgnoreCase(player))) {
+                        List<String> next = new java.util.ArrayList<>(CONFIG.whitelist);
+                        next.add(player);
+                        CONFIG.whitelist = next;
+                    }
                     c.getSource().getEmbed().title("Added " + player);
                 })))
                 .then(literal("del").then(argument("player", word()).executes(c -> {
                     String player = getString(c, "player");
-                    CONFIG.whitelist.removeIf(p -> p.equalsIgnoreCase(player));
+                    List<String> next = new java.util.ArrayList<>(CONFIG.whitelist);
+                    next.removeIf(p -> p.equalsIgnoreCase(player));
+                    CONFIG.whitelist = next;
+                    c.getSource().getEmbed().title("Removed " + player);
+                }))))
+            .then(literal("friends")
+                // Players that do not count as someone else near the bot (the owner's alts); not the whisper whitelist
+                .executes(c -> {
+                    friendsShow(c.getSource().getEmbed());
+                })
+                .then(literal("list").executes(c -> {
+                    friendsShow(c.getSource().getEmbed());
+                }))
+                .then(literal("add").then(argument("player", word()).executes(c -> {
+                    String player = getString(c, "player");
+                    if (!player.matches("[A-Za-z0-9_-]{1,36}")) {
+                        c.getSource().getEmbed().title("Bad Name").description("A player name or a UUID: letters, digits, _ and -, up to 36.").errorColor();
+                        return;
+                    }
+                    // Replaced, not changed in place: the tick thread reads the list
+                    if (CONFIG.friends.stream().noneMatch(p -> p.equalsIgnoreCase(player))) {
+                        List<String> next = new java.util.ArrayList<>(CONFIG.friends);
+                        next.add(player);
+                        CONFIG.friends = next;
+                    }
+                    c.getSource().getEmbed().title("Added " + player);
+                })))
+                .then(literal("del").then(argument("player", word()).executes(c -> {
+                    String player = getString(c, "player");
+                    List<String> next = new java.util.ArrayList<>(CONFIG.friends);
+                    next.removeIf(p -> p.equalsIgnoreCase(player));
+                    CONFIG.friends = next;
                     c.getSource().getEmbed().title("Removed " + player);
                 }))))
             .then(literal("manager")
@@ -500,6 +549,17 @@ public class StashCommand extends Command {
                 .then(literal("clear").executes(c -> {
                     deliveryClear(c.getSource());
                 }))
+                .then(literal("expand")
+                    .executes(c -> {
+                        deliveryExpandStatus(c.getSource().getEmbed());
+                    })
+                    .then(argument("toggle", toggle()).executes(c -> {
+                        CONFIG.autoExpandDelivery = getToggle(c, "toggle");
+                        c.getSource().getEmbed().title("Auto Expand Delivery Storage " + toggleStrCaps(CONFIG.autoExpandDelivery))
+                            .description(CONFIG.autoExpandDelivery
+                                ? "When every chest of the delivery storage is full, another double chest is put up one block above the highest one (taken from the stash, or crafted when crafting is on). The lowest chest with room is filled first."
+                                : "When the delivery storage is full an order waits for space (a player claiming an order empties a chest).").primaryColor();
+                    })))
                 .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer())
                     .executes(c -> {
                         deliverySet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), null);
@@ -532,7 +592,7 @@ public class StashCommand extends Command {
                     CONFIG.enableCrafting = getToggle(c, "toggle");
                     c.getSource().getEmbed().title("Crafting " + toggleStrCaps(CONFIG.enableCrafting))
                         .description(CONFIG.enableCrafting
-                            ? "A plain shulker box is crafted when an order or compaction needs an empty one and the stash has none." + (CraftingTableSpot.isSet() ? "" : " Set the crafting table first: `stash craftingtable here`.")
+                            ? "A plain shulker box is crafted when an order or compaction needs an empty one and the stash has none." + (CraftingTableSpot.isSet() ? "" : " With no crafting table set one is looked for in the stash area, taken from the stash or crafted when needed (`stash craftingtable here` picks one by hand).")
                             : "Nothing is crafted.").primaryColor();
                 })))
             .then(literal("craftNeverUse")
@@ -632,12 +692,23 @@ public class StashCommand extends Command {
                 pos.x(), pos.y(), pos.z(), Stash.describe(bounds));
         }
         Box box = stash.boxAt(pos);
+        // Never a new container outside the perimeter: it would only be skipped
+        if (box == null && stash.hasArea() && bounds != null && !stash.inArea(pos, 0)) {
+            embed.title("Outside the Stash Area").description(String.format("%d, %d, %d is outside the stash area %s, so it was not added. Widen the area first with stash area here1/here2.",
+                pos.x(), pos.y(), pos.z(), Stash.describe(bounds))).errorColor();
+            return;
+        }
         if (box == null) {
             box = Containers.isLoaded(pos) ? Containers.makeBox(pos) : new Box(pos, new java.util.ArrayList<>(List.of(pos)));
             stash.boxes.add(box);
         }
 
         String at = box.pos.x() + ", " + box.pos.y() + ", " + box.pos.z();
+        // Skipped by the sorter for being outside the perimeter: nothing is changed (it would be skipped again at once)
+        if (box.marksBlocked() && kind != MARK_COMPACT_SKIP) {
+            embed.title("Outside the Stash Area").description(at + " is outside the stash area, so it is skipped (kept in the file, not read, sorted or listed). Widen the area with stash area here1/here2 to use it. Nothing was changed.").errorColor();
+            return;
+        }
         if (kind == MARK_COMPACT_SKIP) {
             box.noCompact = !box.noCompact;
             embed.title(box.noCompact ? "Compact Skip Set" : "Compact Skip Removed").description(at + (box.noCompact
@@ -645,6 +716,7 @@ public class StashCommand extends Command {
         }
         else if (kind == MARK_EXCLUDE) {
             box.excluded = !box.excluded;
+            box.outsideSkip = false;
             box.dropOff = false;
             embed.title(box.excluded ? "Excluded" : "No Longer Excluded").description(at + (box.excluded ? " won't be sorted." : " will be sorted again.") + note);
         }
@@ -807,6 +879,11 @@ public class StashCommand extends Command {
         return "whitelist: " + (n == 0 ? "empty" : n + (n == 1 ? " player" : " players"));
     }
 
+    private static void friendsShow(Embed embed) {
+        embed.title("Friends (do not count as someone near the bot)").primaryColor()
+            .description(CONFIG.friends.isEmpty() ? "Nobody yet. Add your alts with `stash friends add <player or uuid>`." : String.join(", ", CONFIG.friends));
+    }
+
     private static void whitelistShow(Embed embed) {
         embed.title("Whisper Search Whitelist").primaryColor()
             .description(CONFIG.whitelist.isEmpty() ? "Nobody yet. Add a player with `stash whitelist add <player>`." : String.join(", ", CONFIG.whitelist));
@@ -820,14 +897,15 @@ public class StashCommand extends Command {
             .addField("Waiting On The Website", status.pending() < 0 ? "unknown (no heartbeat yet)" : String.valueOf(status.pending()))
             .addField("Blocker", status.blocker() == null ? "none, ready for an order" : status.blocker())
             .addField("Delivery Container", DeliverySpot.isSet() ? "set (`stash delivery` shows it)" : "not set")
+            .addField("Delivery Storage", MODULE.get(StashSorter.class).deliveryStorageLine())
             .addField("Anvil (Shulker Names)", AnvilSpot.isSet() ? AnvilSpot.source() + " (`stash anvil` shows it)" : "none yet: one is looked for in the stash area, or put down from the stash, when needed")
-            .addField("Crafting", toggleStr(CONFIG.enableCrafting) + ", crafting table " + (CraftingTableSpot.isSet() ? "set" : "not set"));
+            .addField("Crafting", toggleStr(CONFIG.enableCrafting) + ", crafting table " + (CraftingTableSpot.isSet() ? CraftingTableSpot.source() : "none yet: one is looked for in the stash area, taken from the stash or crafted, when needed"));
     }
 
     private static void craftingStatus(Embed embed) {
         embed.title("Crafting").primaryColor()
             .addField("Enabled", toggleStr(CONFIG.enableCrafting))
-            .addField("Crafting Table", CraftingTableSpot.isSet() ? "set (`stash craftingtable` shows it)" + (CraftingTableSpot.usable() ? "" : ", but the block there is not a crafting table now") : "not set: nothing can be crafted")
+            .addField("Crafting Table", CraftingTableSpot.isSet() ? CraftingTableSpot.source() + " (`stash craftingtable` shows it)" + (CraftingTableSpot.usable() ? "" : ", but the block there is not a crafting table now") : "none yet: one is looked for in the stash area, taken from the stash or crafted, when needed")
             .addField("Crafted This Hour", MODULE.get(StashSorter.class).craftedLastHour() + " of " + CONFIG.craftMaxPerHour)
             .addField("Caps", CONFIG.craftMaxPerOrder + " per order, " + CONFIG.craftMaxOpsPerTask + " grid fills per task, " + CONFIG.craftMaxPerHour + " per hour")
             .addField("Never Used", CONFIG.craftNeverUse.isEmpty() ? "nothing listed" : String.join(", ", CONFIG.craftNeverUse))
@@ -840,17 +918,23 @@ public class StashCommand extends Command {
         CraftingTableSpot.Spot spot = CraftingTableSpot.get();
         Embed embed = ctx.getEmbed();
         if (spot == null) {
-            embed.title("No Crafting Table").description("Look at a crafting table and run `stash craftingtable here`, or give its position with `stash craftingtable <x> <y> <z> [dimension]`. Without one nothing is crafted.").primaryColor();
+            embed.title("No Crafting Table").description("None set, found, placed or crafted yet. When a craft needs one the bot looks for a crafting table standing in the stash area, and failing that takes one from the stash and puts it down, or crafts one in its 2x2 inventory grid from planks or logs from the stash; with none of that nothing is crafted (\"" + com.porter.qwertestash.stash.CraftingTableFinder.NONE + "\"). To choose one, look at a crafting table and run `stash craftingtable here`, or give its position with `stash craftingtable <x> <y> <z> [dimension]`.").primaryColor();
             return;
         }
-        embed.title("Crafting Table").description(CraftingTableSpot.describe(spot, showCoordinates(ctx)) + (CraftingTableSpot.usable() ? "" : ". Warning: the block there is not a crafting table now.")).primaryColor();
+        String how = switch (CraftingTableSpot.source()) {
+            case CraftingTableSpot.FOUND -> "found by the bot in the stash area";
+            case CraftingTableSpot.PLACED -> "put down by the bot from the stash";
+            case CraftingTableSpot.CRAFTED -> "crafted by the bot and put down";
+            default -> "set with `stash craftingtable`";
+        };
+        embed.title("Crafting Table").description(CraftingTableSpot.describe(spot, showCoordinates(ctx)) + ", " + how + (CraftingTableSpot.usable() ? "" : ". Warning: the block there is not a crafting table now.")).primaryColor();
     }
 
     private static void tableClear(CommandContext ctx) {
         boolean was = CraftingTableSpot.isSet();
         CraftingTableSpot.clear();
         ctx.getEmbed().title(was ? "Crafting Table Cleared" : "No Crafting Table")
-            .description(was ? "Nothing is crafted until a new one is set." : "None was set.").primaryColor();
+            .description(was ? "Another is looked for, taken from the stash or crafted when a craft needs one." : "None was set.").primaryColor();
     }
 
     private static void tableHere(CommandContext ctx) {
@@ -905,6 +989,12 @@ public class StashCommand extends Command {
         embed.title("Crafting Table Set").description(CraftingTableSpot.describe(CraftingTableSpot.get(), showCoordinates(ctx)) + "." + note).primaryColor();
     }
 
+    private static void deliveryExpandStatus(Embed embed) {
+        embed.title("Auto Expand Delivery Storage").primaryColor()
+            .addField("Enabled", toggleStr(CONFIG.autoExpandDelivery))
+            .addField("Storage", MODULE.get(StashSorter.class).deliveryStorageLine());
+    }
+
     private static void deliveryShow(CommandContext ctx) {
         DeliverySpot.Spot spot = DeliverySpot.get();
         Embed embed = ctx.getEmbed();
@@ -912,14 +1002,29 @@ public class StashCommand extends Command {
             embed.title("No Delivery Container").description("Look at a chest or barrel and run `stash delivery here`, or give its position with `stash delivery <x> <y> <z> [dimension]`.").primaryColor();
             return;
         }
-        embed.title("Delivery Container").description(DeliverySpot.describe(spot, showCoordinates(ctx))).primaryColor();
+        embed.title("Delivery Container").description(DeliverySpot.describe(spot, showCoordinates(ctx))
+            + "\n" + MODULE.get(StashSorter.class).deliveryStorageLine()).primaryColor();
+    }
+
+    /** How many chests put up above the delivery container there are (they become ordinary containers when it changes). */
+    private static int extraDeliveryChests() {
+        Stash stash = Stashes.current();
+        if (stash == null || stash.deliveryStorage == null) return 0;
+        int n = 0;
+        for (var e : stash.deliveryStorage) if (e != null && !e.primary) n++;
+        return n;
+    }
+
+    private static String extrasWarning(int n) {
+        return n <= 0 ? "" : " Warning: " + n + " extra delivery chest" + (n == 1 ? " is" : "s are") + " now ordinary stash containers; their contents will be sorted.";
     }
 
     private static void deliveryClear(CommandContext ctx) {
         boolean was = DeliverySpot.isSet();
+        int extras = extraDeliveryChests();
         DeliverySpot.clear();
         ctx.getEmbed().title(was ? "Delivery Container Cleared" : "No Delivery Container")
-            .description(was ? "Orders can not be taken until a new one is set." : "None was set.").primaryColor();
+            .description((was ? "Orders can not be taken until a new one is set." : "None was set.") + extrasWarning(extras)).primaryColor();
     }
 
     private static void deliveryHere(CommandContext ctx) {
@@ -940,8 +1045,9 @@ public class StashCommand extends Command {
             return;
         }
         BlockPos at = Containers.makeBox(pos).pos;
+        int extras = DeliverySpot.isSet() && !Containers.makeBox(pos).has(DeliverySpot.get().pos()) ? extraDeliveryChests() : 0;
         DeliverySpot.set(dimension, at.x(), at.y(), at.z());
-        embed.title("Delivery Container Set").description(DeliverySpot.describe(DeliverySpot.get(), showCoordinates(ctx)) + ". Finished order shulkers are put in here." + (CONFIG.acceptOrders ? "" : " Turn orders on with `stash orders on`.")).primaryColor();
+        embed.title("Delivery Container Set").description(DeliverySpot.describe(DeliverySpot.get(), showCoordinates(ctx)) + ". Finished order shulkers are put in here." + extrasWarning(extras) + (CONFIG.acceptOrders ? "" : " Turn orders on with `stash orders on`.")).primaryColor();
     }
 
     private static void deliverySet(CommandContext ctx, int x, int y, int z, @Nullable String dimensionArg) {
@@ -966,6 +1072,12 @@ public class StashCommand extends Command {
         boolean inThisDimension = here != null && com.porter.qwertestash.orders.OrderBlocker.sameDimension(here, dimension);
         if (!inThisDimension) {
             note = " The bot is not in that dimension, so I could not check that it is a container.";
+        }
+        else if (!Containers.isLoaded(pos) && Math.hypot(CACHE.getPlayerCache().getX() - (pos.x() + 0.5), CACHE.getPlayerCache().getZ() - (pos.z() + 0.5)) > 128) {
+            // Typed on the wrong bot, or a position copied from another one: the bot would make a box for it and try to walk there
+            embed.title("Too Far Away").description(String.format("That position is %,d blocks from the bot and not loaded, check the coordinates (and that this is the right bot). Walk the bot near the container and use `stash delivery here`. Nothing was changed.",
+                Math.round(Math.hypot(CACHE.getPlayerCache().getX() - (pos.x() + 0.5), CACHE.getPlayerCache().getZ() - (pos.z() + 0.5))))).errorColor();
+            return;
         }
         else if (!Containers.isLoaded(pos)) {
             note = " Warning: that position is not loaded (out of range), so I could not check that it is a container.";
@@ -1107,10 +1219,14 @@ public class StashCommand extends Command {
         String stashLine;
         if (stash == null) stashLine = "None saved here yet";
         else {
-            long excluded = stash.boxes.stream().filter(b -> b.excluded).count();
-            long dropOffs = stash.boxes.stream().filter(b -> b.dropOff).count();
+            // The delivery container and the chests put up above it are not the stash
+            var mine = stash.boxes.stream().filter(b -> !b.delivery && stash.inScope(b)).toList();
+            long excluded = mine.stream().filter(b -> b.excluded).count();
+            long dropOffs = mine.stream().filter(b -> b.dropOff).count();
+            long items = 0;
+            for (var b : mine) if (b.known()) for (var it : b.contents) if (it != null) items += it.count;
             stashLine = String.format("%d containers (%d read, %d excluded, %d drop-off), %,d items",
-                stash.boxes.size(), stash.knownCount(), excluded, dropOffs, stash.itemCount());
+                mine.size(), mine.stream().filter(b -> b.known()).count(), excluded, dropOffs, items);
         }
 
         embed
@@ -1131,7 +1247,7 @@ public class StashCommand extends Command {
             .addField("Split Durability", toggleStr(CONFIG.splitDurability) + " (signs mode, used gear goes in containers signed \"Used\", full gear everywhere else)")
             .addField("Stay On", toggleStr(CONFIG.stayOn) + " (recheck " + CONFIG.recheckSeconds + "s, " + (CONFIG.smartRecheck ? "smart: only drop-offs a hopper or dropper can fill, backing off to 5 min" : "every drop-off") + ")")
             .addField("Carry / Keep Slots", (CONFIG.carrySlots.isBlank() ? "every empty slot" : CONFIG.carrySlots) + " / " + (CONFIG.keepSlots.isBlank() ? "none" : CONFIG.keepSlots))
-            .addField("Delay", CONFIG.delayTicks + " ticks")
+            .addField("Delay", CONFIG.delayTicks + " ticks, container delay " + CONFIG.containerDelay + " ticks")
             .addField("Gives Way To Other Modules", "waits " + CONFIG.quietSeconds + "s after they stop, pearl slot (hotbar 1) kept for PearlPlus " + toggleStr(CONFIG.reservePearlSlot))
             .addField("Watch Chests", toggleStr(CONFIG.watchAccess) + " (re-read " + CONFIG.accessRescanSeconds + "s after another player closes one; needs tracking on)")
             .addField("Auto Label", toggleStr(CONFIG.autoLabel) + " (signs mode, a sign every " + CONFIG.labelGapSeconds + "s at most, see `stash labels`)")

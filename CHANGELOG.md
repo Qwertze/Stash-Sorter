@@ -5,6 +5,189 @@ All notable changes to Stash Sorter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-11-06
+
+### Added
+- **Container delay** (`stash containerDelay <0-100>`, setting "Container Delay" on the website, default 0): extra ticks of pause
+  around opening containers. A container is not opened until this many ticks after the last one the bot closed, and the first click in a
+  freshly opened one waits this long too, on top of the click delay. It applies to every container the sorter opens, the placed shulker,
+  the crafting table and the anvil. Ticks held back do not count against the open timeouts or the retry pause. 0 is exactly as before.
+  A higher value is slower but gentler on the server; 2b2t can kick or rubber-band when containers are opened very quickly. Mirrors the
+  Qwerte addon's setting.
+
+### Fixed
+- A read container kept and skipped for being outside the stash area could still be walked to and read after `stash rescan`
+  (or a recheck): a container that is excluded or skipped is now never read again by those. `stash exclude` and `stash dropoff`
+  on such a container change nothing and say that it is outside the stash area (widen the area to use it again).
+- A container you excluded yourself is never removed, even one that was never read and lies outside the area.
+- Merging the two halves of a double chest keeps the "skipped, outside the area" mark, and the count of known shulkers ignores
+  excluded and skipped containers.
+
+## [1.12.1] - 2026-11-06
+
+### Added
+- **`stash friends add/del/list` and a "Friends" setting** (on the website): players (name or UUID, empty by default) that do
+  not count as "someone else near the bot" - your own alts. They no longer hold back going back to a shulker, nor the pickup of
+  ground items. Not the whisper whitelist.
+
+### Fixed
+- **A shulker problem no longer stops shulker handling (and orders) for good.** Seen live: the server put a broken order shulker
+  back five times in 20 s, the bot gave up ("Couldn't break the shulker ... it's still there"), and every order then showed
+  "paused: a shulker could not be picked up" until sorting was restarted.
+  - A refused break is asked again after a growing wait (5, 15, 30, 60, 90 s, five times) instead of every 4 s, and the wait
+    does not count towards the break timeout. A refusal seen before (the shulker back after "broken") now counts as a retry.
+  - Giving up on a shulker (break, return, pickup or the 10 minute finish) is no longer a stop: its record is kept, orders wait
+    ("finishing a shulker"), and after 20 s plus 15 s with no other player within 32 blocks of the shulker or the bot, the bot
+    goes back (walking there first if it is far) and finishes or picks it up. Each shulker is gone back to at most 3 times.
+  - If the shulker is clearly gone (nothing standing, nothing on the ground near), the orphan is forgotten and shulkers pause for
+    3 minutes only.
+  - A real stop (after the 3 goes, or a way that leaves the stash area) now ends by itself once the shulker is picked up or gone
+    from the world, not only when sorting is restarted.
+  - Time spent giving way no longer counts against the 10 minute finish deadline in any case.
+  - New INFO lines to grep: `Shulker handling PAUSED (will retry ...)`, `Shulker handling PAUSED (stopped)`,
+    `Shulker handling PAUSED (3 min)`, `Shulker handling: the area is quiet, going back`, `Shulker handling RESUMED`.
+- The cap of 3 goes back per shulker and the quiet wait now survive a restart (saved in the in-flight record, no format change).
+- Going back to a shulker no longer waits for ever for a player: after 5 minutes the bot goes back anyway. It says who it waits for
+  at INFO (first time, then every minute).
+- A shulker given up on is saved as given up (it is picked up, not packed on), the order bin is kept (not replaced by an empty one),
+  an idle sorter checks once a second whether the area is quiet, and the pause state is read safely from command and web threads.
+- **Scans no longer stall on a container that is not there.** A container that was never read and is outside the stash
+  (outside the perimeter, or with no perimeter over 20000 blocks from every container read, with at least 5 read ones to judge by)
+  is dropped at every start, at INFO, after the stash file is copied beside it (.prune-bak-, 3 kept; no copy, no drop). A read container is never dropped this way,
+  and nothing is dropped when the stash file is only loaded. A container with nothing there (air in a loaded chunk), or one
+  the pathfinder finds no way to 4 times in a row, is skipped at once with the reason at INFO; a chunk that is not loaded is walked
+  to (a wide stash is fine). A read that gets nowhere is tried again later, never marked unreachable for good. `stash exclude`, `dropoff` and
+  `compactSkip` with a position refuse to add a new container outside the perimeter. The last container's progress line ("reading containers: 48/48; done.") is
+  printed too.
+- **Read containers are kept, not deleted.** Setting or changing the perimeter (and every start) now drops only never-read
+  containers outside it. A read one stays in the stash file and is skipped (marked excluded by the sorter, undone when the perimeter
+  holds it again or goes), and is left out of the website index, the local search index and the status counts.
+- **The delivery container can no longer plant a stray container.** `stash delivery <x> <y> <z>` refuses an unloaded position more
+  than 128 blocks from the bot (a position meant for another bot); changing or clearing the delivery container removes its never-read stand-in box and resets its no-compact mark.
+- `stash friends add` checks the name; the friends and whitelist lists are replaced, not changed in place.
+- A read that failed is tried again after 1 minute, then 2, then every 5 minutes, each container on its own schedule (it was all of them
+  every minute), and a read gets 30 s without getting nearer instead of a minute of pathing.
+
+## [1.12.0] - 2026-11-06
+
+### Added
+- **The live viewer shows the bot's whole inventory:** the viewer frame's `hud` gains `inv`, the 27 main inventory slots (window 0
+  slots 9-35, top left to bottom right, null for empty), next to the hotbar, armour and offhand it already had. Every HUD item
+  (hotbar, armour, offhand, inventory) also gains `d` (damage) and `md` (max damage), only for damageable items, read the way the
+  index reads durability, so the website draws the same durability bars as in the stash grid. Items still carry only their id,
+  count and durability: never a custom name, nothing positional.
+  - The inventory is part of the HUD: a change there is sent on the next 200 ms viewer tick (one HUD per tick at most), and the
+    whole HUD at least every 5 s, as before.
+  - Needs a Stash Manager server that knows `inv`, `d` and `md` (an older server drops them; the page then shows no inventory).
+
+## [1.11.1] - 2026-11-06
+
+### Added
+- **An INFO log line when the delivery report is taken by the Stash Manager server:** "Delivery report sent: N chests". It never
+  has positions or names, and is throttled to about one a minute (the first success after a failure is always logged). The Qwerte
+  addon logs the same line.
+
+## [1.11.0] - 2026-11-06
+
+### Added
+- **The delivery storage's contents are reported to the Stash Manager server**, so the website can show what is already in the
+  delivery chests (left over from past orders) and whether a new order fits. A new signed `POST /api/v1/delivery` carries every
+  delivery chest (the delivery container and the chests put up above it) in fill order (chests not known to be full first, lowest
+  first, then the full ones): size, whether it is full, when it was last read, and per slot the item id, hover name (at most 64
+  characters), count, max stack, damage, and for shulker boxes a summary of what is inside (at most 27 `{id, count}` entries,
+  grouped by id). No positions. A chest the bot has never read has `readAt` 0 and `items` null.
+  - Taken from what the sorter reads through an open delivery chest window: delivering into it, looking at a full chest again
+    (a player opened it, or the 2-minute check), and verifying a delivery. Saved with the stash like any other container contents.
+  - Sent at most once every 5 seconds, only when the contents changed (the hash leaves the read times out) or the server asks
+    (`needDelivery` in the heartbeat reply). The heartbeat gains `deliveryHash` (left out when no delivery container is set).
+    A 409 (stash name in use) is handled like the index's; an older server without the route (404) is not asked again until
+    the contents change.
+  - These contents are never part of the index, the search or the stock counts; that rule is unchanged.
+  - Only sent to a server whose heartbeat reply carries a `needDelivery` key (an older server never gets it); last in line after the
+    index, the heartbeat and the order requests; a failure never touches the manager's backoff or status, and has a retry timer of
+    its own (60 s, doubling to 10 min). A 400 or 413 is not retried for the same contents. A report over about 230 KB drops the
+    shulker contents first, then the last chests' items.
+
+## [1.10.0] - 2026-11-06
+
+### Added
+- **A crafting table is found, put down or crafted when crafting needs one and none is set.** Same order of preference as the anvil
+  (and the Meteor addon), looked for only when a craft that is possible is about to start (shulker boxes for orders and compaction,
+  chests for the delivery storage), never at heartbeat time, and never before the craft itself was found possible:
+  1. the table set with `stash craftingtable` (or one remembered from before);
+  2. a placed crafting table standing in the stash area (the perimeter, or the containers widened by the container radius; at most
+     128 blocks across; loaded chunks only; one search every 10 s), the nearest one the bot can stand next to (remembered as "found");
+  3. a crafting table taken from the stash and put down by the same spot rules as the anvil (remembered as "placed");
+  4. a crafting table crafted in the inventory's own 2x2 grid from 4 planks (any wood), or from logs made into planks first, from
+     planks and logs in the stash only, and put down (remembered as "crafted").
+  With none of that the craft fails with "no crafting table available" (with the cause when it is known), and the order goes on or
+  goes short exactly as it does without a table. A remembered table that is gone is forgotten and the search starts again; a found,
+  placed or crafted one the bot can't reach or open is forgotten too (a hand-set one never is). The 2x2 grid is only clicked
+  with plain pick-up clicks (no shift-click), and is emptied, with the cursor, on every way out (stop, disconnect, cancel,
+  respawn, another module's window): with no room left the bot keeps trying and says so.
+  - `stash craftingtable`, `stash crafting` and `stash status` say how the table came to be (set, found, placed or crafted); the
+    position is shown only where the delivery container's is.
+  - The heartbeat's `crafting` gains `tableSource` ("set", "found", "placed", "crafted" or "none"); `table` is unchanged.
+
+- **Live viewer feed for the Stash Manager website.** While a browser has the viewer page open for this bot (the server says so in
+  its `bot/next` reply), the plugin posts a frame five times a second to `bot/viewer`: the map tiles around the bot (vanilla map
+  colours and shading, with water depth, from the loaded chunks), the bot's position and heading, the players, mobs and dropped
+  items nearby (players first, at most 256), the HUD (health, food, experience, armour points, hotbar, armour, off-hand) and new
+  chat lines. Tiles are sent when they change (block updates, chunk loads, and a re-check of every tile every 2 s), when they come
+  into or leave the radius, and all of them on a new session, a resync or a change of dimension.
+  - Costs nothing when nobody watches: no requests, no chunk scanning, no thread. Only the last 50 chat lines are kept in memory.
+  - One request at a time, never queued; stops at once when the server says nobody watches, and when the dashboard link or the
+    module is turned off. Chat text, positions and player names are never written to the log.
+
+## [1.9.0] - 2026-11-05
+
+### Added
+- **Delivery storage that grows (`stash delivery expand on`, off by default; "Auto expand delivery storage" on the website).**
+  When every chest of the delivery storage is full, the bot takes a chest from the stash and puts another chest up one block above
+  the highest one. A double chest gets a double chest above both halves, the same way round; a single chest (or a barrel) gets a
+  single chest. This goes on for as long as the new chests could be opened and the bot can reach them: it stops at the build height
+  limit, at something in the way, at a solid block above the new chest (a lid does not open under one), and where there is nowhere to
+  stand that can reach it. From the floor the first row above the delivery container is within reach; higher ones need something to
+  stand on beside the stack (the top of a chest is only in sight from an eye above it). The order then waits with "delivery storage
+  full: can't place higher: <why>".
+  - The chests come from the stash by the order source rules (loose or inside shulkers, never a chest another line of the order asks
+    for, nothing that holds something). With none left and crafting on, chests are crafted (chest from planks from logs, at the
+    crafting table).
+  - A chest is not placed against a chest by a plain click (that opens it): the bot sneaks. The first half is put up by a sneaking
+    click on the top of the chest below, standing on the side the chest should face (the front is opposite to where the bot looks).
+    The second half by a sneaking click on the side of the first, which joins it as the other half of the same double chest. What
+    stands at the end is read back from the world: a double chest, or two single ones if they did not join.
+  - The lowest chest with room is filled first; the chests stay and are used again. A full chest is passed over until it is known to
+    have room.
+  - **A chest a player emptied is used again.** The bot sees the lid of the delivery chests (the block event with the number of
+    players who have it open). A full chest opened by a player and closed again is looked at once (the bot opens it and reads what
+    is in it); if it has room it is usable. Where the lid could not be seen (the bot was out of range), a full chest is looked at
+    again every 2 minutes while an order waits for space.
+  - The chests are part of the delivery set: their positions are never on the website (not in the settings, the activity or the
+    heartbeat), the sorter never sorts into them or takes from them, and they are not in the index or the search. They are saved with
+    the stash. A different delivery container forgets the chests put up above the old one; a chest a player breaks leaves the storage.
+  - `stash delivery expand [on|off]` shows or sets it; `stash delivery` and `stash orders` say "3 chests, 1 full, can expand" or
+    "blocked: why". The heartbeat gets a new optional `deliveryStorage` ({`autoExpand`, `chests`, `full`, `canExpand`, `blocked`},
+    no positions); the existing fields are as they were.
+- **An order waits for delivery space instead of ending.** When every delivery chest is full and no chest can be put up (or auto
+  expand is off), the order is paused with "paused: waiting for delivery space: <why>" and goes on once space is confirmed (a chest
+  emptied by a player, or a chest put up). It waits for 2 hours at most (longer than the 10 minutes a held-up bot is given, because
+  what it waits for is a player claiming an earlier order), then ends as before with "delivery container full (x/y)". The finished
+  shulker stays in the inventory throughout (the sorter does not sort while an order is in hand) and, if the order ends, is put back
+  into the stash like any leftover; nothing is dropped.
+
+- The stash index carries the durability of damaged gear: each `items[]` entry of a damaged, damageable item has `damage` (at least 1)
+  and `maxDamage`; undamaged and undamageable items have neither. The index hash changes for stashes that hold damaged gear.
+
+- Changing or clearing the delivery container turns the chests put up above the old one into ordinary stash containers, and the
+  sorter then sorts what is in them (the shulkers delivered there included). The console and the command reply say how many
+  ("N extra delivery chests are now ordinary stash containers; their contents will be sorted"). Going back to 1.8.1 does the same:
+  it knows nothing of them. The 2-hour wait for delivery space is kept in memory only, so a restart of the proxy starts it again.
+
+### Changed
+- The shulker just delivered is looked for in the chest it was put into, which is kept with the saved order (`deliveringAt`) so a
+  restart looks in the right one.
+
 ## [1.8.1] - 2026-11-05
 
 ### Added

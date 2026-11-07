@@ -60,6 +60,13 @@ class CraftingSettingsTest {
         assertTrue(c.get("enabled").getAsBoolean());
         assertFalse(c.get("table").getAsBoolean());
         assertEquals(2, c.size(), "no position: " + c);
+        for (String source : new String[] {"set", "found", "placed", "crafted", "none"}) {
+            JsonObject withSource = JsonParser.parseString(new String(ManagerIndex.heartbeat(b, -1, null, null, null, new ManagerIndex.Naming(true, 3), new ManagerIndex.Crafting(true, !source.equals("none"), source)), StandardCharsets.UTF_8))
+                .getAsJsonObject().getAsJsonObject("crafting");
+            assertEquals(source, withSource.get("tableSource").getAsString());
+            assertEquals(3, withSource.size(), "enabled, table, tableSource: " + withSource);
+        }
+        assertTrue(SettingsSpec.PLUGIN.get("craftingTableSource").hidden);
         assertTrue(o.has("naming"));
         JsonObject old = JsonParser.parseString(new String(ManagerIndex.heartbeat(b, -1, null, null, null, new ManagerIndex.Naming(true, 3)), StandardCharsets.UTF_8)).getAsJsonObject();
         assertFalse(old.has("crafting"));

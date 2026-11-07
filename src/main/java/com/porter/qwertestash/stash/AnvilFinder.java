@@ -110,6 +110,7 @@ public final class AnvilFinder {
      */
     public static final class Scan {
         private final int[] region;
+        private final Predicate<String> match;
         private final List<BlockPos> found = new ArrayList<>();
         private int cx, cz;
         private final int cx0, cx1, cz0, cz1;
@@ -117,6 +118,12 @@ public final class AnvilFinder {
         private long lookups;
 
         public Scan(int[] region) {
+            this(region, AnvilFinder::isAnvil);
+        }
+
+        /** A search for blocks of another kind (the crafting table, 1.10.0): {@code match} gets the block name. */
+        public Scan(int[] region, Predicate<String> match) {
+            this.match = match;
             this.region = region.clone();
             cx0 = Math.floorDiv(region[0], 16);
             cx1 = Math.floorDiv(region[3], 16);
@@ -167,7 +174,7 @@ public final class AnvilFinder {
                 int x = x0 + col % width, z = z0 + col / width;
                 for (int y = region[1]; y <= region[4]; y++) {
                     used++;
-                    if (isAnvil(w.name(x, y, z))) found.add(new BlockPos(x, y, z));
+                    if (match.test(w.name(x, y, z))) found.add(new BlockPos(x, y, z));
                 }
                 if (++col >= cols) nextChunk();
             }

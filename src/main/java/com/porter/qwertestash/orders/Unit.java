@@ -25,6 +25,10 @@ public final class Unit {
     public boolean confirmed;
     public boolean verified, verifying, replanned, trimmed;
     public int fullTries, starts, fetches, begins, base;
+    /** Times delivery storage was asked to grow for it (1.9.0), bounded by OrderFlow.MAX_EXPANDS. */
+    public int expands;
+    /** Expand/Recheck steps handed to the host in a row (bounded by OrderFlow.MAX_SPINS: a host that can't start them gets a wait). */
+    public int spins;
     /** What the finished shulker holds, by item key, counted when it was first seen. */
     public Map<String, Integer> content = Map.of();
 

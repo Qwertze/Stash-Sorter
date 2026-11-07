@@ -31,12 +31,17 @@ public final class CraftGrid {
      * ones in slots 1, 2, 3, ...
      */
     public static int[] slots(Recipes.Recipe r) {
+        return slots(r, 3);
+    }
+
+    /** As {@link #slots(Recipes.Recipe)} for a grid {@code width} across (3 for the table, 2 for the inventory's 2x2 grid, slots 1-4). */
+    public static int[] slots(Recipes.Recipe r, int width) {
         List<Integer> out = new ArrayList<>();
         if (r.shaped()) {
             for (int row = 0; row < r.h(); row++) {
                 for (int col = 0; col < r.w(); col++) {
                     List<String> cell = r.cells().get(row * r.w() + col);
-                    if (cell != null && !cell.isEmpty()) out.add(1 + row * 3 + col);
+                    if (cell != null && !cell.isEmpty()) out.add(1 + row * width + col);
                 }
             }
         }
@@ -72,7 +77,12 @@ public final class CraftGrid {
      * @param maxPerSlot the most one grid slot may hold (the stack size, 64 for everything phase 1 makes)
      */
     public static @Nullable Batch batch(Recipes.Recipe r, Map<String, Integer> carried, int fills, int maxPerSlot) {
-        int[] at = slots(r);
+        return batch(r, carried, fills, maxPerSlot, 3);
+    }
+
+    /** As {@link #batch(Recipes.Recipe, Map, int, int)} for a grid {@code width} across. */
+    public static @Nullable Batch batch(Recipes.Recipe r, Map<String, Integer> carried, int fills, int maxPerSlot, int width) {
+        int[] at = slots(r, width);
         List<List<String>> cells = r.ingredients();
         for (int k = Math.min(fills, maxPerSlot); k >= 1; k--) {
             String[] item = assign(cells, at, carried, k);

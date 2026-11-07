@@ -345,13 +345,31 @@ public class GroundItems extends Module {
     }
 
     /**
-     * The name of a player other than the bot who is loaded (in render distance), or null if there is none.
+     * The name of a player other than the bot who is loaded (in render distance), or null if there is none. The owner's friends
+     * ({@code stash friends}) do not count.
      */
     public @Nullable String playerNearby() {
+        return otherPlayer(Double.NaN, Double.NaN, 0);
+    }
+
+    /**
+     * The name of a player other than the bot, not a friend, within {@code radius} blocks (flat) of a point, or null. Used to
+     * decide when it is quiet enough to go back to a shulker; unlike {@link #playerNearby()} it ignores players far away in view.
+     * Bot tick thread.
+     */
+    public @Nullable String playerWithin(double x, double z, double radius) {
+        return otherPlayer(x, z, radius);
+    }
+
+    /** The one place that says who counts as someone else: not the bot, not removed, not a friend; within the radius unless x is NaN. */
+    private @Nullable String otherPlayer(double x, double z, double radius) {
         int botId = botId();
         for (EntityPlayer player : CACHE.getEntityCache().getPlayers().values()) {
             if (player == null || player.getEntityId() == botId || player.isSelfPlayer() || player.isRemoved()) continue;
-            return CACHE.getTabListCache().get(player.getUuid()).map(PlayerListEntry::getName).orElse(player.getUuid().toString());
+            if (!Double.isNaN(x) && !ShulkerRecovery.within(player.getX(), player.getZ(), x, z, radius)) continue;
+            String name = CACHE.getTabListCache().get(player.getUuid()).map(PlayerListEntry::getName).orElse(null);
+            if (Friends.matches(com.porter.qwertestash.QwerteStashPlugin.CONFIG.friends, player.getUuid(), name)) continue;
+            return name != null ? name : player.getUuid().toString();
         }
         return null;
     }

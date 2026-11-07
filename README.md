@@ -66,6 +66,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash radius <blocks>` / `height <blocks>` | How far around the bot to look for new containers (8 / 3) |
 | `stash barrels on/off` | Include barrels (on) |
 | `stash delay <ticks>` | Ticks between inventory clicks (3). Raise it if the server rejects clicks |
+| `stash containerDelay [ticks]` | Extra pause around opening containers, 0 to 100 (0). A container is not opened until this many ticks after the last one was closed, and the first click in a new one waits as long. Slower but gentler on the server; raise it if 2b2t kicks or rubber-bands you when containers open quickly |
 | `stash quiet <seconds>` | Seconds other modules (like PearlPlus) must be idle before sorting carries on (3). Doubles for repeated interruptions, up to a minute |
 | `stash pearlSlot on/off` | Keep the first hotbar slot free of stash items and shulkers, for PearlPlus's pearls (on) |
 | `stash watch on/off` | Re-read a chest after another player has opened and closed it (on). Needs tracking on |
@@ -98,6 +99,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash whisper on/off` | Whisper search (off) |
 | `stash whitelist add/del <player>` | Who can search by whisper |
 | `stash whitelist` or `stash whitelist list` | Shows the whitelisted players (other status output only gives how many) |
+| `stash friends add/del <player or uuid>` / `stash friends [list]` | Players who don't count as someone else near the bot (your own alts). They don't hold back going back to a shulker or the pickup of ground items. Not the whisper whitelist. Empty by default |
 | `stash prefix <word>` / `clear` | Whispers starting with this are searches (`find`) |
 
 Slots: 1-9 is the hotbar, 10-36 the inventory from the top left.
@@ -107,8 +109,9 @@ Instead of looking around the bot (`radius` / `height`), you can give the stash 
 saved in the stash file, so each stash name on each server has its own.
 
 - Every chest, trapped chest and barrel (if `barrels` is on; double chests as always one container) inside the box
-  belongs to the stash, and none outside it is ever added. Setting a perimeter drops the containers outside it, with
-  what was saved for them. `stash area clear` goes back to looking around the bot.
+  belongs to the stash, and none outside it is ever added. Setting a perimeter drops the never-read containers outside
+  it. A read one outside it is kept in the stash file and skipped (not sorted, searched or indexed) until the perimeter
+  takes it in again. `stash area clear` goes back to looking around the bot.
 - The bot only knows chunks that are loaded, so on `stash on`, when the perimeter changes and on `stash rescan` it first
   explores: it walks to the middle of each 16×16 column of the box it hasn't seen yet, nearest first, reading each
   column for containers as it comes into view, then reads the containers and sorts as usual. A column it can't get to
@@ -245,13 +248,16 @@ container is read again as usual. This also happens after `stash off` with a shu
 
 ## Stash Manager and orders
 The [Stash Manager server](https://github.com/Qwertze/Qwertze/tree/dev/stash-manager-server) is a small website for
-your network that shows the stash, takes orders and can show this plugin's settings and console. New and still being
-tested (1.6.0-dev).
+your network that shows the stash, takes orders and can show this plugin's settings and console. New in 1.6.0 and
+still being tested.
 
 1. Start the server and copy the API key from its console or its Link addon panel.
 2. `stash manager url http://<server>:8765`, `stash manager key <key>`, `stash manager on`.
 3. For orders, with the bot looking at a chest or barrel run `stash delivery here` (or give `x y z`), then `stash orders on`. `stash orders`
-   tells you what is stopping orders, if anything.
+   tells you what is stopping orders, if anything. `stash delivery x y z` refuses a position in the bot's dimension that is not
+   loaded and more than 128 blocks from the bot (usually a position meant for another bot). Walk the bot near the chest and use
+   `stash delivery here`. Changing or clearing the delivery container removes the box the bot made for the old one if it
+   was never read.
 4. For orders that name their shulkers, with the bot looking at an anvil run `stash anvil here` (or
    `stash anvil <x> <y> <z> [dimension]`). `stash anvil` shows it and `stash anvil clear` removes it. The bot renames
    each shulker there before delivering it, for about 1 XP level each. Without an anvil, or without enough levels, the

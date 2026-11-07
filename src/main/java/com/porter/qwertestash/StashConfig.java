@@ -26,6 +26,8 @@ public class StashConfig {
     public boolean barrels = true;
     /** Ticks between inventory actions. Raise it if the server rejects clicks. */
     public int delayTicks = 3;
+    /** Extra ticks of pause around opening containers: not opened until this long after the last was closed, and the first click in a new one waits this long too. 0 is as fast as possible. */
+    public int containerDelay = 0;
     /** Ticks to wait after opening a container before reading it. */
     public int settleTicks = 6;
 
@@ -153,6 +155,8 @@ public class StashConfig {
 
     public boolean whisperSearch = false;
     public List<String> whitelist = new ArrayList<>();
+    /** Players (names, or UUIDs) that do not count as someone else near the bot, like the owner's own alts. Empty by default. Not the whisper whitelist. */
+    public List<String> friends = new ArrayList<>();
     /** Whispers starting with this are searches. Blank treats every whitelisted whisper as a search. */
     public String prefix = "find";
 
@@ -209,6 +213,14 @@ public class StashConfig {
      */
     public String anvilSource = "";
 
+    // Delivery storage (1.9.0). Off by default; older settings files load as before.
+
+    /**
+     * When every chest of the delivery storage is full, put another double chest up one block above the highest one (taken from
+     * the stash, or crafted when crafting is on), and fill the lowest chest with room first. Off: an order waits for space.
+     */
+    public boolean autoExpandDelivery = false;
+
     // Crafting (1.8.0, phase 1: plain shulker boxes for orders and compaction). Every key has a default so older settings files
     // load as before, with crafting off.
 
@@ -225,4 +237,6 @@ public class StashConfig {
     /** The crafting table: set with `stash craftingtable`. craftingTableDimension is blank when none is set. Never sorted or indexed. */
     public String craftingTableDimension = "";
     public int craftingTableX, craftingTableY, craftingTableZ;
+    /** How the crafting table came to be (1.10.0): "set" (blank reads as set), "found", "placed" or "crafted". */
+    public String craftingTableSource = "";
 }
