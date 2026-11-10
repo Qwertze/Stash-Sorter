@@ -361,14 +361,23 @@ public class GroundItems extends Module {
         return otherPlayer(x, z, radius);
     }
 
-    /** The one place that says who counts as someone else: not the bot, not removed, not a friend; within the radius unless x is NaN. */
+    /** As {@link #playerWithin}, but friends count too (repair passes: thrown orbs do not care who a friend is). Bot tick thread. */
+    public @Nullable String anyPlayerWithin(double x, double z, double radius) {
+        return otherPlayer(x, z, radius, true);
+    }
+
     private @Nullable String otherPlayer(double x, double z, double radius) {
+        return otherPlayer(x, z, radius, false);
+    }
+
+    /** The one place that says who counts as someone else: not the bot, not removed, a friend only when {@code friendsCount}; within the radius unless x is NaN. */
+    private @Nullable String otherPlayer(double x, double z, double radius, boolean friendsCount) {
         int botId = botId();
         for (EntityPlayer player : CACHE.getEntityCache().getPlayers().values()) {
             if (player == null || player.getEntityId() == botId || player.isSelfPlayer() || player.isRemoved()) continue;
             if (!Double.isNaN(x) && !ShulkerRecovery.within(player.getX(), player.getZ(), x, z, radius)) continue;
             String name = CACHE.getTabListCache().get(player.getUuid()).map(PlayerListEntry::getName).orElse(null);
-            if (Friends.matches(com.porter.qwertestash.QwerteStashPlugin.CONFIG.friends, player.getUuid(), name)) continue;
+            if (!friendsCount && Friends.matches(com.porter.qwertestash.QwerteStashPlugin.CONFIG.friends, player.getUuid(), name)) continue;
             return name != null ? name : player.getUuid().toString();
         }
         return null;

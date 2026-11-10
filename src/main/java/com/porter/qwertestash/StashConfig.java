@@ -74,6 +74,17 @@ public class StashConfig {
     public boolean kitSorting = true;
     /** Kit orders (1.16.0): take orders with kit lines (needs kit sorting on). */
     public boolean kitOrders = true;
+    /** Repair passes (1.17.0, REPAIR-CONTRACT v2): off sends no repair keys, runs no passes and does no needs-repair routing. */
+    public boolean repairPass = true;
+    /** Items per pass, throwing minutes per pass, minutes between automatic passes, boxes opened per pass (0: none whatever the website says). */
+    public int repairPassMaxItems = 64;
+    public int repairPassMaxMinutes = 20;
+    public int repairPassEveryMinutes = 30;
+    public int repairPassMaxBoxes = 8;
+    /** Local limits that also hold for manual runs: minutes between passes for a manual run, passes an hour, and a bottle reserve of at least this many (0: the website's only). */
+    public int repairPassMinGapManualMinutes = 5;
+    public int repairPassMaxPerHour = 4;
+    public int repairMinReserve = 0;
     /** Kit restock (1.16.0): while idle, build copies of templates with a keep count (needs kit orders on), up to {@code kitRestockPerHour} an hour. */
     public boolean kitRestock = true;
     public int kitRestockPerHour = 12;

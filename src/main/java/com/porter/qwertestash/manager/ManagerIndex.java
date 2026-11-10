@@ -360,10 +360,21 @@ public final class ManagerIndex {
         return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, naming, crafting, storage, deliveryHash, kits, craft, null);
     }
 
+    /** What the heartbeat says about repair passes (REPAIR-CONTRACT v2): the hash of the cached settings (null: none, sent as null) and the pass object. */
+    public record RepairHb(@Nullable String hash, @Nullable JsonObject pass) {
+    }
+
     /** @param area sent as {@code area} (needs a player); null leaves it out */
     public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
                                    @Nullable Naming naming, @Nullable Crafting crafting, @Nullable DeliveryStorage storage, @Nullable String deliveryHash,
                                    @Nullable Kits kits, @Nullable Craft craft, @Nullable AreaReport area) {
+        return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, naming, crafting, storage, deliveryHash, kits, craft, area, null);
+    }
+
+    /** @param repair sent as {@code repairHash} and {@code repairPass} (needs a player); null leaves both out (repair passes are off) */
+    public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
+                                   @Nullable Naming naming, @Nullable Crafting crafting, @Nullable DeliveryStorage storage, @Nullable String deliveryHash,
+                                   @Nullable Kits kits, @Nullable Craft craft, @Nullable AreaReport area, @Nullable RepairHb repair) {
         JsonObject o = new JsonObject();
         if (area != null && b.player() != null && !b.player().isBlank()) {
             JsonObject a = new JsonObject();
@@ -439,6 +450,12 @@ public final class ManagerIndex {
                 ko.addProperty("craft", kits.caps().craft());
                 o.add("kitOrders", ko);
             }
+        }
+        // Repair passes (2.0): the server only answers for a bot that sends repairHash; a bot with passes off sends neither key
+        if (repair != null && b.player() != null && !b.player().isBlank()) {
+            if (repair.hash() == null) o.add("repairHash", JsonNull.INSTANCE);
+            else o.addProperty("repairHash", clamp(repair.hash(), 64));
+            if (repair.pass() != null) o.add("repairPass", repair.pass());
         }
         if (deliveryHash != null && !deliveryHash.isEmpty()) o.addProperty("deliveryHash", clamp(deliveryHash, 64));
         o.addProperty("server", b.server());
@@ -525,6 +542,49 @@ public final class ManagerIndex {
             return new KitsReply(known, need, settings, invalid);
         } catch (RuntimeException ex) {
             return NO_KITS;
+        }
+    }
+
+    /**
+     * What a heartbeat reply says about repair passes. {@code known}: the reply has a {@code repairHash} key (the server supports passes). {@code settings}: a valid
+     * {@code repairSettings} object, else null; {@code invalid} why one was refused. {@code run} / {@code stop}: the ids asked for (-1: none). {@code needReport}:
+     * the server wants the report.
+     */
+    public record RepairReply(boolean known, @Nullable String hash, com.porter.qwertestash.stash.@Nullable RepairSettings settings, @Nullable String invalid, long run, long stop,
+                              boolean needReport) {
+    }
+
+    private static final RepairReply NO_REPAIR = new RepairReply(false, null, null, null, -1, -1, false);
+
+    private static long idOf(@Nullable JsonElement e) {
+        if (e == null || !e.isJsonPrimitive() || !e.getAsJsonPrimitive().isNumber() || !e.getAsString().matches("[0-9]{1,15}")) return -1;
+        return Long.parseLong(e.getAsString());
+    }
+
+    /** Reads the repair fields of a heartbeat reply. Missing or broken fields mean nothing was said; a bad settings object is refused whole. */
+    public static RepairReply repairReply(String body) {
+        try {
+            JsonElement e = SafeJson.parse(body);
+            if (!e.isJsonObject()) return NO_REPAIR;
+            JsonObject o = e.getAsJsonObject();
+            JsonElement h = o.get("repairHash");
+            boolean known = h != null;
+            String hash = hex40(h);
+            com.porter.qwertestash.stash.@Nullable RepairSettings settings = null;
+            String invalid = null;
+            JsonElement s = o.get("repairSettings");
+            if (s != null && !s.isJsonNull()) {
+                try {
+                    settings = com.porter.qwertestash.stash.RepairSettings.parse(s);
+                } catch (com.porter.qwertestash.stash.RepairSettings.Invalid ex) {
+                    invalid = ex.getMessage();
+                }
+            }
+            JsonElement n = o.get("needRepairReport");
+            boolean need = n != null && n.isJsonPrimitive() && n.getAsJsonPrimitive().isBoolean() && n.getAsBoolean();
+            return new RepairReply(known, hash, settings, invalid, idOf(o.get("repairRun")), idOf(o.get("repairStop")), need);
+        } catch (RuntimeException ex) {
+            return NO_REPAIR;
         }
     }
 

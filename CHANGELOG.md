@@ -5,6 +5,44 @@ All notable changes to Stash Sorter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-11-10
+
+### Added
+- **Repair passes** (REPAIR-CONTRACT v2, with "opening unnamed shulkers"; not tried in the game yet). When the bot is idle it finds low-durability items in the stash (below
+  the website's threshold, default 50%; exactly half is not low), takes the Mending ones (loose, or out of unnamed shulker boxes it opens) and bottles from the stash,
+  repairs them fully with the v1.2 throw (RepairTrip), and lets normal sorting put every item in its best chest. Settings come from the website's Repair panel (repair mode
+  and automatic passes on by default; threshold, bottle reserve 1728, needs-repair chest, open unnamed boxes) and are cached in `repair-settings.json`.
+  - **Bottle reserve:** a pass never takes more than `max(0, stashBottles - heldOrderBottles - reserve)`; an item whose bottles don't fit is skipped with `reserve`.
+  - **Needs-repair routing:** with a needs-repair chest set, a loose low item without Mending has that chest as its only destination (after kit routing, before tiers and
+    signs); the chest is reserved (nothing else is sorted into it); Mending items are never routed there; if it is also kit-reserved, kit reservation wins and routing is off.
+  - **Boxes:** an unnamed, non-kit shulker box holding a Mending candidate is opened (one at a time, nobody within 16 blocks, at most `repairPassMaxBoxes` (8) per pass, not
+    again for 24 h unless its contents change); named boxes and kits are never opened and their low items are counted. Items that came out of a box and could not be
+    repaired are not packed into a shulker again for 24 h.
+  - **Yielding:** a pass gives way at every safe point to an order (waiting, claimed or resumable), a player within 8 blocks, a stop, or the sorter being switched off,
+    puts everything back and reports `yielded`; an item that came back unrepaired is not retried by automatic passes for 6 h (manual passes retry it).
+  - **Settings here:** `repairPass` (on), `repairPassMaxItems` (64), `repairPassMaxMinutes` (20), `repairPassEveryMinutes` (30), `repairPassMaxBoxes` (8). Commands:
+    `stash repair run | stop | status`, `stash repairpass on/off`.
+  - **Protocol:** the heartbeat carries `repairHash` and `repairPass` (state, why, progress, candidates, bottles, `runDone`, `stopDone`, `reportHash`) while repair passes are on;
+    the reply's `repairSettings`, `repairRun`, `repairStop` and `needRepairReport` are handled (a run or stop is acknowledged once accepted); the report goes to
+    `POST /api/v1/repair/report` (signed like the index, at most every 10 s). A server without passes is never asked.
+- **Review fixes for repair passes.** The run and stop ids the bot acknowledged are kept per stash in `repair-settings.json`, so a restart does not run the last website
+  request again. A pass counts friends as players near (8 blocks, which also stops a throw; 16 blocks before a box is placed); an order repair is unchanged. The box a pass
+  emptied is put back before the next load and before the pass ends. Items tried with no headway in a pass are left out of its later plans, manual passes too. A pass waits
+  for the first heartbeat reply after connecting. A queued manual run is dropped while repair is disabled on the website and expires after 10 minutes. The scan and the
+  bottle count are kept per stash version. The needs-repair chest takes back the items routed to it. With no kit settings yet, the default kit score keeps kit-looking unnamed
+  boxes closed. An unknown needs-repair chest id switches routing off (warned once, without coordinates). Settings from an older server with no `shulkers` field read as
+  false (boxes stay closed) and keep their own hash. The cache file is read with the depth limit.
+  - **New local limits (also for manual runs):** `repairPassMinGapManualMinutes` 5, `repairPassMaxPerHour` 4 (the start times are kept in `repair-passes.json`, so a restart does
+    not reset them; 0 is no limit), `repairMinReserve` 0 (the reserve is the higher of the website one and this).
+  - **Box cooldowns are memory only** (24 h, lost on a restart); a restart can open a box again sooner than 24 h. The foreign-module and quiet-time facts of the gate are the
+    sorter own: it never starts a job while another module works or before the quiet time has passed, and the heartbeat state now says so.
+  - **Not in this version:** orders do not take `newKey` items for an `oldKey` a pass repaired (the 24 h key memory is kept, but unused); `toNeedsRepair` is the change in
+    the number of needs-repair items in the chest over the pass; `rehomed` counts repaired items whose best chest is not where they were. The report's `to` is always null (not reported yet).
+
+### Notes
+- Jar `StashSorter-1.17.0.jar`, SHA-256 `af3798575142bc607cc193a62fb3fc26a5c3b352a87f2bca6c5047dcb26cf6ea`, 813 automated tests.
+- Repair passes have not been tried in the game yet. With a Stash Manager server before 1.2.0 the bot makes no automatic passes (its cached settings are kept); `stash repair run` still works locally. The Qwerte addon has no repair passes yet.
+
 ## [1.16.1] - 2026-11-09
 
 ### Fixed
@@ -906,3 +944,6 @@ Everything from 1.2.0-dev.1 below, plus these fixes found while testing it:
 - Initial release. Sorts a saved stash of chests and barrels into tiers or by the signs on them, repacks mixed
   shulkers, merges partial stacks, empties drop-off chests, keeps the stash sorted in stay-on mode, and answers
   `find <item>` whispers from whitelisted players.
+
+## Versioning
+Major breaking changes: a new x.0.0 version. New features, bug fixes and more: 1.x.0. Minor bug fixes, single one-off patches or hotfixes: x.y.z.

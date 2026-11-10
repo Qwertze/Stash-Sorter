@@ -148,6 +148,11 @@ public class StashManager extends Module {
     private String kitWho = "";
     private boolean kitReportKnown, kitAsked;
     private @Nullable String kitSentHash, kitRejectedHash, kitInvalidSaid;
+    // Repair passes (1.17.0): the ids acknowledged, whether the server knows the repair report route, and the report's progress
+    private volatile long repairRunDone, repairStopDone;
+    private boolean repairReportKnown, repairAsked;
+    private @Nullable String repairSentHash, repairRejectedHash, repairInvalidSaid;
+    private long repairAttemptAt, repairBlockedUntil;
     // After a 409 owner conflict the report is not tried again for this long
     private long kitBlockedUntil;
     // What the report was last built from, and when
@@ -709,7 +714,107 @@ public class StashManager extends Module {
             // Last in line: the index, the heartbeat and the order's requests all go first
             if (deliveryReport != null && deliverySchedule.due(scheduleKey(deliveryReport), now)) sendDelivery(base, key, deliveryReport, now);
             else if (kitReportDue(built, now)) sendKits(base, key, kitReport, now);
+            else if (repairReportDue(now)) sendRepair(base, key, built, now);
         }
+    }
+
+    // Repair passes (1.17.0, REPAIR-CONTRACT v2): the heartbeat's repairHash and repairPass, the reply's settings, run and stop, and the report
+
+    /** The repair keys of the heartbeat: none with repair passes off here; else the hash of the cached settings (null: none) and the pass state. Tick thread. */
+    private ManagerIndex.@Nullable RepairHb repairBody(ManagerIndex.Built built) {
+        if (!CONFIG.repairPass) return null;
+        repairIdsSync(built);
+        com.porter.qwertestash.stash.RepairSettings cached = com.porter.qwertestash.stash.RepairStore.shared().get(built.server(), built.stash());
+        com.porter.qwertestash.orders.RepairPassReport r = sorter().repairReportNow();
+        return new ManagerIndex.RepairHb(cached == null ? null : cached.hash(), sorter().repairBeat(repairRunDone, repairStopDone, r == null ? null : r.hash()));
+    }
+
+    private @Nullable String repairIdsFor;
+
+    /** The acknowledged ids are kept per stash on disk: after a restart the bot sends its real values and is not asked to run an old request again. */
+    private void repairIdsSync(ManagerIndex.Built built) {
+        String who = built.server() + "|" + built.stash();
+        if (who.equals(repairIdsFor)) return;
+        repairIdsFor = who;
+        long[] ids = com.porter.qwertestash.stash.RepairStore.shared().ids(built.server(), built.stash());
+        repairRunDone = ids[0];
+        repairStopDone = ids[1];
+    }
+
+    /** What a heartbeat reply says about repair: new settings are checked, cached and the sorter woken; a run or stop is queued and acknowledged. Tick thread. */
+    private void repairReplied(ManagerIndex.Built built, String body) {
+        if (!CONFIG.repairPass) return;
+        repairIdsSync(built);
+        ManagerIndex.RepairReply reply = ManagerIndex.repairReply(body);
+        // Only a server that answers with a repairHash key knows passes (an older server: the cache is kept, nothing is asked)
+        repairReportKnown = reply.known();
+        if (!reply.known()) return;
+        if (reply.invalid() != null) {
+            if (!reply.invalid().equals(repairInvalidSaid)) LOG.warn("{}ignoring repair settings from the server: {}.", PREFIX, reply.invalid());
+            repairInvalidSaid = reply.invalid();
+        }
+        else if (reply.settings() != null) {
+            repairInvalidSaid = null;
+            if (com.porter.qwertestash.stash.RepairStore.shared().put(built.server(), built.stash(), reply.settings())) {
+                // The sorter plans everything again (routing, candidates)
+                Stashes.version++;
+                LOG.info("{}repair settings updated from the server.", PREFIX);
+            }
+        }
+        // A run or stop is acknowledged once accepted (queued or acted on), even with repair switched off on the website
+        if (reply.run() > repairRunDone) {
+            sorter().repairRun();
+            repairRunDone = reply.run();
+            lastHeartbeat = 0;
+            com.porter.qwertestash.stash.RepairStore.shared().putIds(built.server(), built.stash(), repairRunDone, repairStopDone);
+        }
+        if (reply.stop() > repairStopDone) {
+            sorter().repairStop();
+            repairStopDone = reply.stop();
+            lastHeartbeat = 0;
+            com.porter.qwertestash.stash.RepairStore.shared().putIds(built.server(), built.stash(), repairRunDone, repairStopDone);
+        }
+        repairAsked = reply.needReport();
+    }
+
+    /** Whether to send the pass report now: the server knows the route, the report changed (or it asked), at most every 10 s; a refused one is not sent again. */
+    private boolean repairReportDue(long now) {
+        if (!CONFIG.repairPass || !repairReportKnown || now < repairBlockedUntil || now - repairAttemptAt < 10_000L) return false;
+        com.porter.qwertestash.orders.RepairPassReport r = sorter().repairReportNow();
+        if (r == null) return false;
+        String hash = r.hash();
+        if (hash.equals(repairRejectedHash)) return false;
+        return repairAsked || !hash.equals(repairSentHash);
+    }
+
+    /** POST /api/v1/repair/report, signed like the index. Soft: the answer never feeds the manager's backoff or status. */
+    private void sendRepair(URI base, String key, ManagerIndex.Built built, long now) {
+        com.porter.qwertestash.orders.RepairPassReport r = sorter().repairReportNow();
+        String player = playerName();
+        if (r == null || player == null) return;
+        repairAttemptAt = now;
+        com.google.gson.JsonArray containers = null;
+        Stash stash = Stashes.current();
+        if (!CONFIG.kitSorting && stash != null) {
+            // With no kit report the server takes the pickable containers from here (for the needs-repair chest picker)
+            try {
+                KitReport.Built kb = KitReport.buildV2(stash, CONFIG.managerIncludeExcluded, player, List.of(), KitScore.Scoring.DEFAULT, KitItems.shared(), null);
+                containers = com.google.gson.JsonParser.parseString(new String(kb.json(), java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject().getAsJsonArray("containers");
+            } catch (RuntimeException e) {
+                containers = null;
+            }
+        }
+        String hash = r.hash();
+        send(base, "/api/v1/repair/report", r.body(built.server(), built.stash(), player, containers), key, (code, body) -> {
+            if (code == 200) {
+                repairSentHash = hash;
+                repairRejectedHash = null;
+                repairAsked = false;
+            }
+            else if (code == 400 || code == 413) repairRejectedHash = hash;
+            else if (code == 409) repairBlockedUntil = System.currentTimeMillis() + 5 * 60_000L;
+            return true;
+        }, true);
     }
 
     private String sig() {
@@ -730,7 +835,8 @@ public class StashManager extends Module {
         ManagerIndex.AreaReport areaNow = areaBody();
         String sentAreaHash = areaNow == null ? null : areaNow.hash();
         craftSentOrders = craftNow.orders() != null;
-        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash(), kitsBody(built), craftNow, areaNow), key, (code, body) -> {
+        ManagerIndex.RepairHb repairNow = repairBody(built);
+        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash(), kitsBody(built), craftNow, areaNow, repairNow), key, (code, body) -> {
             if (ManagerIndex.craftShapeRefused(code, body, craftSentOrders, craftLegacy)) {
                 // Not a failure of the server: it does not know the newer fields. Sent again at once in the 1.15.0 shape, and from now on
                 craftLegacy = true;
@@ -755,6 +861,7 @@ public class StashManager extends Module {
             kitsReplied(built, body);
             craftReplied(built, body);
             areaReplied(body, sentAreaHash);
+            repairReplied(built, body);
             long id = ManagerIndex.rescanId(body);
             if (id >= 0) startRescan(id);
             return true;

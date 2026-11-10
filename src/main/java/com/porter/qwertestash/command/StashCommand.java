@@ -81,6 +81,8 @@ public class StashCommand extends Command {
                 "autoLabel on/off",
                 "unsignedOverflow on/off",
                 "kitSorting on/off",
+                "repairpass on/off",
+                "repair run | stop | status",
                 "labels",
                 "stayOn on/off",
                 "recheck <seconds>",
@@ -341,6 +343,25 @@ public class StashCommand extends Command {
                 c.getSource().getEmbed().title("Kit Sorting " + toggleStrCaps(CONFIG.kitSorting));
                 Stashes.version++;
             })))
+            .then(literal("repairpass").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.repairPass = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Repair Mode " + toggleStrCaps(CONFIG.repairPass)).description(CONFIG.repairPass
+                    ? "Repair passes run when the bot is idle, as set on the website's Repair panel."
+                    : "No repair passes run, nothing about repair is sent, and needs-repair items are sorted like any other.").primaryColor();
+                Stashes.version++;
+            })))
+            .then(literal("repair")
+                .then(literal("run").executes(c -> {
+                    MODULE.get(StashSorter.class).repairRun();
+                    c.getSource().getEmbed().title("Repair Pass").description("A repair pass runs when the bot is idle (orders come first). With no settings from the server the defaults are used: below 50%, keeping 1728 bottles, no needs-repair chest.").primaryColor();
+                }))
+                .then(literal("stop").executes(c -> {
+                    MODULE.get(StashSorter.class).repairStop();
+                    c.getSource().getEmbed().title("Repair Pass").description("A queued run is dropped and a running pass puts everything back and ends.").primaryColor();
+                }))
+                .then(literal("status").executes(c -> {
+                    c.getSource().getEmbed().title("Repair Status").description(String.join("\n", MODULE.get(StashSorter.class).repairStatus())).primaryColor();
+                })))
             .then(literal("labels").executes(c -> {
                 c.getSource().getEmbed().title("Labels").description(MODULE.get(StashSorter.class).labelsReport()).primaryColor();
             }))

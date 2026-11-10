@@ -19,6 +19,7 @@ instead of your client.
   item's chest, freeing chest slots. See below.
 - **Repairs order items** with Bottles o' Enchanting from the stash before they're delivered (orders from the website can
   ask for it). See below.
+- **Repair passes** (new in 1.17.0): when idle, the bot repairs the low-durability items in the stash with bottles from the stash, and sends the items without Mending to a chest you pick on the Stash Manager website. See Repair mode below.
 - **Crafts what the stash can make for orders** (craft orders, new in 1.15.0): the website's build planner and the Printer can order items the stash does
   not hold but can make from what it holds; the bot crafts them at the crafting table set for the stash on the website. Needs a recipe table fetched
   from the Stash Manager server. See Crafting from the stash below.
@@ -404,6 +405,52 @@ alert.
 
 When a shulker box can't be crafted, the order says why ("no empty shulker; couldn't craft one: needs a crafting table",
 "... shulker shells can't be crafted", "... not enough planks ...", "... cap reached ...").
+
+## Repair mode (1.17.0)
+When the bot is idle it repairs low-durability items in the stash: Mending items with experience bottles from the stash (the throw of order repair), items without Mending
+are sent to the needs-repair chest picked on the website. It is set up on the Stash Manager website's Repair panel (on by default once the bot has synced): threshold (default
+below 50% durability), the bottle reserve it never goes under (1728), the needs-repair chest and "open unnamed shulker boxes" (named boxes and kits are never opened). A pass
+gives way to orders, players within 8 blocks and a stop, and puts everything back. Here: `stash repairpass on/off`, `stash repair run | stop | status`, and the settings in the table below.
+
+**When a pass runs.** Automatically: repair mode and automatic passes are on on the website, the bot is idle (the sorter is resting, no job runs, nothing is carried or stuck), no order is held or resumable and the last heartbeat showed none pending, no other module is working, the quiet time has passed, a Mending item's bottles fit the usable bottles, no player is within 8 blocks, and `repairPassEveryMinutes` has passed since the last automatic pass ended. A manual run (the website's **Run repair pass**, or `stash repair run`) waits for the same idle state and ignores `auto` and that gap. It still needs repair mode on the website: a queued run is dropped when repair is switched off there, and after 10 minutes.
+
+**Yielding.** At every safe point a pass gives way to an order (waiting, claimed or resumable), a player within 8 blocks, a stop, or the sorter being switched off. Friends count as players here, because the thrown orbs don't ask who a friend is. The pass puts everything back (carried items go through normal sorting, bottles go back to the stash) and reports `yielded`, or `stopped` after a stop.
+
+**Opening unnamed shulkers.** With `shulkers` on on the website and `repairPassMaxBoxes` above 0, a pass opens an unnamed box that isn't a kit and holds a Mending item to repair. One box is open at a time, only with nobody within 16 blocks (friends count), and at most `repairPassMaxBoxes` (8 by default) per pass. A box isn't opened again for 24 hours unless its contents change. That cooldown is in memory only, so a restart can open a box sooner. Named boxes and kits are never opened; their low items are only counted (in the bot's status, with the reason `in a named shulker` or `in a kit`). Items that came out of a box and weren't repaired aren't packed into a shulker again for 24 hours.
+
+**Needs-repair routing.** With a needs-repair chest set on the website, a loose low item without Mending goes there, after kit routing and before tiers and signs. The chest is reserved, so nothing else is sorted into it, and Mending items never go there. If the chest is also a kit chest, kit routing wins and needs-repair routing is off (warned once). An unknown chest id switches routing off (warned once, without coordinates).
+
+**Bottles and limits.** A pass takes only the bottles above the reserve: the website's reserve, or `repairMinReserve` when that is higher. An item whose bottles don't fit is skipped with the reason `reserve`. Items are repaired fully, not only to the threshold. An item that comes back unrepaired is not retried by automatic passes for 6 hours (a manual pass retries it). Per pass: at most `repairPassMaxItems` items and `repairPassMaxMinutes` minutes of throwing. Between passes: `repairPassMinGapManualMinutes` (also for manual runs; memory only, so a restart resets it) and `repairPassMaxPerHour` (kept in `repair-passes.json`, so a restart doesn't reset it).
+
+| Setting | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `repairPass` | on | on or off | Off: no repair keys are sent, no passes run, and needs-repair items are sorted like any others. Also `stash repairpass on/off`. |
+| `repairPassMaxItems` | 64 | 1 to 256 | Items one pass takes. |
+| `repairPassMaxMinutes` | 20 | 1 to 120 | Minutes one pass spends throwing bottles. |
+| `repairPassEveryMinutes` | 30 | 0 to 1440 | Least minutes between two automatic passes. |
+| `repairPassMaxBoxes` | 8 | 0 to 54 | Unnamed boxes one pass opens (0: none, whatever the website says). |
+| `repairPassMinGapManualMinutes` | 5 | 0 to 1440 | Least minutes between two passes, also for a manual run (memory only). |
+| `repairPassMaxPerHour` | 4 | 0 to 60 | Passes started in an hour, manual ones included (0: no limit). |
+| `repairMinReserve` | 0 | 0 to 1,000,000 | Least bottles a pass keeps, when that is more than the website's reserve. |
+
+**Commands.** `stash repairpass on|off`, `stash repair run`, `stash repair stop`, `stash repair status` (the state, the candidates, the bottles and the last pass).
+
+**Files.** The settings the server sent, and the run and stop ids the bot has acknowledged, are kept in `plugins/qwerte-stash/repair-settings.json`. The start times for the hourly cap are in `plugins/qwerte-stash/repair-passes.json`.
+
+**Older servers.** A server without repair passes sends no `repairHash`. The bot keeps its cached settings, makes no automatic passes, and a local `stash repair run` still works (with the defaults when nothing is cached). A settings object from a server before the shulker setting has `shulkers` off, so boxes stay closed.
+
+**Known limits.**
+- An open order for an item that a pass repaired isn't moved to the repaired item. The bot keeps the old-to-new key for 24 hours, but orders don't use it yet.
+- The report's `to` is never sent, so the website's list shows "stayed" for each item.
+- `toNeedsRepair` (the change in the needs-repair chest's item count during the pass) and `rehomed` (repaired items whose best chest is not where they were) are approximations.
+- A queued or unfinished manual run is lost on a restart. Its id is saved when it is received, so it isn't sent again.
+- Box cooldowns reset on a restart.
+- The Qwerte addon has no repair passes yet.
+
+It has not been tried in the game yet.
+
+## Versioning
+Major breaking changes: a new x.0.0 version. New features, bug fixes and more: 1.x.0. Minor bug fixes, single one-off patches or hotfixes: x.y.z.
 
 ## Building
 Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in

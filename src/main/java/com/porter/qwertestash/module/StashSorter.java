@@ -64,6 +64,13 @@ import com.porter.qwertestash.orders.SourcePicker;
 import com.porter.qwertestash.orders.SourceRules;
 import com.porter.qwertestash.orders.BinStep;
 import com.porter.qwertestash.orders.OrderFlow;
+import com.porter.qwertestash.orders.RepairMemory;
+import com.porter.qwertestash.orders.RepairPassGate;
+import com.porter.qwertestash.orders.RepairPassReport;
+import com.porter.qwertestash.orders.RepairRules;
+import com.porter.qwertestash.stash.RepairSettings;
+import com.porter.qwertestash.stash.RepairStore;
+import com.google.gson.JsonObject;
 import com.porter.qwertestash.orders.StockPlanner;
 import com.porter.qwertestash.orders.Unit;
 import com.porter.qwertestash.stash.AnvilFinder;
@@ -4591,6 +4598,12 @@ public class StashSorter extends AbstractFieldModule {
             if (repair != null) return false;
         }
 
+        // A repair pass under way goes on until it is over or gives way
+        if (pass != null) {
+            if (continuePass()) return true;
+            if (pass != null) return false;
+        }
+
         // Orders come before sorting (and keep a driven run going while one is in hand)
         if (orders.engaged()) return nextOrderJob();
 
@@ -4746,7 +4759,8 @@ public class StashSorter extends AbstractFieldModule {
         // Everything is put away: items lying on the ground in the stash area are fetched next, and then put away too
         if (startGround(false)) return true;
 
-        // Idle: kit restock (after drop-offs, repair routing and repair passes, before compaction)
+        // Idle: a repair pass (after drop-offs and needs-repair routing), then kit restock, before compaction
+        if (startRepairPass()) return true;
         if (startRestock()) return true;
 
         // Everything is where it belongs: full shulkers' worth of anything are packed, which frees chest slots
@@ -5436,6 +5450,8 @@ public class StashSorter extends AbstractFieldModule {
                 }
                 String key = item.bulkKey();
                 if (key == null || !item.isFullStack() || compactExcluded(item)) continue;
+                // An item a repair pass took out of a box and could not repair is not packed into a shulker again for 24 h
+                if (repairMemory.noRepackHold(item.variant != null ? item.variant : item.indexKey())) continue;
                 if (!homed.computeIfAbsent(key, k -> hasHome(item))) continue;
                 full.merge(key, 1, Integer::sum);
                 where.computeIfAbsent(key, k -> new HashMap<>()).merge(box, 1, Integer::sum);
@@ -8976,6 +8992,10 @@ public class StashSorter extends AbstractFieldModule {
             }
         }
 
+        // A low item with no Mending goes to the needs-repair chest, after kit routing and before Tiers, signs and contents
+        List<Box> needsRepair = repairDestinations(item);
+        if (needsRepair != null) return needsRepair;
+
         if (CONFIG.mode == Mode.Tiers) return tierBoxes.getOrDefault(tier(item), List.of());
 
         // A shulker goes where what it's mostly full of goes: a shulker of totems belongs with the totems. Only when
@@ -9278,7 +9298,8 @@ public class StashSorter extends AbstractFieldModule {
     /** The kits chest or the chest of a kit rule: nothing but kit shulkers goes in, and it is out of overflow, sign scoring, the tiers, compacting, repacking and labelling. */
     private boolean kitReserved(Box box) {
         KitRouting.View v = kitView();
-        return v != null && v.reserved(box);
+        // The needs-repair chest is reserved the same way: nothing but needs-repair items is sorted into it
+        return (v != null && v.reserved(box)) || repairReserved(box);
     }
 
     /**
@@ -9313,7 +9334,14 @@ public class StashSorter extends AbstractFieldModule {
     private boolean originAllowed(Box from, List<Integer> slots) {
         if (!kitReserved(from)) return true;
         if (slots.isEmpty()) return false;
-        for (int slot : slots) if (!kitChain(inventoryItem(slot)).contains(from)) return false;
+        for (int slot : slots) {
+            Item it = inventoryItem(slot);
+            if (kitChain(it).contains(from)) continue;
+            // The needs-repair chest takes back the needs-repair items routed to it
+            List<Box> routed = it == null ? null : repairDestinations(it);
+            if (routed != null && routed.contains(from)) continue;
+            return false;
+        }
         return true;
     }
 
@@ -9711,6 +9739,680 @@ public class StashSorter extends AbstractFieldModule {
     private boolean orderLeftoverTried;
 
     /** For the Stash Manager (bot tick): the order in hand and everything the protocol needs to know about it. */
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Repair passes (1.17.0, REPAIR-CONTRACT v2). When the bot is idle it finds low-durability items in the stash, takes the Mending ones (loose, or out of
+    // unnamed shulker boxes it opens) and bottles from the stash, throws the bottles with the v1.2 trip (RepairTrip), and lets normal sorting put every item
+    // in its best chest. Items without Mending go to the needs-repair chest by the sorter's own routing. The decisions are RepairRules, RepairPassGate and
+    // RepairMemory (plain Java, tested); this runs them on the bot tick thread. Compiles and is unit tested in its parts; it has not been run in the game.
+
+    private enum PassPhase { Plan, Items, Throw, Finish }
+
+    private static final class PassRun {
+        final long id;
+        final String trigger;
+        final RepairPassReport report;
+        final Repair.Report thrown = new Repair.Report();
+        PassPhase phase = PassPhase.Plan;
+        @Nullable Bin bin;
+        RepairRules.@Nullable Batch batch;
+        int done, total, gatherJobs, needsAtStart, boxesOpened;
+        @Nullable String yieldWhy;
+        boolean stopped;
+        final Set<String> skippedSeen = new HashSet<>();
+        final Set<String> boxesSeen = new HashSet<>();
+        /** Items tried with no headway in this pass (not got, or not repaired at all): left out of its later plans, manual or not. */
+        final Set<String> noProgress = new HashSet<>();
+        final Map<String, RepairRules.Cand> lotCands = new HashMap<>();
+        final long startTick;
+
+        PassRun(long id, String trigger, RepairPassReport report, long startTick) {
+            this.id = id;
+            this.trigger = trigger;
+            this.report = report;
+            this.startTick = startTick;
+        }
+    }
+
+    private @Nullable PassRun pass;
+    private @Nullable Predicate<Item> unpackFilter;
+    private final RepairMemory repairMemory = new RepairMemory(System::currentTimeMillis);
+    private long repairPassCounter, repairLastAutoEnd, repairNextEvalAt, repairBeatEvalAt, repairLastStopId;
+    private volatile boolean repairManualPending;
+    private volatile long repairManualAt;
+    private long repairLastPassEnd;
+    private final com.porter.qwertestash.orders.KitRestockStamps repairStamps = new com.porter.qwertestash.orders.KitRestockStamps(java.nio.file.Path.of("plugins", "qwerte-stash", "repair-passes.json"));
+    private volatile boolean repairStopPending;
+    private volatile @Nullable RepairPassReport repairLastReport;
+    private volatile RepairPassGate.Decision repairDecision = new RepairPassGate.Decision(RepairPassGate.State.OFF, null, false);
+    private volatile RepairCounts repairCounts = RepairCounts.NONE;
+    private @Nullable String repairWarnedConflict, repairWarnedMissing;
+
+    /** What the heartbeat says about candidates and bottles. */
+    record RepairCounts(int mend, int mendBottles, int needsRepair, int inShulkers, int inBoxes, int boxes, long stash, int reserve, long usable) {
+        static final RepairCounts NONE = new RepairCounts(0, 0, 0, 0, 0, 0, 0, RepairSettings.DEFAULT_RESERVE, 0);
+    }
+
+    public RepairMemory repairMemory() {
+        return repairMemory;
+    }
+
+    private @Nullable RepairSettings repairSettings() {
+        Stash st = stash;
+        return st == null ? null : RepairStore.shared().get(ManagerIndex.clamp(st.server, 256), ManagerIndex.clamp(st.name, 256));
+    }
+
+    /** The settings a pass runs with: the cache, else the defaults (a local run with none cached). */
+    private RepairSettings repairSettingsOrDefaults() {
+        RepairSettings s = repairSettings();
+        return s == null ? RepairSettings.DEFAULTS : s;
+    }
+
+    /** A manual run was asked for (the website's repairRun, or the command): runs when the bot is idle, orders first. Any thread. */
+    public void repairRun() {
+        repairManualPending = true;
+        repairManualAt = System.currentTimeMillis();
+        repairStopPending = false;
+        repairNextEvalAt = 0;
+    }
+
+    /** A stop was asked for: a queued manual run is dropped and a running pass yields. Any thread. */
+    public void repairStop() {
+        repairManualPending = false;
+        // Only a pass in hand has anything to stop: a stop with none must not make the next one give way at once
+        if (pass != null) repairStopPending = true;
+    }
+
+    // -- Needs-repair routing and the reserved chest ------------------------------------------------------------------
+
+    private long repairViewVersion = Long.MIN_VALUE;
+    private @Nullable Box repairChestBox;
+    private boolean repairRoutingOn;
+
+    private void repairViewRefresh() {
+        Stash st = stash;
+        long version = ((long) RepairStore.shared().version() << 40) ^ ((long) Stashes.version << 8) ^ (st == null ? 0 : st.boxes.size()) ^ (CONFIG.repairPass ? 1 : 0)
+            ^ (CONFIG.kitSorting ? 2 : 0) ^ ((long) KitStore.shared().version() << 20);
+        if (version == repairViewVersion) return;
+        repairViewVersion = version;
+        repairChestBox = null;
+        repairRoutingOn = false;
+        RepairSettings s = repairSettings();
+        if (st == null || s == null || !CONFIG.repairPass || !s.enabled() || s.needsRepairChest() == null) return;
+        Box chest = null;
+        for (Box b : st.boxes) {
+            if (s.needsRepairChest().equals(KitRouting.canonicalId(b))) {
+                chest = b;
+                break;
+            }
+        }
+        // A chest id the stash has no container for: routing is off (warned once), needs-repair items are sorted as today
+        if (chest == null) {
+            if (!s.needsRepairChest().equals(repairWarnedMissing)) {
+                repairWarnedMissing = s.needsRepairChest();
+                warn("The needs-repair chest the website set is not a container of this stash: needs-repair routing is off until it is.");
+            }
+            return;
+        }
+        repairWarnedMissing = null;
+        // A chest that is also kit-reserved is the kits': kit reservation wins and needs-repair routing is off (warned once)
+        KitRouting.View kits = kitView();
+        if (chest != null && kits != null && kits.reserved(chest)) {
+            if (!s.needsRepairChest().equals(repairWarnedConflict)) {
+                repairWarnedConflict = s.needsRepairChest();
+                warn("The needs-repair chest is also reserved for kits: needs-repair routing is off until one of them is changed.");
+            }
+            return;
+        }
+        repairWarnedConflict = null;
+        repairRoutingOn = true;
+        repairChestBox = chest;
+    }
+
+    /** The needs-repair chest the sorter reserves (nothing else is put in it), or null while routing is off. */
+    private boolean repairReserved(Box box) {
+        repairViewRefresh();
+        return repairRoutingOn && repairChestBox == box;
+    }
+
+    /** A loose item that is low and has no Mending, with a needs-repair chest set: that chest is its only destination (or none while it can't take it). */
+    private @Nullable List<Box> repairDestinations(Item item) {
+        repairViewRefresh();
+        RepairSettings s = repairSettings();
+        if (!repairRoutingOn || s == null || !kitRoutingOn()) return null;
+        if (!RepairRules.needsRepair(item, s.threshold())) return null;
+        Box chest = repairChestBox;
+        if (chest == null || !KitRouting.pickable(chest) || chest.free() <= 0) {
+            if (chest == null || !KitRouting.pickable(chest)) repairMissing(s.needsRepairChest());
+            return List.of();
+        }
+        return List.of(chest);
+    }
+
+    private void repairMissing(@Nullable String id) {
+        boolean first;
+        synchronized (kitWarned) {
+            first = kitWarned.add("repair\t" + id);
+        }
+        if (first) warn("The needs-repair chest is missing or can't take items. Such an item stays where it is, and one from a drop-off goes to overflow.");
+    }
+
+    // -- Evaluating: candidates, bottles, whether a pass may start -------------------------------------------------------
+
+    private long repairBottles() {
+        Stash st = stash;
+        if (st == null) return 0;
+        int carried = carriedBottles();
+        String key = Stashes.version + "|" + carried + "|" + System.currentTimeMillis() / 60_000L;
+        if (key.equals(repairBottleKey)) return repairBottleCache;
+        StockPlanner.Survey sv = orders.survey(st, Set.of(Repair.BOTTLE));
+        repairBottleCache = sv.available().getOrDefault(Repair.BOTTLE, 0L) + sv.shulkerAvailable().getOrDefault(Repair.BOTTLE, 0L) + carried;
+        repairBottleKey = key;
+        return repairBottleCache;
+    }
+
+    /** The reserve a pass keeps: the website's, or the local minimum when higher. */
+    private int repairReserve(RepairSettings s) {
+        return RepairPassGate.reserve(s.reserve(), CONFIG.repairMinReserve);
+    }
+
+    // The scan and the bottle count are kept per version of the stash, of the settings and of the minute (box cooldowns run out with time)
+    private String repairScanKey = "";
+    private RepairRules.@Nullable Scan repairScanCache;
+    private String repairBottleKey = "";
+    private long repairBottleCache;
+
+    private RepairRules.Scan repairScan(RepairSettings s) {
+        String key = Stashes.version + "|" + RepairStore.shared().version() + "|" + s.hash() + "|" + System.currentTimeMillis() / 60_000L + "|" + CONFIG.repairPassMaxBoxes + "|" + stash.boxes.size();
+        RepairRules.Scan cached = repairScanCache;
+        if (cached != null && key.equals(repairScanKey)) return cached;
+        RepairRules.Scan fresh = repairScanNow(s);
+        repairScanKey = key;
+        repairScanCache = fresh;
+        return fresh;
+    }
+
+    private RepairRules.Scan repairScanNow(RepairSettings s) {
+        Stash st = stash;
+        return RepairRules.scan(st.boxes, b -> b.sortable() && !b.stale && !b.dropOff && !b.delivery && !b.excluded && b.known() && !kitReserved(b), s.threshold(),
+            s.shulkers() && CONFIG.repairPassMaxBoxes > 0, this::repairKitLike, repairMemory::boxOnCooldown, s.needsRepairChest() != null);
+    }
+
+    /** A box the kit rules call a kit; with no kit settings yet, the default kit score decides, so a kit-looking unnamed box stays closed. */
+    private boolean repairKitLike(Item it) {
+        KitRouting.View kits = kitView();
+        if (kits != null) return kits.isKit(it);
+        return com.porter.qwertestash.stash.KitScore.of(it, com.porter.qwertestash.stash.KitScore.Scoring.DEFAULT, com.porter.qwertestash.stash.KitItems.shared()).kit();
+    }
+
+    private @Nullable double[] repairPos(String id) {
+        for (Box b : stash.boxes) {
+            if (id.equals(KitRouting.canonicalId(b))) {
+                BlockPos p = nearestPart(b);
+                return new double[] {p.x() + 0.5, p.z() + 0.5};
+            }
+        }
+        return null;
+    }
+
+    private int repairArmour() {
+        int armour = 0;
+        for (int w = 5; w <= 8; w++) {
+            RepairTrip.Stack worn = repairPort.at(w);
+            if (worn != null && worn.mending() && worn.damage() > 0) armour++;
+        }
+        return armour;
+    }
+
+    /**
+     * Works out the candidates and whether a pass may start. {@code idle}: called from the sorter's resting point (only then can it say start). Throttled; the
+     * answer is kept for the heartbeat. Tick thread.
+     */
+    private RepairPassGate.Decision repairEvaluate(boolean idle) {
+        long now = System.currentTimeMillis();
+        if (!CONFIG.repairPass) {
+            repairDecision = new RepairPassGate.Decision(RepairPassGate.State.OFF, null, false);
+            return repairDecision;
+        }
+        if (now < (idle ? repairNextEvalAt : repairBeatEvalAt)) return idle ? new RepairPassGate.Decision(repairDecision.state(), repairDecision.why(), false) : repairDecision;
+        if (idle) repairNextEvalAt = now + 5_000L;
+        else repairBeatEvalAt = now + 10_000L;
+        Stash st = stash;
+        RepairSettings cached = repairSettings();
+        RepairSettings s = cached == null ? RepairSettings.DEFAULTS : cached;
+        // A queued manual run is dropped while repair is disabled on the website, and expires after 10 minutes
+        if (repairManualPending && !RepairPassGate.manualLive(true, repairManualAt, now, cached != null && !cached.enabled())) repairManualPending = false;
+        boolean manual = repairManualPending;
+        RepairRules.Scan scan;
+        long bottles;
+        long usable;
+        boolean hasCand = false, anyMend = false;
+        if (st == null) {
+            scan = new RepairRules.Scan(List.of(), List.of(), List.of(), 0, Map.of());
+            bottles = 0;
+        }
+        else {
+            scan = repairScan(s);
+            bottles = repairBottles();
+        }
+        usable = RepairRules.usable(bottles, 0, repairReserve(s));
+        List<RepairRules.Cand> all = new ArrayList<>(scan.mend());
+        for (RepairRules.BoxStop b : scan.boxes()) all.addAll(b.mend());
+        for (RepairRules.Cand c : all) {
+            if (!manual && repairMemory.recentlyFailed(c.memoryKey())) continue;
+            anyMend = true;
+            if (c.bottles() <= usable) {
+                hasCand = true;
+                break;
+            }
+        }
+        repairViewRefresh();
+        boolean kitConflict = cached != null && cached.needsRepairChest() != null && CONFIG.repairPass && !repairRoutingOn && st != null && repairWarnedConflict != null;
+        RepairPassGate.Facts f = new RepairPassGate.Facts(CONFIG.repairPass, cached != null, s.enabled(), s.auto(), manual, Alerts.online(), isEnabled(),
+            orders.flow.holdsOrder() || orders.flow.resumeId() != null || restockOrdersWaiting || pass != null, foreignNow, idle && pass == null, idle && repairPlayerNear(true), quietElapsed(),
+            kitConflict, hasCand, anyMend, freeCarryCount() < 4, now - repairLastAutoEnd, CONFIG.repairPassEveryMinutes * 60_000L);
+        RepairPassGate.Decision d = RepairPassGate.decide(f);
+        // The local limits hold for manual runs too: a gap since the last pass, and the passes an hour
+        if (d.start() && !RepairPassGate.limitsOk(manual, now - repairLastPassEnd, CONFIG.repairPassMinGapManualMinutes, repairStamps.lastHour(now), CONFIG.repairPassMaxPerHour)) {
+            d = new RepairPassGate.Decision(RepairPassGate.State.WAITING, RepairPassGate.COOLDOWN, false);
+        }
+        // The pass is running: that is the state; a decision "start" is only for the idle point
+        repairDecision = d;
+        repairCounts = new RepairCounts(scan.mend().size(), scan.mendBottles(), scan.needs().size(), scan.inShulkers(), scan.inBoxes(), scan.boxes().size(), bottles, repairReserve(s), usable);
+        return idle ? d : new RepairPassGate.Decision(d.state(), d.why(), false);
+    }
+
+    /** What the heartbeat's repairPass says, from the last evaluation and the pass in hand. Tick thread. */
+    public JsonObject repairBeat(long runDone, long stopDone, @Nullable String reportHash) {
+        PassRun p = pass;
+        RepairPassGate.Decision d = repairEvaluate(false);
+        RepairCounts c = repairCounts;
+        RepairPassGate.State state = d.state();
+        String why = d.why();
+        boolean progress = false;
+        int done = 0, total = 0;
+        long id = repairLastReport == null ? repairPassCounter : repairPassCounter;
+        String trigger = repairLastReport == null ? null : repairLastReport.trigger;
+        if (p != null) {
+            state = p.yieldWhy != null ? RepairPassGate.State.YIELDING : RepairPassGate.State.RUNNING;
+            why = null;
+            progress = true;
+            done = p.done;
+            total = p.total;
+            id = p.id;
+            trigger = p.trigger;
+        }
+        else if (CONFIG.repairPass && !Alerts.online()) {
+            state = RepairPassGate.State.WAITING;
+            why = RepairPassGate.OFFLINE;
+        }
+        else if (CONFIG.repairPass && !isEnabled() && state != RepairPassGate.State.BLOCKED) {
+            state = RepairPassGate.State.WAITING;
+            why = RepairPassGate.SORTER_OFF;
+        }
+        return RepairPassGate.beat(state, why, id, trigger, done, total, progress, c.mend(), c.mendBottles(), c.needsRepair(), c.inShulkers(), c.inBoxes(), c.boxes(), c.stash(), c.reserve(),
+            c.usable(), runDone, stopDone, reportHash);
+    }
+
+    public @Nullable RepairPassReport repairLastReport() {
+        return repairLastReport;
+    }
+
+    /** The pass in hand or the last one, for the report route: its current state. */
+    public @Nullable RepairPassReport repairReportNow() {
+        PassRun p = pass;
+        return p != null ? p.report : repairLastReport;
+    }
+
+    /** `stash repair status` */
+    public List<String> repairStatus() {
+        List<String> out = new ArrayList<>();
+        RepairSettings s = repairSettings();
+        RepairCounts c = repairCounts;
+        PassRun p = pass;
+        out.add("Repair mode: " + (CONFIG.repairPass ? (s == null ? "on, no settings from the server yet (a manual run uses the defaults)" : s.enabled() ? "on" + (s.auto() ? ", automatic" : ", manual only") : "off on the website") : "off here"));
+        RepairPassGate.Decision d = repairDecision;
+        out.add("State: " + (p != null ? (p.yieldWhy != null ? "yielding (" + p.yieldWhy + ")" : "running " + p.done + "/" + p.total) : d.state().name().toLowerCase(java.util.Locale.ROOT) + (d.why() == null ? "" : " (" + d.why() + ")")));
+        out.add("Candidates: " + c.mend() + " Mending items (" + c.mendBottles() + " bottles), " + c.needsRepair() + " without Mending, " + c.inBoxes() + " in boxes it will open, "
+            + c.inShulkers() + " in boxes it won't");
+        out.add("Bottles: " + c.stash() + " in the stash, reserve " + c.reserve() + ", usable " + c.usable());
+        RepairPassReport r = repairLastReport;
+        if (r != null) out.add("Last pass: " + r.state + ", " + r.repaired + " repaired, " + r.partial + " partly, " + r.skipped() + " skipped, " + r.bottlesUsed + " bottles");
+        return out;
+    }
+
+    // -- Starting, running and ending a pass ----------------------------------------------------------------------------
+
+    /** The sorter is resting: a pass starts when the gate says so (auto, or a manual run). Tick thread. */
+    private boolean startRepairPass() {
+        // Not before the server has said whether orders wait (the first heartbeat reply after connecting), as restock does
+        if (pass != null || repair != null || repairTrip != null || stash == null || !restockHeard) return false;
+        RepairPassGate.Decision d = repairEvaluate(true);
+        if (!d.start()) return false;
+        boolean manual = repairManualPending;
+        RepairSettings s = repairSettingsOrDefaults();
+        long id = ++repairPassCounter;
+        repairStopPending = false;
+        repairStamps.add(System.currentTimeMillis());
+        RepairPassReport report = new RepairPassReport(id, manual ? "manual" : "auto", System.currentTimeMillis(), s.threshold());
+        PassRun p = new PassRun(id, manual ? "manual" : "auto", report, tickCount);
+        RepairSettings cached = repairSettings();
+        p.needsAtStart = needsInChest(cached);
+        pass = p;
+        repairLastReport = report;
+        info("Repair pass {} starts ({}).", id, p.trigger);
+        return continuePass();
+    }
+
+    private int needsInChest(@Nullable RepairSettings s) {
+        repairViewRefresh();
+        Box chest = repairChestBox;
+        if (chest == null || chest.contents == null || s == null) return 0;
+        int n = 0;
+        for (Item it : chest.contents) if (it != null && RepairRules.damageable(it) && !it.hasMending() && RepairRules.low(it.damage, it.maxDamage, s.threshold())) n++;
+        return n;
+    }
+
+    /** Why a pass must give way now (orders always first), or null. */
+    private @Nullable String passYieldReason(PassRun p) {
+        if (repairStopPending) return RepairRules.STOPPED;
+        if (orders.flow.holdsOrder() || orders.flow.resumeId() != null || restockOrdersWaiting) return RepairRules.ORDER;
+        if (!CONFIG.repairPass || !isEnabled()) return RepairRules.STOPPED;
+        RepairSettings s = repairSettings();
+        if (s != null && !s.enabled()) return RepairRules.STOPPED;
+        if (orders.pauseReason() != null) return RepairRules.INTERRUPTED;
+        return null;
+    }
+
+    private boolean continuePass() {
+        PassRun p = pass;
+        if (p == null) return false;
+        if (job != null) return true;
+        if (repair != null) return false;
+        if (p.phase != PassPhase.Finish && p.phase != PassPhase.Throw) {
+            String why = passYieldReason(p);
+            if (why == null && repairPlayerNear(true)) why = RepairRules.PLAYER_NEAR;
+            if (why == null && p.thrown.ticks() >= CONFIG.repairPassMaxMinutes * 1200) why = RepairRules.STOPPED;
+            if (why != null) {
+                p.yieldWhy = why;
+                p.stopped = why.equals(RepairRules.STOPPED);
+                p.phase = PassPhase.Finish;
+            }
+        }
+        switch (p.phase) {
+            case Plan -> {
+                return passPlan(p);
+            }
+            case Items -> {
+                return passItems(p);
+            }
+            case Throw -> {
+                return passThrow(p);
+            }
+            case Finish -> {
+                // And again before the end: no emptied box is left in the inventory
+                if (handle == null && returnSpentShulker()) return true;
+                finishPass(p);
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private boolean passPlan(PassRun p) {
+        RepairSettings s = repairSettingsOrDefaults();
+        if (!orders.gate()) return false;
+        if (p.report.items().size() + p.total >= CONFIG.repairPassMaxItems && p.total >= CONFIG.repairPassMaxItems) {
+            p.phase = PassPhase.Finish;
+            return continuePass();
+        }
+        RepairRules.Scan scan = repairScan(s);
+        scan = RepairRules.without(scan, p.noProgress);
+        // Items that came back unrepaired are not retried by automatic passes for 6 h; a manual pass retries them
+        boolean manual = p.trigger.equals("manual");
+        if (!manual) {
+            List<RepairRules.Cand> mend = new ArrayList<>();
+            for (RepairRules.Cand c : scan.mend()) if (!repairMemory.recentlyFailed(c.memoryKey())) mend.add(c);
+            scan = new RepairRules.Scan(mend, scan.needs(), scan.boxes(), scan.inShulkers(), scan.inShulkerReasons());
+        }
+        long usable = RepairRules.usable(repairBottles(), 0, repairReserve(s));
+        BlockPos feet = playerFeet();
+        Map<String, double[]> positions = new HashMap<>();
+        RepairRules.Plan plan = RepairRules.plan(scan, usable, freeCarryCount(), repairArmour(), repairPort.at(45) != null, feet.x() + 0.5, feet.z() + 0.5,
+            id -> positions.computeIfAbsent(id, this::repairPos), Math.max(0, CONFIG.repairPassMaxItems - p.total), Math.max(0, CONFIG.repairPassMaxBoxes - p.boxesOpened));
+        for (RepairRules.Skipped sk : plan.skipped()) {
+            if (p.skippedSeen.add(sk.cand().key() + "|" + sk.cand().container() + "|" + sk.cand().slot())) {
+                p.report.skip(sk.cand().key(), sk.reason(), sk.cand().container(), sk.cand().damage(), sk.cand().maxDamage(), sk.cand().box());
+            }
+        }
+        p.report.left = plan.left();
+        RepairRules.Batch batch = plan.batch();
+        if (batch.empty()) {
+            p.phase = PassPhase.Finish;
+            return continuePass();
+        }
+        List<Order.Lot> lots = new ArrayList<>();
+        p.lotCands.clear();
+        for (RepairRules.Cand c : batch.loose()) addLot(p, lots, c);
+        for (RepairRules.BoxStop b : batch.boxes()) {
+            for (RepairRules.Cand c : b.mend()) addLot(p, lots, c);
+        }
+        for (RepairRules.Cand c : batch.extraNeeds()) addLot(p, lots, c);
+        p.batch = batch;
+        p.total += batch.items();
+        Unit unit = new Unit(Unit.Kind.Bin, "", lots);
+        p.bin = new Bin(unit);
+        p.gatherJobs = 0;
+        p.phase = PassPhase.Items;
+        step("repair: taking " + batch.items() + " item" + (batch.items() == 1 ? "" : "s") + " from the stash to repair.");
+        return passItems(p);
+    }
+
+    private void addLot(PassRun p, List<Order.Lot> lots, RepairRules.Cand c) {
+        lots.add(new Order.Lot(c.key(), c.variant(), 1));
+        p.lotCands.put(c.key() + "|" + c.variant(), c);
+    }
+
+    /** Boxes a pass may open: unnamed, not a kit, not opened by a pass lately, holding a mend candidate; at most the cap. */
+    private boolean passBoxOk(PassRun p, Item shulker) {
+        if (shulker.customName) return false;
+        if (repairKitLike(shulker)) return false;
+        String key = ManagerIndex.shulkerKey(shulker);
+        if (key == null || repairMemory.boxOnCooldown(key)) return false;
+        if (!p.boxesSeen.contains(key) && p.boxesOpened >= CONFIG.repairPassMaxBoxes) return false;
+        RepairSettings s = repairSettings();
+        return s == null || s.shulkers();
+    }
+
+    private boolean passItems(PassRun p) {
+        Bin bin = p.bin;
+        if (bin == null) {
+            p.phase = PassPhase.Finish;
+            return continuePass();
+        }
+        if (!orders.gate()) return false;
+        // A box that was emptied of what the pass needed goes back before the next load is looked for
+        if (handle == null) {
+            sourceShulkers.entrySet().removeIf(e -> {
+                Item held = inventoryItem(e.getKey());
+                return held == null || !held.isShulker();
+            });
+            if (returnSpentShulker()) return true;
+        }
+        BinTracker.Need need = needOf(bin);
+        if (need == null) {
+            p.phase = PassPhase.Throw;
+            return continuePass();
+        }
+        if (++p.gatherJobs > 8 + 3 * bin.lots.size()) return passItemsGiveUp(p, RepairRules.INTERRUPTED);
+        if (freeCarryCount() < 2) return passItemsGiveUp(p, RepairRules.NO_ROOM);
+        Box source = binSourceFor(bin);
+        if (source != null) {
+            gatherLeft = Math.max(1, Math.min(bin.lots.size(), freeCarryCount() - 1));
+            return start(Job.Gather, source);
+        }
+        // Not loose anywhere: out of an unnamed box, one at a time, after a look that nobody is near
+        RepairRules.Cand cand = p.lotCands.get(need.lot().key() + "|" + need.lot().variant());
+        if (cand != null && cand.box() != null) {
+            if (shulkerPause() != null) return passItemsDrop(p, need, RepairRules.INTERRUPTED);
+            try {
+                if (groundItems().anyPlayerWithin(CACHE.getPlayerCache().getX(), CACHE.getPlayerCache().getZ(), 16.0) != null) return passItemsDrop(p, need, RepairRules.PLAYER_NEAR);
+            } catch (RuntimeException e) {
+                return passItemsDrop(p, need, RepairRules.PLAYER_NEAR);
+            }
+            unpackFilter = it -> passBoxOk(p, it);
+            boolean started;
+            try {
+                started = startBinUnpack(bin, "repair: ");
+            } finally {
+                unpackFilter = null;
+            }
+            if (started) {
+                if (cand.box() != null && p.boxesSeen.add(cand.box())) {
+                    p.boxesOpened++;
+                    p.report.boxesOpened++;
+                    repairMemory.boxOpened(cand.box());
+                }
+                return true;
+            }
+            p.report.boxesFailed++;
+            return passItemsDrop(p, need, RepairRules.BOX_FAILED);
+        }
+        return passItemsDrop(p, need, RepairRules.INTERRUPTED);
+    }
+
+    /** This load cannot be had: its item is reported skipped with the reason, and the rest of the batch goes on. */
+    private boolean passItemsDrop(PassRun p, BinTracker.Need need, String reason) {
+        Bin bin = p.bin;
+        RepairRules.Cand c = p.lotCands.remove(need.lot().key() + "|" + need.lot().variant());
+        if (c != null) {
+            p.report.skip(c.key(), reason, c.container(), c.damage(), c.maxDamage(), c.box());
+            p.noProgress.add(c.memoryKey());
+        }
+        if (bin != null) bin.lots.remove(need.index());
+        return continuePass();
+    }
+
+    private boolean passItemsGiveUp(PassRun p, String reason) {
+        Bin bin = p.bin;
+        if (bin != null) {
+            for (BinTracker.Held h : carriedHeld(bin)) {
+                // Carried stacks are the ones that were got; the others are reported
+            }
+            BinTracker.Need need;
+            while ((need = needOf(bin)) != null) {
+                RepairRules.Cand c = p.lotCands.remove(need.lot().key() + "|" + need.lot().variant());
+                if (c != null) {
+                    p.report.skip(c.key(), reason, c.container(), c.damage(), c.maxDamage(), c.box());
+                    p.noProgress.add(c.memoryKey());
+                }
+                bin.lots.remove(need.index());
+            }
+        }
+        p.phase = PassPhase.Throw;
+        return continuePass();
+    }
+
+    private boolean passThrow(PassRun p) {
+        Bin bin = p.bin;
+        if (bin == null || repair != null) return false;
+        if (!orders.gate()) return false;
+        List<RepairRun.Item> items = new ArrayList<>();
+        Map<RepairRun.Item, RepairRules.Cand> cands = new IdentityHashMap<>();
+        List<RepairCand> rcs = new ArrayList<>();
+        for (BinTracker.Held h : BinTracker.ready(bin.lots, bin.packed, carriedHeld(bin))) {
+            RepairRules.Cand c = p.lotCands.get(h.key() + "|" + h.variant());
+            if (c == null) c = p.lotCands.get(h.key() + "|" + null);
+            Item it = inventoryItem(h.slot());
+            if (it == null || c == null || !c.mending()) continue;
+            String why = Repair.skipReason(it.isShulker(), it.hasMending(), it.damage, it.maxStack);
+            if (why != null) continue;
+            RepairRun.Item ri = new RepairRun.Item(h.key(), windowOf(h.slot()), it.damage, it.maxDamage);
+            items.add(ri);
+            cands.put(ri, c);
+            rcs.add(new RepairCand(h.key(), h.variant(), windowOf(h.slot())));
+        }
+        if (items.isEmpty() || RepairRun.exhausted(p.thrown)) {
+            p.phase = PassPhase.Finish;
+            return continuePass();
+        }
+        RepairCtl ctl = new RepairCtl(bin, new RepairRun(p.thrown, items));
+        ctl.pass = p;
+        ctl.bottleCap = p.batch == null ? -1 : p.batch.bottles();
+        for (int i = 0; i < items.size(); i++) {
+            ctl.cands.put(items.get(i), rcs.get(i));
+            ctl.passCands.put(items.get(i), cands.get(items.get(i)));
+        }
+        repair = ctl;
+        step("repair pass: repairing " + items.size() + " item" + (items.size() == 1 ? "" : "s") + " with experience bottles; next: take bottles from the stash.");
+        return continueRepair();
+    }
+
+    /** The throw is over: what became of each item (repaired, partly, not) goes in the report and the memory. */
+    private void passThrowDone(RepairCtl r) {
+        PassRun p = r.pass;
+        if (p == null) return;
+        for (var e : r.passCands.entrySet()) {
+            RepairRun.Item ri = e.getKey();
+            RepairRules.Cand c = e.getValue();
+            RepairCand rc = r.cands.get(ri);
+            p.done++;
+            String key = c.key();
+            if (ri.damage <= 0) {
+                String to = null;
+                p.report.add(new RepairPassReport.Item(key, "repaired", null, c.container(), to, 0, ri.maxDamage, c.box()));
+                if (rc != null) repairMemory.repaired(c.key(), rc.key);
+                Item now = rc == null ? null : inventoryItem(indexOf(rc.slot));
+                if (now != null) {
+                    List<Box> homes = destinationsFor(now);
+                    boolean originIsHome = false;
+                    for (Box b : homes) originIsHome |= c.container().equals(KitRouting.canonicalId(b));
+                    if (!homes.isEmpty() && !originIsHome) p.report.rehomed++;
+                }
+            }
+            else if (ri.damage < ri.startDamage) {
+                p.report.add(new RepairPassReport.Item(key, "partial", null, c.container(), null, ri.damage, ri.maxDamage, c.box()));
+                repairMemory.failed(c.memoryKey());
+                if (c.box() != null) repairMemory.noRepack(c.memoryKey());
+            }
+            else {
+                String reason = p.yieldWhy != null ? (p.stopped ? RepairRules.STOPPED : p.yieldWhy.equals(RepairRules.ORDER) ? RepairRules.ORDER : RepairRules.INTERRUPTED)
+                    : ri.reason.equals(Repair.NO_BOTTLES) ? RepairRules.NO_BOTTLES : RepairRules.INTERRUPTED;
+                p.report.skip(key, reason, c.container(), ri.damage, ri.maxDamage, c.box());
+                p.noProgress.add(c.memoryKey());
+                if (p.yieldWhy == null) repairMemory.failed(c.memoryKey());
+                if (c.box() != null) repairMemory.noRepack(c.memoryKey());
+            }
+        }
+        p.report.bottlesUsed = p.thrown.bottlesUsed();
+        p.phase = PassPhase.Plan;
+        // Another batch is planned afresh, unless something asked the pass to give way
+        if (p.yieldWhy != null) p.phase = PassPhase.Finish;
+        else if (p.total >= CONFIG.repairPassMaxItems || p.thrown.ticks() >= CONFIG.repairPassMaxMinutes * 1200) p.phase = PassPhase.Finish;
+    }
+
+    private void finishPass(PassRun p) {
+        long now = System.currentTimeMillis();
+        String state;
+        if (p.stopped) state = RepairPassReport.STOPPED;
+        else if (p.yieldWhy != null) state = RepairPassReport.YIELDED;
+        else state = RepairPassReport.DONE;
+        p.report.bottlesUsed = p.thrown.bottlesUsed();
+        RepairSettings cached = repairSettings();
+        p.report.toNeedsRepair = Math.max(0, needsInChest(cached) - p.needsAtStart);
+        p.report.end(state, now);
+        info("Repair pass {} {}: {} repaired, {} partly, {} skipped, {} bottles.", p.id, state, p.report.repaired, p.report.partial, p.report.skipped(), p.report.bottlesUsed);
+        repairLastReport = p.report;
+        repairLastPassEnd = now;
+        if (p.trigger.equals("auto") && !state.equals(RepairPassReport.YIELDED)) repairLastAutoEnd = now;
+        if (p.trigger.equals("manual") && !state.equals(RepairPassReport.YIELDED)) repairManualPending = false;
+        if (state.equals(RepairPassReport.STOPPED)) repairStopPending = false;
+        pass = null;
+        unpackFilter = null;
+        repairNextEvalAt = 0;
+        // Whatever is still carried (repaired items, items not repaired, bottles) is the sorter's again and goes to its best chest
+    }
+
     // Kit restock (1.16.0, KIT-CONTRACT v2 revision 4 "Restock"). An idle job: the sorter offers the order flow a restock order (never reported to the
     // server, never saved), so the kit is planned, built, named and carried by the code kit orders use; the finished kit is filed by the sorter.
     // Compiles and is unit tested in its parts; it has not been run in the game.
@@ -9760,7 +10462,7 @@ public class StashSorter extends AbstractFieldModule {
         OrderFlow flow = orders.flow;
         Stash st = stash;
         // Not while an order is held or saved to be resumed, nor before the server has said whether orders wait (after connecting), nor with orders off
-        if (st == null || !com.porter.qwertestash.orders.KitRestock.mayStart(flow.holdsOrder(), flow.resumeId() != null, restockHeard, CONFIG.acceptOrders, orders.pauseReason() != null)) return false;
+        if (st == null || pass != null || repair != null || !com.porter.qwertestash.orders.KitRestock.mayStart(flow.holdsOrder(), flow.resumeId() != null, restockHeard, CONFIG.acceptOrders, orders.pauseReason() != null)) return false;
         long now = System.currentTimeMillis();
         if (now < restockNextAt) return false;
         restockNextAt = now + 30_000;
@@ -10388,6 +11090,9 @@ public class StashSorter extends AbstractFieldModule {
             for (int i = 0; i < box.contents.length; i++) {
                 Item s = box.contents[i];
                 if (s == null || !s.isShulker() || (s.customName && !CONFIG.useNamedShulkers) || !holds(s, key)) continue;
+                // A repair pass opens only the boxes it chose: unnamed, not a kit, not opened lately, within the box cap
+                Predicate<Item> only = unpackFilter;
+                if (only != null && !only.test(s)) continue;
                 if (reserved.contains(ManagerIndex.shulkerKey(s))) continue;
                 int count = 0;
                 boolean same = false;
@@ -10687,6 +11392,10 @@ public class StashSorter extends AbstractFieldModule {
         int jobs, putBackTries;
         long waitSince, quietSince;
         boolean leaving, undoTried, slotsChecked;
+        /** A repair pass's throw (1.17.0): the pass, the bottles it may take (-1: as the order needs) and the candidate each item is. */
+        @Nullable PassRun pass;
+        int bottleCap = -1;
+        final Map<RepairRun.Item, RepairRules.Cand> passCands = new IdentityHashMap<>();
 
         RepairCtl(Bin bin, RepairRun run) {
             this.bin = bin;
@@ -10811,7 +11520,14 @@ public class StashSorter extends AbstractFieldModule {
         if (!orders.gate()) return false;
         OrderFlow flow = orders.flow;
         // The order ended, was cancelled or is parked: nothing more is thrown; what was gathered goes back with the leftovers
-        if (!r.leaving && (!flow.running() || flow.cancelRequested() || flow.parkRequested())) {
+        // A pass gives way at every safe point: an order, a player, a stop (it puts the bottles back and ends the throw)
+        if (!r.leaving && r.pass != null && passYieldReason(r.pass) != null) {
+            r.pass.yieldWhy = passYieldReason(r.pass);
+            r.run.giveUp(Repair.INTERRUPTED);
+            r.leaving = true;
+            r.phase = RepairPhase.PutBack;
+        }
+        if (r.pass == null && !r.leaving && (!flow.running() || flow.cancelRequested() || flow.parkRequested())) {
             // A park is not an end: the run is dropped without a report and the order carries on from its saved state. Any other
             // end reports what was not done
             if (flow.parkRequested() || !flow.holdsOrder()) r.run.pending().clear();
@@ -10822,6 +11538,7 @@ public class StashSorter extends AbstractFieldModule {
         switch (r.phase) {
             case Bottles -> {
                 int need = r.run.bottlesNeeded();
+                if (r.bottleCap >= 0) need = Math.min(need, r.bottleCap);
                 int have = carriedBottles();
                 if (have >= need || need == 0) {
                     r.phase = RepairPhase.Trip;
@@ -10936,6 +11653,7 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     private boolean endRepair(RepairCtl r) {
+        if (r.pass != null) passThrowDone(r);
         repair = null;
         repairBottles = null;
         repairTrip = null;
@@ -11021,8 +11739,14 @@ public class StashSorter extends AbstractFieldModule {
 
     /** Another player (not a friend) is within the radius of where the bot stands. */
     private boolean repairPlayerNear() {
+        return repairPlayerNear(pass != null);
+    }
+
+    /** {@code friendsCount}: a repair pass (orbs follow any player); an order's repair leaves friends out as before. */
+    private boolean repairPlayerNear(boolean friendsCount) {
         try {
-            return groundItems().playerWithin(CACHE.getPlayerCache().getX(), CACHE.getPlayerCache().getZ(), Repair.PLAYER_RADIUS) != null;
+            double x = CACHE.getPlayerCache().getX(), z = CACHE.getPlayerCache().getZ();
+            return (friendsCount ? groundItems().anyPlayerWithin(x, z, Repair.PLAYER_RADIUS) : groundItems().playerWithin(x, z, Repair.PLAYER_RADIUS)) != null;
         } catch (RuntimeException e) {
             // Not known: treated as someone near, the safe side
             return true;
@@ -11049,6 +11773,8 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     private void resetRepair() {
+        pass = null;
+        unpackFilter = null;
         repair = null;
         repairBottles = null;
         repairTrip = null;
@@ -14919,6 +15645,8 @@ public class StashSorter extends AbstractFieldModule {
         if (a != null && a.phase == AnvilPhase.Gather) return a.bin;
         ChestRun h = chestRun;
         if (h != null && h.phase == ChestPhase.Gather) return h.bin;
+        PassRun ps = pass;
+        if (ps != null && ps.phase == PassPhase.Items) return ps.bin;
         return null;
     }
 
