@@ -17,6 +17,13 @@ instead of your client.
   packed into shulkers that already hold only that item, before everything is put away. See below.
 - **Compacts shulkers** (signs mode): a full shulker's worth of one item is packed into a shulker and put back in the
   item's chest, freeing chest slots. See below.
+- **Repairs order items** with Bottles o' Enchanting from the stash before they're delivered (orders from the website can
+  ask for it). See below.
+- **Crafts what the stash can make for orders** (craft orders, new in 1.15.0): the website's build planner and the Printer can order items the stash does
+  not hold but can make from what it holds; the bot crafts them at the crafting table set for the stash on the website. Needs a recipe table fetched
+  from the Stash Manager server. See Crafting from the stash below.
+- **Sends kit shulkers to their own chests** (kit sorting, on by default): a shulker box that is a kit goes to the
+  chest you pick on the Stash Manager website. New in 1.14.0; kit types, the Kit Builder and kit orders came in 1.16.0 (not yet tested in game). See Kit sorting below.
 - Scans the stash once and saves it. After that, opening a container through the proxy keeps it up to date.
 - **Drop-offs** are emptied completely: anything without a home, or whose chest is full, goes to a `Misc` chest, then
   anywhere with room. With stay-on mode, the bot watches them (and checks the ones a hopper or dropper can fill) and keeps
@@ -75,6 +82,9 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash signDelay <seconds>` | How long a changed sign is left alone before sorting by it (10) |
 | `stash autoLabel on/off` | Signs mode: when an item has no sign, put up a sign for a new category on an empty unsigned chest next to the signed ones (on) |
 | `stash unsignedOverflow on/off` | Signs mode: stacks with no room in their own chest go to `Misc`/`Other`/`Overflow` chests, then unsigned chests (on) |
+| `stash craftorders on/off` | Take orders with craft lines (on; needs `stash crafting on` and a recipe table from the server). `stash craftorders` shows the recipe table, the website's crafting table state and the caps |
+| `stash craftorders maxfills <n>` / `maxperhour <n>` | Grid fills one craft order may make (2048) and craft orders may make in an hour (4096) |
+| `stash kitSorting on/off` | Kit sorting (on): shulkers that score as kits go to the chests picked on the Stash Manager website. Off: kits sort like any shulker and nothing about kits is sent. The saved rules are kept. See Kit sorting |
 | `stash labels` | Show the signs the bot has put up, and any it gave up on |
 | `stash stayOn on/off` | Keep running after sorting, sorting again whenever a container changes |
 | `stash recheck <seconds>` | How often stay-on checks drop-offs (30) |
@@ -164,7 +174,7 @@ up. It needs a free spot beside it on solid ground with air above, and a pickaxe
 
 Named shulkers are never taken apart. To keep kits whole, sign a chest `Kits` (or `Mixed Shulkers`): mixed shulkers
 then go there as they are instead of being repacked. A chest signed `Shulkers` is just for shulkers that don't belong
-anywhere else, and doesn't stop repacking.
+anywhere else, and doesn't stop repacking. A kit with a chest under kit sorting is kept whole as well (see Kit sorting).
 
 ## Compacting shulkers
 Once everything is in place, the bot looks for chances to free chest slots:
@@ -270,8 +280,110 @@ still being tested.
 The website may run console commands only after `stash manager dashboard console on`, and change proxy settings only
 after `stash manager dashboard proxy on`; both can only be turned on in the proxy terminal.
 
+## Repairing order items
+New in 1.13.0 and still being tested. An order can ask for repairs: "Repair all items" repairs every damaged item that has
+Mending, and a line's "Repair" toggle repairs that item. The rules are in the Stash Manager server's
+[PROTOCOL.md](https://github.com/Qwertze/Qwertze/blob/dev/stash-manager-server/PROTOCOL.md) ("Additions: repair with XP bottles").
+
+- Only items that have Mending, are damaged and don't stack are repaired. A shulker box never is. One Bottle o' Enchanting
+  repairs about 14 durability, so the bot takes `ceil(damage / 14)` bottles per item from the stash, plus a few spare.
+  Bottles inside shulker boxes in the stash are not used: only loose stacks.
+- Before a shulker is packed, the bot checks that it has enough free inventory slots, then stores its own damaged Mending
+  armour and whatever is in its off hand and main hand, so none of it takes the XP. It holds the bottles in the off hand and
+  the item in the main hand, one item at a time, looks down, and throws bottles in small batches, checking the durability
+  after each batch.
+- Everything it moved is put back: after a cancel or a failure, when another module takes the bot over, when the module is
+  switched off (best effort), and at the next start if the bot went offline in between.
+- A player within 8 blocks, or experience orbs that vanish without repairing, stop the throwing. The bot tries once more
+  after a quiet spell; after that the item is delivered as it is, with the reason "interrupted". The throwing is capped at
+  about 2 minutes per order.
+- Repairing never fails or holds up an order. Items that aren't fully repaired are delivered as they are, the order's message
+  says "N item(s) not fully repaired: <reasons>", and the result (bottles used, items repaired, partial and skipped items) goes
+  to the website. Leftover bottles go back to the stash.
+- There is no setting for it: it runs only for orders that ask for repairs. The Meteor addon can also take bottles out of
+  shulker boxes; this plugin uses loose bottles only.
+
+## Kit sorting
+New in 1.14.0. A shulker box that is a kit goes to a chest you pick on the Stash Manager website's Kits tab: by kit type
+from 1.16.0 (see below), by the score before that. The server's side (the pages, the settings and the storage) is described in the
+[Stash Manager server README](https://github.com/Qwertze/Qwertze/tree/dev/stash-manager-server). Turn it off with
+`stash kitSorting off`.
+
+- **The v1 score.** Used while the server sends no v2 settings. Each shulker box gets points: `name` 2 for a custom name with the word "kit" or "kits" ("PvP Kit" and
+  "kit_3" count; "Kitchen", "Toolkit" and "Kitsune" don't); `mix` 3 for a mix of useful items from the shared
+  `kit-items.json` table (for example three pieces of gear, or five wool colours); `full` 1 when all 27 slots are used;
+  and `op` 4 when it holds at least `opMin` OP items (3 by default), counted per item by stack count (3 totems, or a sword
+  and 2 god apples, qualify). A box is a kit when its total reaches the threshold (4 by default). A box of one item is a
+  kit only when all 27 slots are filled, and an empty box never is. The points, the threshold and `opMin` are set per
+  stash on the website, and the bot re-scores its boxes when they change.
+- **Where kits go.** A named kit with a rule for its name goes to that rule's chest. Otherwise it goes to the kits chest,
+  and unnamed kits always go there. A kit with neither sorts as before.
+- **Reserved chests.** The kits chest and every kit's chest hold only kits: nothing else is sorted into them, and they are
+  left out of overflow, sign scoring, the Tiers plan, compacting, repacking and auto-labelling. A put-back into one
+  happens only for a kit routed to it.
+- **Kept whole.** A kit with a target (a rule or the kits chest, found or missing) is never taken apart by repacking.
+- **A chest that can't take it.** A missing chest (not read yet, excluded, a drop-off or unreachable) gives the kit no
+  destination: a kit already in the stash stays where it is, a kit from a drop-off goes to overflow, and the bot warns
+  once per kit and chest until the settings change. A full chest takes the normal path, so kits in the stash move once
+  it has room.
+- **Offline.** The settings the server sends are kept in `plugins/qwerte-stash/kit-settings.json` (written atomically,
+  checked on every load), so the rules keep working while the server is offline or too old to know kits. Settings that
+  fail their check are ignored whole, and a warning is logged once.
+- **The report.** The bot sends the server its containers (free slots, and whether each can take kits), where each kit is
+  with its score, and the kits it carries. It sends this only when the server asks or the report changed, at most every
+  10 seconds. Only the first line of a sign is sent, cut to 32 characters.
+- **Off.** `stash kitSorting off` turns the feature off: kits sort like any shulker, nothing about kits is sent, and the
+  saved rules are kept. `stash kitSorting on` turns it back on.
+
+
+### Kit sorting v2 (1.16.0)
+When the server sends v2 settings, the bot tells kits apart by type instead of by the score above. Kit orders and restock are
+new in 1.16.0 and have not been tried in the game yet.
+
+- **Types.** The seven types of the shared `kit-types.json` table: PvP / Crystal, Travel, Redstone, Farming / Food, Building,
+  Starter / Base and Other kit. A box is a kit of a type when enough of its slots hold that type's items (three quarters of
+  them, or half when its name has the word kit) and it has at least that type's minimum number of different items. A box of
+  one kind of item is stock, never a kit.
+- **Chests.** Each type and each custom category (up to 16, set on the website) can have a chest. A kit goes to the first usable
+  of: its kit name's rule, its Kit Builder template's chest, its category's chest, the general kits chest. A stored kit only
+  moves up that chain. "Treat as" on the website gives a kit name a kind, or makes its boxes never kits.
+- **Kit Builder.** The website keeps templates of 27 slots. A box matches a template when it holds the same items in the same
+  counts, with the same components. Item names, damage, repair cost and slot positions don't matter. A box with every item of
+  the template is a complete copy. A box named after the template with some items missing is an incomplete copy: it is topped up
+  and never delivered.
+- **Kit orders** (`kitOrders`, on by default; needs kit sorting on). The bot builds and delivers the kits ordered on the website:
+  complete copies are fetched, and the rest are built from the stash and named with the template's name. A kit it cannot
+  complete is never delivered: with two or more kinds of item it is kept as an incomplete copy, otherwise its items go back into
+  the stash. Plain shortfalls are crafted when craft orders are on.
+- **Restock** (`kitRestock`, on by default; `kitRestockPerHour` 12, `kitRestockMinEmpty` 2). While the bot is idle it keeps each
+  template's keep count in its chest, from unreserved stock only, and never by crafting. A template with keep 0 is not restocked,
+  so nothing happens until a template has a keep count. Only the first 16 templates with a keep count (by id) are restocked.
+  Restock starts only after the first heartbeat reply of a connection, with orders on and no order held or to be resumed. It
+  gives way at once to a waiting order, a player, the queue or a switch-off.
+- **Settings.** `kitOrders`, `kitRestock`, `kitRestockPerHour` (0 to 60) and `kitRestockMinEmpty` (0 to 54) are on the bot's
+  Settings page on the Stash Manager website, and in `plugins/config/qwerte-stash.json`.
+- **Older servers.** With an older server, which sends no v2 settings, the v1 score above is used, and no kit orders or restock
+  are offered.
+
+## Crafting from the stash
+New in 1.15.0. An order can have craft lines: items the stash does not hold but can make from what it holds (the website's build planner shows them as
+"craftable", and the Printer can order them). The Stash Manager server decides what is craftable and plans the crafts; the bot checks the plan and carries it out.
+
+1. `stash crafting on` (crafting itself) and `stash craftorders on` (the default). The bot also needs the **recipe table**, which it fetches from the Stash
+   Manager server by itself (`stash craftorders` shows whether it has one). Until it has, it takes no craft orders and crafts nothing, shulker boxes included.
+2. Set the crafting table **on the website** (the stash's settings, "Crafting table"; quick picks from the tables the bot has seen). It does not use
+   `stash craftingtable` for orders. The bot tells the website whether the table is usable (ok, not loaded, not a crafting table, can not be reached,
+   in another dimension) and why not. **With none set** the bot finds a crafting table in the stash area, or puts one down from the stash, or crafts one
+   and puts it down (4 planks, or a log), and keeps it as its own; the website shows it as "auto". A website table wins when it is set.
+
+What it does: each shulker's craft loads are made just before the shulker is built, as many at a time as the free carry slots allow: it takes only the
+ingredients the order's plan names, crafts them with the plan's recipes (never more of an item than the plan says), and puts exact stacks in the shulker.
+Whatever is left over (a few items of the last fill, the steps between) is carried to the next shulker and goes back to the stash when the order ends.
+What can not be made is left out with a reason, and the order says "<n> item(s) not crafted: <reasons>"; crafting never fails an order by itself.
+Caps: `craftOrderMaxFills` grid fills per order (2048) and `craftOrderMaxPerHour` an hour (4096); the shulker box caps below are separate.
+
 ## Crafting shulker boxes
-New in 1.8.0, off by default. When an order needs an empty shulker (to build a shulker in, or for an empty-shulker line)
+New in 1.8.0, off by default. Since 1.15.0 it also needs the recipe table (above). When an order needs an empty shulker (to build a shulker in, or for an empty-shulker line)
 or compaction does, and the stash has none, the bot can craft a plain shulker box from what the stash holds: 2 shulker
 shells and a chest, the chest from 8 planks of any kind, the planks from logs. Kits never craft.
 

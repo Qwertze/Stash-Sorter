@@ -88,6 +88,23 @@ public final class ShulkerNames {
         return s == null || s.isBlank() ? null : s.trim();
     }
 
+    /**
+     * A control character, a Unicode FORMAT character (zero-width, bidi) or an unpaired surrogate: things that hide in a name. Names read from the
+     * server (templates, shulker names) are refused with them, and the anvil never writes one.
+     */
+    public static boolean hasHiddenChar(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (Character.isISOControl(c) || Character.getType(c) == Character.FORMAT) return true;
+            if (Character.isHighSurrogate(c)) {
+                if (i + 1 >= s.length() || !Character.isLowSurrogate(s.charAt(i + 1))) return true;
+                i++;
+            }
+            else if (Character.isLowSurrogate(c)) return true;
+        }
+        return false;
+    }
+
     /** Why this name can't go on a shulker (the anvil's rules), or null when it can. */
     public static @Nullable String problem(@Nullable String name) {
         if (name == null) return "no name";
@@ -99,6 +116,7 @@ public final class ShulkerNames {
             if (c == '§') return "a name with a § in it";
             if (Character.isISOControl(c)) return "a name with a control character in it";
         }
+        if (hasHiddenChar(t)) return "a name with a hidden character in it";
         return null;
     }
 

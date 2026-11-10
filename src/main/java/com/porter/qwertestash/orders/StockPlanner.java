@@ -69,6 +69,15 @@ public final class StockPlanner {
      * @param nameOf       a readable name for a key, for the notes
      */
     public static Plan plan(Order order, Survey survey, Map<String, Integer> emptiesByKey, Function<String, String> nameOf) {
+        return plan(order, survey, emptiesByKey, nameOf, List.of());
+    }
+
+    /**
+     * As above, with the loads of the order's craft lines (1.15.0, CRAFT-CONTRACT.md "Bot execution" step 2): they join the packer as
+     * item loads of the result id, flagged {@link Order.Lot#craft()}; they are made before their bin is built. Craft lines of the order
+     * itself are not looked at here.
+     */
+    public static Plan plan(Order order, Survey survey, Map<String, Integer> emptiesByKey, Function<String, String> nameOf, List<Order.Lot> craftLots) {
         List<Unit> shulkerUnits = new ArrayList<>(), emptyUnits = new ArrayList<>();
         List<Order.Lot> lots = new ArrayList<>();
         List<String> notes = new ArrayList<>();
@@ -79,6 +88,10 @@ public final class StockPlanner {
         Map<String, Long> shulkerLeft = new HashMap<>();
 
         for (Order.Line l : order.lines) {
+            // Craft lines are loads made before their bin (craftLots), not taken from the stash
+            if (l.type().equals(Order.CRAFT)) continue;
+            // Kit lines (1.16.0) are planned by KitPlanner, not from the stash as items
+            if (l.type().equals(Order.KIT)) continue;
             if ((l.type().equals(Order.SHULKER) || isShulkerKey(l.key())) && shulkerUnits.size() + emptyUnits.size() + (long) l.count() > Order.MAX_BINS) {
                 // Checked before anything is counted out: a line of millions would never finish
                 return new Plan(List.of(), notes, "too big: that is more than " + Order.MAX_BINS + " shulkers");
@@ -128,6 +141,9 @@ public final class StockPlanner {
             lots.addAll(mine);
         }
 
+        lots.addAll(craftLots);
+        stacks += craftLots.size();
+        if (stacks > (long) Order.MAX_BINS * Order.SLOTS) return new Plan(List.of(), notes, "too big: that is more than " + Order.MAX_BINS + " shulkers");
         List<List<Order.Lot>> bins = Order.pack(lots);
         if (shulkerUnits.size() + emptyUnits.size() + bins.size() > Order.MAX_BINS) {
             return new Plan(List.of(), notes, "too big: that is more than " + Order.MAX_BINS + " shulkers");
@@ -191,9 +207,14 @@ public final class StockPlanner {
      */
     public static List<Order.Lot> trim(List<Order.Lot> lots, Survey survey) {
         Map<String, Long> totals = new java.util.LinkedHashMap<>();
-        for (Order.Lot lot : lots) totals.merge(lot.key(), (long) lot.count(), Long::sum);
+        // Loads made by crafting are in hand, not in the stash: a replan keeps them as they are
+        List<Order.Lot> crafted = new ArrayList<>();
+        for (Order.Lot lot : lots) {
+            if (lot.craftState() != Order.Lot.NONE) crafted.add(lot);
+            else totals.merge(lot.key(), (long) lot.count(), Long::sum);
+        }
         Map<Var, Long> used = new IdentityHashMap<>();
-        List<Order.Lot> out = new ArrayList<>();
+        List<Order.Lot> out = new ArrayList<>(crafted);
         for (var e : totals.entrySet()) {
             String key = e.getKey();
             long loose = survey.available().getOrDefault(key, 0L), inShulkers = survey.shulkerAvailable().getOrDefault(key, 0L);

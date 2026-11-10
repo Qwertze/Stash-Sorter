@@ -2,6 +2,7 @@ package com.porter.qwertestash.stash;
 
 import com.aquarius.mc.block.BlockPos;
 import com.porter.qwertestash.orders.Recipes;
+import com.porter.qwertestash.orders.TestRecipes;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftingTableFinderTest {
-    private static final Recipes R = Recipes.shipped();
+    private static final Recipes R = TestRecipes.table();
 
     /** A fake world: the tables standing, the answer of a search, what the stash can give. */
     static final class Fake implements CraftingTableFinder.World {

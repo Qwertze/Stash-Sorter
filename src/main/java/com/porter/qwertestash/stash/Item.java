@@ -39,6 +39,17 @@ public final class Item {
     public boolean damaged;
     /** The damage value and the most damage the item takes (0 when it has none); saved, for the index's durability bar. */
     public int damage, maxDamage;
+    /**
+     * The stack has the Mending enchantment on it (an enchanted book only stores it, so a book never counts). Worked out from the
+     * enchantments, so it holds for stacks saved before this existed.
+     */
+    public boolean hasMending() {
+        if (id == null || id.equals("enchanted_book")) return false;
+        if (enchantLevels != null) for (String e : enchantLevels) if (com.porter.qwertestash.orders.Repair.isMending(e)) return true;
+        if (enchants != null) for (String e : enchants) if (com.porter.qwertestash.orders.Repair.isMending(e)) return true;
+        return false;
+    }
+
     /** Carries block-entity data (a chest or barrel item picked with its contents, a filled beehive...): never a crafting input. */
     public boolean blockData;
     public List<String> tags = new ArrayList<>();
@@ -60,6 +71,17 @@ public final class Item {
     public @Nullable String key;
     /** The same over the whole component patch, contents included. Null in older saves. */
     public @Nullable String variant;
+    /**
+     * The match key (see ItemKeys.matchKey): the key with the custom name, damage and repair cost left out too. Kept only when it differs from the
+     * key (null: the same), so a stash saved before it existed reads as its key.
+     */
+    public @Nullable String match;
+
+    /** The match key of this stack: {@link #match}, else the key, else the plain id. */
+    public String matchKey() {
+        if (match != null) return match;
+        return key != null ? key : "minecraft:" + id;
+    }
     /** For an item inside a shulker: its slot there (the list drops empty slots). -1 anywhere else and in older saves. */
     public int slot = -1;
 
@@ -99,6 +121,8 @@ public final class Item {
         var keys = com.porter.qwertestash.manager.ItemKeys.of(data.name(), stack.getDataComponentsOrEmpty(), data.name().endsWith("shulker_box"));
         item.key = keys.key();
         item.variant = keys.variant();
+        String match = com.porter.qwertestash.manager.ItemKeys.matchKey(data.name(), stack.getDataComponentsOrEmpty(), data.name().endsWith("shulker_box"));
+        item.match = match.equals(item.key) ? null : match;
         item.count = stack.getAmount();
 
         var components = stack.getDataComponentsOrEmpty();

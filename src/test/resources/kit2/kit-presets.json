@@ -1,0 +1,1050 @@
+{
+ "version": 1,
+ "note": "Kit Builder presets for KIT-CONTRACT v2. Hand-written vanilla ids, no game data. A key ending in #* means any variant of that item (enchantments, potion type and other components are free). Server resource only; pages get it from GET /api/v1/kits/templates.",
+ "presets": [
+  {
+   "id": "p-crystal",
+   "category": "pvp",
+   "name": "Crystal PvP",
+   "color": "red",
+   "slots": [
+    {
+     "key": "minecraft:netherite_helmet#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_chestplate#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_leggings#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_boots#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_sword#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_pickaxe#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:end_crystal",
+     "count": 64
+    },
+    {
+     "key": "minecraft:end_crystal",
+     "count": 64
+    },
+    {
+     "key": "minecraft:end_crystal",
+     "count": 64
+    },
+    {
+     "key": "minecraft:end_crystal",
+     "count": 64
+    },
+    {
+     "key": "minecraft:obsidian",
+     "count": 64
+    },
+    {
+     "key": "minecraft:obsidian",
+     "count": 64
+    },
+    {
+     "key": "minecraft:obsidian",
+     "count": 64
+    },
+    {
+     "key": "minecraft:respawn_anchor",
+     "count": 64
+    },
+    {
+     "key": "minecraft:glowstone",
+     "count": 64
+    },
+    {
+     "key": "minecraft:enchanted_golden_apple",
+     "count": 64
+    },
+    {
+     "key": "minecraft:enchanted_golden_apple",
+     "count": 64
+    },
+    {
+     "key": "minecraft:ender_pearl",
+     "count": 16
+    },
+    {
+     "key": "minecraft:ender_pearl",
+     "count": 16
+    },
+    {
+     "key": "minecraft:experience_bottle",
+     "count": 64
+    },
+    {
+     "key": "minecraft:experience_bottle",
+     "count": 64
+    }
+   ]
+  },
+  {
+   "id": "p-sword",
+   "category": "pvp",
+   "name": "Sword PvP",
+   "color": "red",
+   "slots": [
+    {
+     "key": "minecraft:netherite_helmet#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_chestplate#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_leggings#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_boots#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_sword#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:netherite_axe#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:shield#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:bow#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:arrow",
+     "count": 64
+    },
+    {
+     "key": "minecraft:arrow",
+     "count": 64
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:totem_of_undying",
+     "count": 1
+    },
+    {
+     "key": "minecraft:golden_apple",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_apple",
+     "count": 64
+    },
+    {
+     "key": "minecraft:enchanted_golden_apple",
+     "count": 64
+    },
+    {
+     "key": "minecraft:splash_potion#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:splash_potion#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:splash_potion#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:splash_potion#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:splash_potion#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:splash_potion#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:ender_pearl",
+     "count": 16
+    },
+    {
+     "key": "minecraft:ender_pearl",
+     "count": 16
+    },
+    {
+     "key": "minecraft:cobweb",
+     "count": 64
+    },
+    {
+     "key": "minecraft:experience_bottle",
+     "count": 64
+    }
+   ]
+  },
+  {
+   "id": "p-elytra",
+   "category": "travel",
+   "name": "Elytra Travel",
+   "color": "light_blue",
+   "slots": [
+    {
+     "key": "minecraft:elytra#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:elytra#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:elytra#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:firework_rocket",
+     "count": 64
+    },
+    {
+     "key": "minecraft:ender_pearl",
+     "count": 16
+    },
+    {
+     "key": "minecraft:ender_pearl",
+     "count": 16
+    },
+    {
+     "key": "minecraft:chorus_fruit",
+     "count": 64
+    },
+    {
+     "key": "minecraft:experience_bottle",
+     "count": 64
+    },
+    {
+     "key": "minecraft:experience_bottle",
+     "count": 64
+    },
+    {
+     "key": "minecraft:ender_chest",
+     "count": 64
+    }
+   ]
+  },
+  {
+   "id": "p-builder",
+   "category": "building",
+   "name": "Builder Basics",
+   "color": "yellow",
+   "slots": [
+    {
+     "key": "minecraft:stone_bricks",
+     "count": 64
+    },
+    {
+     "key": "minecraft:stone_bricks",
+     "count": 64
+    },
+    {
+     "key": "minecraft:stone_bricks",
+     "count": 64
+    },
+    {
+     "key": "minecraft:stone_bricks",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_planks",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_planks",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_planks",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_planks",
+     "count": 64
+    },
+    {
+     "key": "minecraft:glass",
+     "count": 64
+    },
+    {
+     "key": "minecraft:glass",
+     "count": 64
+    },
+    {
+     "key": "minecraft:glass",
+     "count": 64
+    },
+    {
+     "key": "minecraft:stone_brick_stairs",
+     "count": 64
+    },
+    {
+     "key": "minecraft:stone_brick_stairs",
+     "count": 64
+    },
+    {
+     "key": "minecraft:stone_brick_slab",
+     "count": 64
+    },
+    {
+     "key": "minecraft:stone_brick_slab",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_stairs",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_stairs",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_slab",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_slab",
+     "count": 64
+    },
+    {
+     "key": "minecraft:smooth_stone",
+     "count": 64
+    },
+    {
+     "key": "minecraft:smooth_stone",
+     "count": 64
+    },
+    {
+     "key": "minecraft:torch",
+     "count": 64
+    },
+    {
+     "key": "minecraft:scaffolding",
+     "count": 64
+    },
+    {
+     "key": "minecraft:scaffolding",
+     "count": 64
+    },
+    {
+     "key": "minecraft:ladder",
+     "count": 64
+    },
+    {
+     "key": "minecraft:lantern",
+     "count": 64
+    },
+    {
+     "key": "minecraft:white_concrete",
+     "count": 64
+    }
+   ]
+  },
+  {
+   "id": "p-concrete",
+   "category": "building",
+   "name": "Assorted Concrete",
+   "color": "white",
+   "slots": [
+    {
+     "key": "minecraft:white_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:orange_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:magenta_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:light_blue_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:yellow_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:lime_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:pink_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:gray_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:light_gray_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cyan_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:purple_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:blue_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:brown_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:green_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:red_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:black_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:white_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:white_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:white_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:black_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:black_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:black_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:gray_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:gray_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:light_gray_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:light_gray_concrete",
+     "count": 64
+    },
+    {
+     "key": "minecraft:light_gray_concrete",
+     "count": 64
+    }
+   ]
+  },
+  {
+   "id": "p-redstone",
+   "category": "redstone",
+   "name": "Redstone Basics",
+   "color": "red",
+   "slots": [
+    {
+     "key": "minecraft:redstone",
+     "count": 64
+    },
+    {
+     "key": "minecraft:redstone",
+     "count": 64
+    },
+    {
+     "key": "minecraft:redstone",
+     "count": 64
+    },
+    {
+     "key": "minecraft:redstone",
+     "count": 64
+    },
+    {
+     "key": "minecraft:repeater",
+     "count": 64
+    },
+    {
+     "key": "minecraft:repeater",
+     "count": 64
+    },
+    {
+     "key": "minecraft:comparator",
+     "count": 64
+    },
+    {
+     "key": "minecraft:comparator",
+     "count": 64
+    },
+    {
+     "key": "minecraft:piston",
+     "count": 64
+    },
+    {
+     "key": "minecraft:piston",
+     "count": 64
+    },
+    {
+     "key": "minecraft:sticky_piston",
+     "count": 64
+    },
+    {
+     "key": "minecraft:sticky_piston",
+     "count": 64
+    },
+    {
+     "key": "minecraft:observer",
+     "count": 64
+    },
+    {
+     "key": "minecraft:observer",
+     "count": 64
+    },
+    {
+     "key": "minecraft:hopper",
+     "count": 64
+    },
+    {
+     "key": "minecraft:hopper",
+     "count": 64
+    },
+    {
+     "key": "minecraft:redstone_torch",
+     "count": 64
+    },
+    {
+     "key": "minecraft:lever",
+     "count": 64
+    },
+    {
+     "key": "minecraft:stone_button",
+     "count": 64
+    },
+    {
+     "key": "minecraft:dropper",
+     "count": 64
+    },
+    {
+     "key": "minecraft:dispenser",
+     "count": 64
+    },
+    {
+     "key": "minecraft:rail",
+     "count": 64
+    },
+    {
+     "key": "minecraft:powered_rail",
+     "count": 64
+    },
+    {
+     "key": "minecraft:slime_block",
+     "count": 64
+    },
+    {
+     "key": "minecraft:redstone_lamp",
+     "count": 64
+    },
+    {
+     "key": "minecraft:target",
+     "count": 64
+    },
+    {
+     "key": "minecraft:daylight_detector",
+     "count": 64
+    }
+   ]
+  },
+  {
+   "id": "p-starter",
+   "category": "starter",
+   "name": "Starter Base",
+   "color": "green",
+   "slots": [
+    {
+     "key": "minecraft:iron_helmet#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:iron_chestplate#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:iron_leggings#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:iron_boots#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:iron_sword#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:iron_pickaxe#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:iron_pickaxe#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:iron_axe#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:iron_shovel#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:shield#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:bow#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:arrow",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:torch",
+     "count": 64
+    },
+    {
+     "key": "minecraft:torch",
+     "count": 64
+    },
+    {
+     "key": "minecraft:crafting_table",
+     "count": 64
+    },
+    {
+     "key": "minecraft:furnace",
+     "count": 64
+    },
+    {
+     "key": "minecraft:chest",
+     "count": 64
+    },
+    {
+     "key": "minecraft:white_bed",
+     "count": 1
+    },
+    {
+     "key": "minecraft:water_bucket",
+     "count": 1
+    },
+    {
+     "key": "minecraft:bucket",
+     "count": 1
+    },
+    {
+     "key": "minecraft:oak_boat",
+     "count": 1
+    },
+    {
+     "key": "minecraft:ladder",
+     "count": 64
+    },
+    {
+     "key": "minecraft:flint_and_steel#*",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "id": "p-farmer",
+   "category": "farming",
+   "name": "Farmer",
+   "color": "lime",
+   "slots": [
+    {
+     "key": "minecraft:diamond_hoe#*",
+     "count": 1
+    },
+    {
+     "key": "minecraft:bone_meal",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bone_meal",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bone_meal",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bone_meal",
+     "count": 64
+    },
+    {
+     "key": "minecraft:wheat_seeds",
+     "count": 64
+    },
+    {
+     "key": "minecraft:wheat_seeds",
+     "count": 64
+    },
+    {
+     "key": "minecraft:carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:potato",
+     "count": 64
+    },
+    {
+     "key": "minecraft:potato",
+     "count": 64
+    },
+    {
+     "key": "minecraft:beetroot_seeds",
+     "count": 64
+    },
+    {
+     "key": "minecraft:sugar_cane",
+     "count": 64
+    },
+    {
+     "key": "minecraft:pumpkin_seeds",
+     "count": 64
+    },
+    {
+     "key": "minecraft:melon_seeds",
+     "count": 64
+    },
+    {
+     "key": "minecraft:water_bucket",
+     "count": 1
+    },
+    {
+     "key": "minecraft:water_bucket",
+     "count": 1
+    },
+    {
+     "key": "minecraft:composter",
+     "count": 64
+    },
+    {
+     "key": "minecraft:oak_sapling",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    }
+   ]
+  },
+  {
+   "id": "p-food",
+   "category": "farming",
+   "name": "Food",
+   "color": "orange",
+   "slots": [
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:golden_carrot",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:cooked_beef",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    },
+    {
+     "key": "minecraft:bread",
+     "count": 64
+    }
+   ]
+  }
+ ]
+}

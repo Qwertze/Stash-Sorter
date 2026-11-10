@@ -40,7 +40,11 @@ public final class ManagerHttp {
     /** The error text of a 401, 403 or 5xx that came without a signature: only the code is believable. */
     public static final String UNSIGNED = "unsigned";
 
-    public record Response(int code, String body, @Nullable String error) {
+    /** @param etag the ETag header of the answer (not covered by the signature: only a hint), or null */
+    public record Response(int code, String body, @Nullable String error, @Nullable String etag) {
+        public Response(int code, String body, @Nullable String error) {
+            this(code, body, error, null);
+        }
     }
 
     private static final int MAX_REPLY = 4 << 20;
@@ -122,6 +126,12 @@ public final class ManagerHttp {
      * @param active  told the connection while it is in use, and null again afterwards, so a stop can disconnect it
      */
     public static Response call(String method, URI url, byte @Nullable [] body, String key, @Nullable String botId, int connectMs, int readMs, int totalMs, @Nullable Consumer<HttpURLConnection> active) {
+        return call(method, url, body, key, botId, connectMs, readMs, totalMs, active, null);
+    }
+
+    /** As above; {@code ifNoneMatch} is sent as the If-None-Match header (a GET of something cached; a 304 answer has no body). */
+    public static Response call(String method, URI url, byte @Nullable [] body, String key, @Nullable String botId, int connectMs, int readMs, int totalMs, @Nullable Consumer<HttpURLConnection> active,
+                                @Nullable String ifNoneMatch) {
         if (key.isEmpty() || key.chars().anyMatch(c -> c < 33 || c > 126) || (botId != null && botId.chars().anyMatch(c -> c < 33 || c > 126))) {
             return new Response(-1, "", "bad key");
         }
@@ -151,6 +161,7 @@ public final class ManagerHttp {
             conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod(method);
             conn.setRequestProperty("X-SM-Auth", authHeader(k, method, path, botId, ts, nonce, payload));
+            if (ifNoneMatch != null && !ifNoneMatch.isEmpty()) conn.setRequestProperty("If-None-Match", ifNoneMatch);
             if (body != null) {
                 conn.setDoOutput(true);
                 conn.setFixedLengthStreamingMode(payload.length);
@@ -167,7 +178,7 @@ public final class ManagerHttp {
             byte[] bytes = encoding != null && encoding.equalsIgnoreCase("gzip") && raw.length > 0 ? gunzip(raw) : raw;
 
             if (verify(k, sigHeader, nonce, code, bytes, System.currentTimeMillis())) {
-                return new Response(code, new String(bytes, StandardCharsets.UTF_8), null);
+                return new Response(code, new String(bytes, StandardCharsets.UTF_8), null, conn.getHeaderField("ETag"));
             }
             // Refusals (401, 403) and server errors (5xx) may come unsigned: the code is shown but nothing in the body is
             // ever acted on

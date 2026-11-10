@@ -45,6 +45,13 @@ public final class CraftHealth {
         table = tableSpot;
     }
 
+    /** Forgets the table trouble remembered (the website's table is tried once more before it is given up on). */
+    public synchronized void forget() {
+        failure = null;
+        task = null;
+        table = null;
+    }
+
     /** The table trouble remembered for this task and table, or null. */
     public synchronized @Nullable String problem(@Nullable String taskId, @Nullable Object tableSpot) {
         return failure != null && Objects.equals(taskId, task) && Objects.equals(tableSpot, table) ? failure : null;

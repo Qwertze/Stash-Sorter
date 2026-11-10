@@ -62,6 +62,11 @@ public final class CraftTrip {
         /** Brings this grid slot up to {@code count} of {@code item} (a kind) from one carried stack, as one request. */
         boolean place(int gridSlot, String item, int count);
 
+        /** The stack size of a kind of carried stack (an item id, with its components when it has any): a batch never gives a grid slot more. */
+        default int maxStack(String kind) {
+            return 64;
+        }
+
         /** A stack is on the cursor (a click of ours the server turned down, say). */
         boolean holdingCursor();
 
@@ -131,7 +136,7 @@ public final class CraftTrip {
     private final String item;
     private Step step = Step.Walk;
     private int ticks, stepTicks, tries, sinceClick;
-    private int at, fillsLeft = -1, took, gridBefore, made;
+    private int at, fillsLeft = -1, took, gridBefore, made, taken;
     private final int limit;
     private int places, takes, retrieves, stows;
     private CraftGrid.@Nullable Batch batch;
@@ -177,6 +182,11 @@ public final class CraftTrip {
     /** How many of the wanted item were made so far. */
     public int made() {
         return made;
+    }
+
+    /** Grid fills whose result was taken so far (every step's, not only the wanted item's). */
+    public int fillsTaken() {
+        return taken;
     }
 
     public @Nullable Outcome outcome() {
@@ -320,7 +330,7 @@ public final class CraftTrip {
                 }
                 CraftPlanner.Step st = steps.get(at);
                 if (fillsLeft < 0) fillsLeft = st.fills();
-                batch = CraftGrid.batch(st.recipe(), port.carried(), fillsLeft, MAX_PER_SLOT, inventoryGrid() ? 2 : 3);
+                batch = CraftGrid.batch(st.recipe(), port.carried(), fillsLeft, MAX_PER_SLOT, inventoryGrid() ? 2 : 3, port::maxStack);
                 if (batch == null) {
                     end(MISSING + " (" + Recipes.pretty(st.recipe().result()) + ")", false, false);
                     return;
@@ -408,6 +418,7 @@ public final class CraftTrip {
                     return;
                 }
                 took++;
+                taken++;
                 CraftPlanner.Step st = steps.get(at);
                 if (at == steps.size() - 1 && st.recipe().result().equals(item)) made += st.recipe().count();
                 if (took < b.fills()) {

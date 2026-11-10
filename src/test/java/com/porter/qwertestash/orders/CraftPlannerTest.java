@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CraftPlannerTest {
     static final String BOX = "minecraft:shulker_box", SHELL = "minecraft:shulker_shell", CHEST = "minecraft:chest",
         OAK = "minecraft:oak_planks", BIRCH = "minecraft:birch_planks", LOG = "minecraft:oak_log";
-    private final Recipes r = Recipes.shipped();
+    private final Recipes r = TestRecipes.table();
 
     static Map<String, Long> pool(Object... kv) {
         Map<String, Long> m = new HashMap<>();

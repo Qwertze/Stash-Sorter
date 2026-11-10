@@ -43,6 +43,11 @@ public final class OrderDriver {
     private final Listener listener;
 
     private int pendingOrders;
+    /** This bot can carry out craft orders: the claim says so (CRAFT-CONTRACT.md "Bot capability and routing"), else it is never given one. */
+    private volatile boolean craftOrders;
+    private int waits204;
+    private volatile java.util.function.@Nullable BooleanSupplier craftOrdersWhen;
+    private volatile java.util.function.@Nullable BooleanSupplier kitOrdersWhen;
     private long lastClaim = Long.MIN_VALUE / 2, lastStatusAt = Long.MIN_VALUE / 2, idleSince;
     private boolean parkNoted;
     private String lastStatusSig = "";
@@ -69,6 +74,26 @@ public final class OrderDriver {
 
     public int pending() {
         return pendingOrders;
+    }
+
+    /**
+     * Whether the claim carries {@code craftOrders: 1}: only while this bot has a recipe table and craft orders are on. Without it the
+     * server skips orders that have a craft line, and fails a held one that is claimed again without it.
+     */
+    public void craftOrders(boolean on) {
+        craftOrders = on;
+    }
+
+    /**
+     * As above, asked when the claim is made (the flag is then never older than the claim): either this or {@link #craftOrders(boolean)}
+     * being true puts {@code craftOrders: 1} in the claim.
+     */
+    public void kitOrdersWhen(java.util.function.BooleanSupplier supplier) {
+        kitOrdersWhen = supplier;
+    }
+
+    public void craftOrdersWhen(java.util.function.BooleanSupplier supplier) {
+        craftOrdersWhen = supplier;
     }
 
     /** A new session (the bot reconnected): the order is parked, what the server said before is stale. */
@@ -113,7 +138,7 @@ public final class OrderDriver {
         }
 
         // Taking orders was switched off with one in hand: it is parked, and resumed when it is switched on again
-        if (!acceptOrders && flow.running()) {
+        if (!acceptOrders && flow.running() && !flow.isRestock()) {
             // The server is told it is parked (one report), then it is
             if (!parkNoted) {
                 parkNoted = true;
@@ -128,6 +153,11 @@ public final class OrderDriver {
         else parkNoted = false;
 
         OrderFlow.Report report = flow.report();
+        // A kit restock job is the bot's own: the server hears nothing of it, and no order is claimed while it runs (it is stopped when one waits)
+        if (report != null && flow.isRestock()) {
+            if (report.terminal()) flow.ack(report.id());
+            return null;
+        }
         if (report != null) {
             String sig = report.id() + "|" + report.status() + "|" + report.phase() + "|" + report.done() + "|" + report.message();
             if (!sig.equals(lastStatusSig) && (report.terminal() || now - lastStatusAt >= STATUS_MS)) {
@@ -175,12 +205,22 @@ public final class OrderDriver {
             JsonObject o = new JsonObject();
             o.addProperty("server", server);
             o.addProperty("stash", stash);
+            java.util.function.BooleanSupplier ask = craftOrdersWhen;
+            if (craftOrders || (ask != null && ask.getAsBoolean())) o.addProperty("craftOrders", 1);
+            // 1.16.0 (KIT-CONTRACT v2 "Claim"): this bot can build kits (kit sorting and kit orders on, the type table loaded), or it holds a kit order
+            java.util.function.BooleanSupplier kitAsk = kitOrdersWhen;
+            if (kitAsk != null && kitAsk.getAsBoolean()) o.addProperty("kitOrders", 1);
             return new Request("/api/v1/orders/claim", bytes(o, player), (code, body) -> {
                 if (code == 204) {
                     pendingOrders = 0;
+                    // A held craft order claimed without the flag also answers 204 (the server waits for a capable heartbeat before failing
+                    // it): its saved plan is kept for a few claims, not dropped at once
+                    if (flow.resumeHasCraft() && ++waits204 < 3) return true;
+                    waits204 = 0;
                     flow.dropSaved(null);
                     return true;
                 }
+                waits204 = 0;
                 if (code != 200) return false;
                 takeOrder(body);
                 return true;
@@ -204,7 +244,7 @@ public final class OrderDriver {
         Order order = null;
         String id = null;
         try {
-            JsonElement e = JsonParser.parseString(body);
+            JsonElement e = com.porter.qwertestash.manager.SafeJson.parse(body);
             if (e.isJsonObject() && e.getAsJsonObject().has("order") && e.getAsJsonObject().get("order").isJsonObject()) {
                 JsonObject o = e.getAsJsonObject().getAsJsonObject("order");
                 if (o.has("id") && o.get("id").isJsonPrimitive()) id = o.get("id").getAsString();
@@ -239,7 +279,7 @@ public final class OrderDriver {
     /** The orders part of a heartbeat reply: how many wait, and which of ours were cancelled. */
     public void onHeartbeat(String body) {
         try {
-            JsonElement e = JsonParser.parseString(body);
+            JsonElement e = com.porter.qwertestash.manager.SafeJson.parse(body);
             if (!e.isJsonObject() || !e.getAsJsonObject().has("orders") || !e.getAsJsonObject().get("orders").isJsonObject()) {
                 pendingOrders = 0;
                 return;
@@ -277,7 +317,8 @@ public final class OrderDriver {
         progress.addProperty("total", Math.max(0, r.total()));
         o.add("progress", progress);
         o.addProperty("message", clamp(r.message(), MESSAGE_MAX));
-        if (r.terminal() && !r.status().equals("cancelled")) {
+        // A cancelled craft order still reports what it made and gave back (result.craft); other cancelled orders send no result
+        if (r.terminal() && (!r.status().equals("cancelled") || r.craft() != null || r.kit() != null)) {
             JsonObject result = new JsonObject();
             result.addProperty("shulkers", Math.max(0, r.shulkers()));
             JsonArray lines = new JsonArray();
@@ -290,6 +331,12 @@ public final class OrderDriver {
                 lines.add(line);
             }
             result.add("lines", lines);
+            // Only when the order asked for repairs (REPAIR-CONTRACT.md); numbers and keys only
+            if (r.repair() != null) result.add("repair", r.repair());
+            // Only when the order had craft lines (CRAFT-CONTRACT.md): numbers, item ids and reason codes only
+            if (r.craft() != null) result.add("craft", r.craft());
+            // Only when the order had kit lines (KIT-CONTRACT v2): template ids, item keys, counts and reason codes only
+            if (r.kit() != null) result.add("kit", r.kit());
             o.add("result", result);
         }
         return o;

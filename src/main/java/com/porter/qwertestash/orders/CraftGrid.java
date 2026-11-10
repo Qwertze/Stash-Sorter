@@ -82,11 +82,23 @@ public final class CraftGrid {
 
     /** As {@link #batch(Recipes.Recipe, Map, int, int)} for a grid {@code width} across. */
     public static @Nullable Batch batch(Recipes.Recipe r, Map<String, Integer> carried, int fills, int maxPerSlot, int width) {
+        return batch(r, carried, fills, maxPerSlot, width, kind -> Integer.MAX_VALUE);
+    }
+
+    /**
+     * As above, and a grid slot is never given more than the stack size of the kind in it (CRAFT-CONTRACT.md: {@code k <= min(64, the
+     * smallest maxStack of the input kinds)}).
+     * @param stackOf the stack size of a kind (an item id, with its components when it has any)
+     */
+    public static @Nullable Batch batch(Recipes.Recipe r, Map<String, Integer> carried, int fills, int maxPerSlot, int width, java.util.function.ToIntFunction<String> stackOf) {
         int[] at = slots(r, width);
         List<List<String>> cells = r.ingredients();
         for (int k = Math.min(fills, maxPerSlot); k >= 1; k--) {
             String[] item = assign(cells, at, carried, k);
-            if (item != null) return new Batch(k, item);
+            if (item == null) continue;
+            boolean fits = true;
+            for (int i = 1; i <= 9 && fits; i++) if (item[i] != null && k > stackOf.applyAsInt(item[i])) fits = false;
+            if (fits) return new Batch(k, item);
         }
         return null;
     }

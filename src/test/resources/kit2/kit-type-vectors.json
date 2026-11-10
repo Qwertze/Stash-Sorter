@@ -1,0 +1,1523 @@
+{
+ "version": 2,
+ "table": "c3ffa89424c6998aebcc40339e9d750df410952beb31e5e2dc05d7a59d663e3e",
+ "vectors": [
+  {
+   "label": "A1 ASSORTED CONCRETE",
+   "name": "assorted concrete",
+   "treatAs": {},
+   "slots": [
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:orange_concrete",
+    "minecraft:orange_concrete",
+    "minecraft:orange_concrete",
+    "minecraft:magenta_concrete",
+    "minecraft:magenta_concrete",
+    "minecraft:magenta_concrete",
+    "minecraft:light_blue_concrete",
+    "minecraft:light_blue_concrete",
+    "minecraft:light_blue_concrete",
+    "minecraft:yellow_concrete",
+    "minecraft:yellow_concrete",
+    "minecraft:yellow_concrete",
+    "minecraft:lime_concrete",
+    "minecraft:lime_concrete",
+    "minecraft:lime_concrete",
+    "minecraft:pink_concrete",
+    "minecraft:pink_concrete",
+    "minecraft:pink_concrete",
+    "minecraft:gray_concrete",
+    "minecraft:gray_concrete",
+    "minecraft:gray_concrete",
+    "minecraft:light_gray_concrete",
+    "minecraft:light_gray_concrete",
+    "minecraft:light_gray_concrete"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "building",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 9,
+    "items": [
+     "minecraft:gray_concrete",
+     "minecraft:light_blue_concrete",
+     "minecraft:light_gray_concrete"
+    ]
+   }
+  },
+  {
+   "label": "A2 J-Z Concrete Powder",
+   "name": "j-z™ concrete powder",
+   "treatAs": {},
+   "slots": [
+    "minecraft:white_concrete_powder",
+    "minecraft:white_concrete_powder",
+    "minecraft:orange_concrete_powder",
+    "minecraft:orange_concrete_powder",
+    "minecraft:magenta_concrete_powder",
+    "minecraft:magenta_concrete_powder",
+    "minecraft:light_blue_concrete_powder",
+    "minecraft:light_blue_concrete_powder",
+    "minecraft:yellow_concrete_powder",
+    "minecraft:yellow_concrete_powder",
+    "minecraft:lime_concrete_powder",
+    "minecraft:lime_concrete_powder",
+    "minecraft:pink_concrete_powder",
+    "minecraft:pink_concrete_powder",
+    "minecraft:gray_concrete_powder",
+    "minecraft:gray_concrete_powder",
+    "minecraft:light_gray_concrete_powder",
+    "minecraft:light_gray_concrete_powder",
+    "minecraft:cyan_concrete_powder",
+    "minecraft:cyan_concrete_powder",
+    "minecraft:purple_concrete_powder",
+    "minecraft:purple_concrete_powder",
+    "minecraft:blue_concrete_powder",
+    "minecraft:brown_concrete_powder",
+    "minecraft:green_concrete_powder",
+    "minecraft:red_concrete_powder",
+    "minecraft:black_concrete_powder"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "building",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 16,
+    "items": [
+     "minecraft:cyan_concrete_powder",
+     "minecraft:gray_concrete_powder",
+     "minecraft:light_blue_concrete_powder"
+    ]
+   }
+  },
+  {
+   "label": "A3 J-Z Terracotta",
+   "name": "j-z™ terracotta",
+   "treatAs": {},
+   "slots": [
+    "minecraft:terracotta",
+    "minecraft:terracotta",
+    "minecraft:terracotta",
+    "minecraft:white_terracotta",
+    "minecraft:white_terracotta",
+    "minecraft:orange_terracotta",
+    "minecraft:orange_terracotta",
+    "minecraft:magenta_terracotta",
+    "minecraft:magenta_terracotta",
+    "minecraft:light_blue_terracotta",
+    "minecraft:light_blue_terracotta",
+    "minecraft:yellow_terracotta",
+    "minecraft:yellow_terracotta",
+    "minecraft:lime_terracotta",
+    "minecraft:lime_terracotta",
+    "minecraft:pink_terracotta",
+    "minecraft:pink_terracotta",
+    "minecraft:gray_terracotta",
+    "minecraft:gray_terracotta",
+    "minecraft:light_gray_terracotta",
+    "minecraft:light_gray_terracotta",
+    "minecraft:cyan_terracotta",
+    "minecraft:cyan_terracotta",
+    "minecraft:purple_terracotta",
+    "minecraft:purple_terracotta",
+    "minecraft:blue_terracotta",
+    "minecraft:blue_terracotta"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "building",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 13,
+    "items": [
+     "minecraft:terracotta",
+     "minecraft:blue_terracotta",
+     "minecraft:cyan_terracotta"
+    ]
+   }
+  },
+  {
+   "label": "A4 Redstone Kit",
+   "name": "redstone kit",
+   "treatAs": {},
+   "slots": [
+    "minecraft:redstone",
+    "minecraft:redstone",
+    "minecraft:redstone",
+    "minecraft:redstone",
+    "minecraft:repeater",
+    "minecraft:repeater",
+    "minecraft:repeater",
+    "minecraft:comparator",
+    "minecraft:comparator",
+    "minecraft:comparator",
+    "minecraft:piston",
+    "minecraft:piston",
+    "minecraft:sticky_piston",
+    "minecraft:sticky_piston",
+    "minecraft:observer",
+    "minecraft:observer",
+    "minecraft:hopper",
+    "minecraft:hopper",
+    "minecraft:redstone_torch",
+    "minecraft:lever"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "redstone",
+    "code": "assortment",
+    "slots": 20,
+    "covered": 20,
+    "kinds": 9,
+    "items": [
+     "minecraft:redstone",
+     "minecraft:comparator",
+     "minecraft:repeater"
+    ]
+   }
+  },
+  {
+   "label": "A5 Qwerttze Test Kit",
+   "name": "qwerttze test kit",
+   "treatAs": {},
+   "slots": [
+    "minecraft:netherite_helmet",
+    "minecraft:netherite_chestplate",
+    "minecraft:netherite_leggings",
+    "minecraft:netherite_boots",
+    "minecraft:netherite_sword",
+    "minecraft:netherite_pickaxe",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:ender_pearl",
+    "minecraft:ender_pearl"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "pvp",
+    "code": "assortment",
+    "slots": 26,
+    "covered": 26,
+    "kinds": 11,
+    "items": [
+     "minecraft:end_crystal",
+     "minecraft:totem_of_undying",
+     "minecraft:obsidian"
+    ]
+   }
+  },
+  {
+   "label": "A6 Keenans Beacons",
+   "name": "keenans beacons",
+   "treatAs": {},
+   "slots": [
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "other",
+    "code": "stock",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 1,
+    "items": [
+     "minecraft:beacon"
+    ]
+   }
+  },
+  {
+   "label": "A7 RulesOffs Elytras",
+   "name": "rulesoff's elytras",
+   "treatAs": {},
+   "slots": [
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra",
+    "minecraft:elytra"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "travel",
+    "code": "stock",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 1,
+    "items": [
+     "minecraft:elytra"
+    ]
+   }
+  },
+  {
+   "label": "A8 Core Builders (1 slot gapples)",
+   "name": "core builders - discord.gg/corebuilders",
+   "treatAs": {},
+   "slots": [
+    "minecraft:enchanted_golden_apple",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "travel",
+    "code": "few_kinds",
+    "slots": 27,
+    "covered": 26,
+    "kinds": 1,
+    "need": 21,
+    "minKinds": 2,
+    "items": [
+     "minecraft:gunpowder"
+    ]
+   }
+  },
+  {
+   "label": "A8b Core Builders (8 slots gapples)",
+   "name": "core builders - discord.gg/corebuilders",
+   "treatAs": {},
+   "slots": [
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:gunpowder"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "travel",
+    "code": "mixed",
+    "slots": 27,
+    "covered": 19,
+    "kinds": 1,
+    "need": 21,
+    "minKinds": 2,
+    "items": [
+     "minecraft:gunpowder"
+    ]
+   }
+  },
+  {
+   "label": "A9 Etc",
+   "name": "etc",
+   "treatAs": {},
+   "slots": [
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:dirt",
+    "minecraft:dirt",
+    "minecraft:dirt",
+    "minecraft:rotten_flesh",
+    "minecraft:rotten_flesh",
+    "minecraft:string"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "mixed",
+    "slots": 13,
+    "covered": 3,
+    "kinds": 1,
+    "need": 10,
+    "minKinds": 3,
+    "items": [
+     "minecraft:totem_of_undying"
+    ]
+   }
+  },
+  {
+   "label": "B1 27 white concrete unnamed",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "building",
+    "code": "stock",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 1,
+    "items": [
+     "minecraft:white_concrete"
+    ]
+   }
+  },
+  {
+   "label": "B2 27 totems unnamed",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "stock",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 1,
+    "items": [
+     "minecraft:totem_of_undying"
+    ]
+   }
+  },
+  {
+   "label": "B3 10 totems unnamed",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "stock",
+    "slots": 10,
+    "covered": 10,
+    "kinds": 1,
+    "items": [
+     "minecraft:totem_of_undying"
+    ]
+   }
+  },
+  {
+   "label": "B4 named Bobs Cobble",
+   "name": "bob's cobble",
+   "treatAs": {},
+   "slots": [
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone"
+   ],
+   "expect": {
+    "kit": false,
+    "type": null,
+    "code": "stock_neutral",
+    "slots": 27,
+    "items": [
+     "minecraft:cobblestone"
+    ]
+   }
+  },
+  {
+   "label": "B5 named Obsidian",
+   "name": "obsidian",
+   "treatAs": {},
+   "slots": [
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "stock",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 1,
+    "items": [
+     "minecraft:obsidian"
+    ]
+   }
+  },
+  {
+   "label": "B6 Keenans Beacons, treatAs other (ignored)",
+   "name": "keenans beacons",
+   "treatAs": {
+    "keenans beacons": "other"
+   },
+   "slots": [
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon",
+    "minecraft:beacon"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "other",
+    "code": "stock",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 1,
+    "items": [
+     "minecraft:beacon"
+    ]
+   }
+  },
+  {
+   "label": "C1 1 elytra + 26 rockets",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:elytra",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "travel",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 2,
+    "items": [
+     "minecraft:firework_rocket",
+     "minecraft:elytra"
+    ]
+   }
+  },
+  {
+   "label": "C2 elytra pvp mix",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:elytra",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:firework_rocket",
+    "minecraft:ender_pearl",
+    "minecraft:ender_pearl",
+    "minecraft:ender_pearl",
+    "minecraft:ender_pearl",
+    "minecraft:netherite_helmet",
+    "minecraft:netherite_chestplate",
+    "minecraft:netherite_leggings",
+    "minecraft:netherite_boots",
+    "minecraft:netherite_sword",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:end_crystal"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "pvp",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 11,
+    "items": [
+     "minecraft:firework_rocket",
+     "minecraft:ender_pearl",
+     "minecraft:totem_of_undying"
+    ]
+   }
+  },
+  {
+   "label": "C3 starter",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:iron_helmet",
+    "minecraft:iron_chestplate",
+    "minecraft:iron_leggings",
+    "minecraft:iron_boots",
+    "minecraft:iron_sword",
+    "minecraft:iron_pickaxe",
+    "minecraft:iron_axe",
+    "minecraft:iron_shovel",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:torch",
+    "minecraft:torch",
+    "minecraft:crafting_table",
+    "minecraft:furnace",
+    "minecraft:white_bed"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "starter",
+    "code": "assortment",
+    "slots": 18,
+    "covered": 18,
+    "kinds": 14,
+    "items": [
+     "minecraft:bread",
+     "minecraft:cooked_beef",
+     "minecraft:torch"
+    ]
+   }
+  },
+  {
+   "label": "C4 food",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_beef",
+    "minecraft:golden_carrot",
+    "minecraft:golden_carrot",
+    "minecraft:golden_carrot",
+    "minecraft:golden_carrot",
+    "minecraft:golden_carrot",
+    "minecraft:golden_carrot",
+    "minecraft:golden_carrot",
+    "minecraft:golden_carrot",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:bread"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "farming",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 3,
+    "items": [
+     "minecraft:cooked_beef",
+     "minecraft:bread",
+     "minecraft:golden_carrot"
+    ]
+   }
+  },
+  {
+   "label": "C5 farming",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:wheat_seeds",
+    "minecraft:wheat_seeds",
+    "minecraft:wheat_seeds",
+    "minecraft:wheat_seeds",
+    "minecraft:wheat_seeds",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:wheat",
+    "minecraft:bone_meal",
+    "minecraft:bone_meal",
+    "minecraft:bone_meal",
+    "minecraft:bone_meal",
+    "minecraft:bone_meal",
+    "minecraft:bone_meal",
+    "minecraft:carrot",
+    "minecraft:carrot",
+    "minecraft:carrot",
+    "minecraft:potato",
+    "minecraft:potato",
+    "minecraft:potato"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "farming",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 5,
+    "items": [
+     "minecraft:wheat",
+     "minecraft:bone_meal",
+     "minecraft:wheat_seeds"
+    ]
+   }
+  },
+  {
+   "label": "C6 v1 junk",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:diamond_sword",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:dirt",
+    "minecraft:dirt",
+    "minecraft:dirt",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "mixed",
+    "slots": 10,
+    "covered": 1,
+    "kinds": 1,
+    "need": 8,
+    "minKinds": 3,
+    "items": [
+     "minecraft:diamond_sword"
+    ]
+   }
+  },
+  {
+   "label": "C7 Bobs Kit 50pct",
+   "name": "bob's kit",
+   "treatAs": {},
+   "slots": [
+    "minecraft:netherite_helmet",
+    "minecraft:netherite_chestplate",
+    "minecraft:netherite_leggings",
+    "minecraft:netherite_boots",
+    "minecraft:netherite_sword",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:dirt",
+    "minecraft:dirt"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "pvp",
+    "code": "named_assortment",
+    "slots": 10,
+    "covered": 5,
+    "kinds": 5,
+    "items": [
+     "minecraft:netherite_boots",
+     "minecraft:netherite_chestplate",
+     "minecraft:netherite_helmet"
+    ]
+   }
+  },
+  {
+   "label": "C7b same unnamed",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:netherite_helmet",
+    "minecraft:netherite_chestplate",
+    "minecraft:netherite_leggings",
+    "minecraft:netherite_boots",
+    "minecraft:netherite_sword",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:dirt",
+    "minecraft:dirt"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "mixed",
+    "slots": 10,
+    "covered": 5,
+    "kinds": 5,
+    "need": 8,
+    "minKinds": 3,
+    "items": [
+     "minecraft:netherite_boots",
+     "minecraft:netherite_chestplate",
+     "minecraft:netherite_helmet"
+    ]
+   }
+  },
+  {
+   "label": "C8 PvP name, junk",
+   "name": "pvp",
+   "treatAs": {},
+   "slots": [
+    "minecraft:totem_of_undying",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "mixed",
+    "slots": 10,
+    "covered": 1,
+    "kinds": 1,
+    "need": 5,
+    "minKinds": 3,
+    "items": [
+     "minecraft:totem_of_undying"
+    ]
+   }
+  },
+  {
+   "label": "C9 chessboard",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete",
+    "minecraft:black_concrete"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "building",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 2,
+    "items": [
+     "minecraft:black_concrete",
+     "minecraft:white_concrete"
+    ]
+   }
+  },
+  {
+   "label": "C10 Dye Kit",
+   "name": "dye kit",
+   "treatAs": {},
+   "slots": [
+    "minecraft:white_dye",
+    "minecraft:white_dye",
+    "minecraft:orange_dye",
+    "minecraft:orange_dye",
+    "minecraft:magenta_dye",
+    "minecraft:magenta_dye",
+    "minecraft:light_blue_dye",
+    "minecraft:light_blue_dye",
+    "minecraft:yellow_dye",
+    "minecraft:yellow_dye",
+    "minecraft:lime_dye",
+    "minecraft:lime_dye",
+    "minecraft:pink_dye",
+    "minecraft:pink_dye",
+    "minecraft:gray_dye",
+    "minecraft:gray_dye",
+    "minecraft:light_gray_dye",
+    "minecraft:light_gray_dye",
+    "minecraft:cyan_dye",
+    "minecraft:cyan_dye",
+    "minecraft:purple_dye",
+    "minecraft:purple_dye",
+    "minecraft:blue_dye",
+    "minecraft:brown_dye",
+    "minecraft:green_dye",
+    "minecraft:red_dye",
+    "minecraft:black_dye"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "building",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 16,
+    "items": [
+     "minecraft:cyan_dye",
+     "minecraft:gray_dye",
+     "minecraft:light_blue_dye"
+    ]
+   }
+  },
+  {
+   "label": "C11 random kit items",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:diamond_sword",
+    "minecraft:white_concrete",
+    "minecraft:white_concrete",
+    "minecraft:redstone",
+    "minecraft:redstone",
+    "minecraft:bread",
+    "minecraft:bread",
+    "minecraft:elytra",
+    "minecraft:beacon"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "starter",
+    "code": "mixed",
+    "slots": 9,
+    "covered": 3,
+    "kinds": 2,
+    "need": 7,
+    "minKinds": 3,
+    "items": [
+     "minecraft:bread",
+     "minecraft:diamond_sword"
+    ]
+   }
+  },
+  {
+   "label": "C12 kit, empty",
+   "name": "kit",
+   "treatAs": {},
+   "slots": [],
+   "expect": {
+    "kit": false,
+    "type": null,
+    "code": "empty",
+    "slots": 0
+   }
+  },
+  {
+   "label": "C13 boundary 9 of 12",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "pvp",
+    "code": "assortment",
+    "slots": 12,
+    "covered": 9,
+    "kinds": 3,
+    "items": [
+     "minecraft:end_crystal",
+     "minecraft:obsidian",
+     "minecraft:totem_of_undying"
+    ]
+   }
+  },
+  {
+   "label": "C13b boundary 8 of 12",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "mixed",
+    "slots": 12,
+    "covered": 8,
+    "kinds": 3,
+    "need": 9,
+    "minKinds": 3,
+    "items": [
+     "minecraft:end_crystal",
+     "minecraft:totem_of_undying",
+     "minecraft:obsidian"
+    ]
+   }
+  },
+  {
+   "label": "C14 armour only",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:diamond_helmet",
+    "minecraft:diamond_helmet",
+    "minecraft:diamond_chestplate",
+    "minecraft:diamond_chestplate",
+    "minecraft:diamond_leggings",
+    "minecraft:diamond_leggings",
+    "minecraft:diamond_boots",
+    "minecraft:diamond_boots"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "pvp",
+    "code": "assortment",
+    "slots": 8,
+    "covered": 8,
+    "kinds": 4,
+    "items": [
+     "minecraft:diamond_boots",
+     "minecraft:diamond_chestplate",
+     "minecraft:diamond_helmet"
+    ]
+   }
+  },
+  {
+   "label": "C14b armour, Starter Kit",
+   "name": "starter kit",
+   "treatAs": {},
+   "slots": [
+    "minecraft:diamond_helmet",
+    "minecraft:diamond_helmet",
+    "minecraft:diamond_chestplate",
+    "minecraft:diamond_chestplate",
+    "minecraft:diamond_leggings",
+    "minecraft:diamond_leggings",
+    "minecraft:diamond_boots",
+    "minecraft:diamond_boots"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "starter",
+    "code": "assortment",
+    "slots": 8,
+    "covered": 8,
+    "kinds": 4,
+    "items": [
+     "minecraft:diamond_boots",
+     "minecraft:diamond_chestplate",
+     "minecraft:diamond_helmet"
+    ]
+   }
+  },
+  {
+   "label": "C15 diamond tools",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:diamond_sword",
+    "minecraft:diamond_pickaxe",
+    "minecraft:diamond_axe",
+    "minecraft:diamond_shovel"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "starter",
+    "code": "assortment",
+    "slots": 4,
+    "covered": 4,
+    "kinds": 4,
+    "items": [
+     "minecraft:diamond_axe",
+     "minecraft:diamond_pickaxe",
+     "minecraft:diamond_shovel"
+    ]
+   }
+  },
+  {
+   "label": "C16 2 kinds of logs",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:oak_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log",
+    "minecraft:birch_log"
+   ],
+   "expect": {
+    "kit": false,
+    "type": null,
+    "code": "no_purpose",
+    "slots": 27,
+    "items": [
+     "minecraft:oak_log",
+     "minecraft:birch_log"
+    ]
+   }
+  },
+  {
+   "label": "C17 crystal kit",
+   "name": "crystal kit",
+   "treatAs": {},
+   "slots": [
+    "minecraft:netherite_helmet",
+    "minecraft:netherite_chestplate",
+    "minecraft:netherite_leggings",
+    "minecraft:netherite_boots",
+    "minecraft:netherite_sword",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:respawn_anchor",
+    "minecraft:respawn_anchor",
+    "minecraft:glowstone",
+    "minecraft:glowstone",
+    "minecraft:ender_pearl",
+    "minecraft:ender_pearl",
+    "minecraft:enchanted_golden_apple"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "pvp",
+    "code": "assortment",
+    "slots": 27,
+    "covered": 27,
+    "kinds": 12,
+    "items": [
+     "minecraft:end_crystal",
+     "minecraft:totem_of_undying",
+     "minecraft:obsidian"
+    ]
+   }
+  },
+  {
+   "label": "C18 Etc treatAs building",
+   "name": "etc",
+   "treatAs": {
+    "etc": "building"
+   },
+   "slots": [
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:dirt",
+    "minecraft:dirt",
+    "minecraft:dirt",
+    "minecraft:rotten_flesh",
+    "minecraft:rotten_flesh",
+    "minecraft:string"
+   ],
+   "expect": {
+    "kit": true,
+    "type": "building",
+    "code": "override",
+    "slots": 13,
+    "covered": 0,
+    "kinds": 0,
+    "items": []
+   }
+  },
+  {
+   "label": "C19 Crystal Kit treatAs none",
+   "name": "crystal kit",
+   "treatAs": {
+    "crystal kit": "none"
+   },
+   "slots": [
+    "minecraft:netherite_helmet",
+    "minecraft:netherite_chestplate",
+    "minecraft:netherite_leggings",
+    "minecraft:netherite_boots",
+    "minecraft:netherite_sword",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:end_crystal",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:obsidian",
+    "minecraft:respawn_anchor",
+    "minecraft:respawn_anchor",
+    "minecraft:glowstone",
+    "minecraft:glowstone",
+    "minecraft:ender_pearl",
+    "minecraft:ender_pearl",
+    "minecraft:enchanted_golden_apple"
+   ],
+   "expect": {
+    "kit": false,
+    "type": null,
+    "code": "override_none",
+    "slots": 27
+   }
+  },
+  {
+   "label": "C20 3 totems + cobble + dirt",
+   "name": null,
+   "treatAs": {},
+   "slots": [
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:totem_of_undying",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:cobblestone",
+    "minecraft:dirt",
+    "minecraft:dirt"
+   ],
+   "expect": {
+    "kit": false,
+    "type": "pvp",
+    "code": "mixed",
+    "slots": 8,
+    "covered": 3,
+    "kinds": 1,
+    "need": 6,
+    "minKinds": 3,
+    "items": [
+     "minecraft:totem_of_undying"
+    ]
+   }
+  }
+ ]
+}

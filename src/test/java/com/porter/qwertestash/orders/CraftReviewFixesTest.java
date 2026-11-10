@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 1.8.1: the fixes from the review of 1.8.0's crafting. */
 class CraftReviewFixesTest {
-    private static final Recipes R = Recipes.shipped();
+    private static final Recipes R = TestRecipes.table();
 
     @Test
     void onlyTheSlotsTheResultWentIntoAreKeptNeverASourceShulker() {

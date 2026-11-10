@@ -1,5 +1,6 @@
 package com.porter.qwertestash.orders;
 
+import com.google.gson.JsonObject;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -59,6 +60,75 @@ public final class OrderFlow {
 
         /** Plans a fresh order from what the stash holds now. */
         StockPlanner.Plan plan(Order order);
+
+        /**
+         * As {@link #plan(Order)}, with the loads of the order's craft lines (1.15.0) added to what is packed. A host that can't craft
+         * is never given any.
+         */
+        default StockPlanner.Plan plan(Order order, List<Order.Lot> craftLots) {
+            return plan(order);
+        }
+
+        /**
+         * The recipe table craft orders are carried out by, or null when this bot can't carry them out (1.15.0): none was fetched, or
+         * craft orders are off. Asked once, when the order is planned: the order keeps that table to its end.
+         */
+        default @Nullable Recipes craftTable() {
+            return null;
+        }
+
+        /** The most grid fills one craft order may make. */
+        default int craftMaxFills() {
+            return 0;
+        }
+
+        /**
+         * The units for the order's kit lines (1.16.0, KIT-CONTRACT v2): complete copies to fetch and kits to build, planned from what the stash
+         * holds now; null when this host cannot build kits (every kit is then short with template_mismatch).
+         */
+        default KitPlanner.@Nullable Plan planKit(Order order, int emptiesTaken) {
+            return null;
+        }
+
+        /**
+         * A kit unit was begun and will not be delivered or stored (cancelled, given up, or short and not nameable): the shulker, if the bot carries one
+         * with its items, is emptied and the items put back (KIT-CONTRACT v2 revision 4, step 4). Asked once per unit; the host finds the shulker.
+         */
+        default void kitEmptyBack(Unit unit) {
+        }
+
+        /** The stack size of an item (a namespaced id) for splitting a craft line into loads. */
+        default int maxStack(String id) {
+            return 64;
+        }
+
+        /**
+         * A plan was taken up again after a restart (1.15.0): the crafted loads of these units and the surplus the ledger saved, that are still
+         * carried, are set aside again (the host forgot which slots they were in). @return the surplus (by id) that is not carried any more:
+         * it is refunded to the budget
+         */
+        default Map<String, Long> craftResumed(List<Unit> units, Map<String, Long> surplus) {
+            return Map.of();
+        }
+
+        /** The order ends: these crafted stacks (by id) are carried and go back; the host watches them leave. */
+        default void craftWatch(Map<String, Long> carried) {
+        }
+
+        /** Some stack of the ones watched is still carried (the put-back is not over). */
+        default boolean craftReturning() {
+            return false;
+        }
+
+        /** What of the watched stacks is still carried, by id. */
+        default Map<String, Long> craftStillCarried() {
+            return Map.of();
+        }
+
+        /** The crafted surplus carried now (made by the order and not used), by id; given back when the order ends. */
+        default Map<String, Long> craftCarried() {
+            return Map.of();
+        }
 
         /** Whether the empty shulkers in the stash are enough for the units still to do; null if so, else why not. */
         @Nullable String checkEmpties(List<Unit> remaining);
@@ -139,7 +209,7 @@ public final class OrderFlow {
         }
     }
 
-    public sealed interface Intent permits Idle, Build, Fetch, Name, Deliver, Craft, Expand, Recheck {
+    public sealed interface Intent permits Idle, Build, Fetch, Name, Deliver, Craft, CraftLoads, Expand, Recheck {
     }
 
     /** Nothing for the host to do for the order now. */
@@ -173,6 +243,14 @@ public final class OrderFlow {
     }
 
     /**
+     * Make the craft loads of this bin (1.15.0): the first load flagged {@link Order.Lot#craft()} ({@link Unit#nextCraftLot}) is crafted
+     * (one chunk of it at a time, as many as the free carry slots allow) before the bin is built. The host reports {@link #craftLoadsStarted},
+     * then {@link #craftChunk} or {@link #craftLotShort}, or {@link #craftAbandon} when the table can't be used.
+     */
+    public record CraftLoads(Unit unit) implements Intent {
+    }
+
+    /**
      * Put another double chest up above the delivery storage (1.9.0) because every chest is full. The host reports nothing
      * back: what it did shows in {@link Host#deliveryRoom()} on the next step (room, or why not).
      */
@@ -189,7 +267,22 @@ public final class OrderFlow {
     public enum State { Running, Delivered, Failed, Cancelled }
 
     /** A snapshot of the order for the server. */
-    public record Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered) {
+    public record Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered,
+                         @Nullable JsonObject repair, @Nullable JsonObject craft, @Nullable JsonObject kit) {
+        public Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered,
+                      @Nullable JsonObject repair, @Nullable JsonObject craft) {
+            this(id, status, phase, done, total, message, shulkers, delivered, repair, craft, null);
+        }
+
+        public Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered,
+                      @Nullable JsonObject repair) {
+            this(id, status, phase, done, total, message, shulkers, delivered, repair, null, null);
+        }
+
+        public Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered) {
+            this(id, status, phase, done, total, message, shulkers, delivered, null, null, null);
+        }
+
         public boolean terminal() {
             return !status.equals("in_progress");
         }
@@ -213,6 +306,10 @@ public final class OrderFlow {
         public List<String> unnamedReasons = new ArrayList<>();
         /** Shulker boxes crafted for this order so far: they count towards its cap (1.8.0; 0 in older saves). */
         public int crafted;
+        /** The repair result so far (Repair.Report.toSaved as JSON text), or null for none / an older save (1.13.0). */
+        public @Nullable String repair;
+        /** The craft ledger so far (CraftLedger.toSaved as JSON text), or null for none / an older save (1.15.0). */
+        public @Nullable String craft;
 
         public static final class UnitSave {
             /** 0 Shulker, 1 Empty, 2 Bin. */
@@ -226,6 +323,13 @@ public final class OrderFlow {
             public boolean nameDone;
             public String nameFailure = "";
             public String namedKey = "";
+            /** Repaired items of this unit: "key now" and "key asked for" alternating (1.13.0; empty in older saves). */
+            public List<String> rekeys = new ArrayList<>();
+            /** Kit units (1.16.0; empty in older saves): the template id, the colour asked for and the base copy's group key; a ready copy; built short. */
+            public String kitTemplate = "", kitColor = "", kitBase = "";
+            public boolean kitReady, kitShort;
+            /** Per lot: 0 an ordinary load, 1 still to be crafted, 2 crafted (1.15.0; empty in older saves, which read as 0). */
+            public List<Integer> lotCraft = new ArrayList<>();
         }
     }
 
@@ -252,6 +356,10 @@ public final class OrderFlow {
     public static final int MAX_NAME_TRIES = 2;
     /** Craft trips for one unit before it is given up. */
     public static final int MAX_CRAFT_TRIES = 2;
+    /** The host is asked to craft a bin's loads for this long at most before they are given up on (it never started). */
+    public static final long CRAFT_START_WAIT_MS = 5 * 60 * 1000L;
+    /** Rounds (chunks) of crafting one bin may take. */
+    public static final int MAX_CRAFT_ROUNDS = 120;
     public static final String PLAIN_SHULKER = "minecraft:shulker_box";
     /** What a unit given up for want of an empty shulker says when crafting one did not work either. */
     public static final String NO_EMPTY_CRAFT = "no empty shulker; couldn't craft one: ";
@@ -269,6 +377,69 @@ public final class OrderFlow {
     private int unnamed;
     private final List<String> unnamedReasons = new ArrayList<>();
     private int crafted;
+    /** What the order asked to have repaired, and what came of it (1.13.0). Null when no line is wanted for repair. */
+    private Repair.@Nullable Report repair;
+    private java.util.Set<String> repairKeys = java.util.Set.of(), repairExplicit = java.util.Set.of();
+    /** What the order's kit lines have made (1.16.0). Null when the order has none. */
+    private @Nullable KitResult kitResult;
+    /** Kit units whose outcome is recorded already (delivered, released short, or given up). */
+    private final java.util.Set<Unit> kitSettled = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    /** The order in hand is a kit restock job (never reported to the server). */
+    public boolean isRestock() {
+        return order != null && order.restock;
+    }
+
+    /** The kit result so far, for the host (colour notes) and the report. */
+    public @Nullable KitResult kitResult() {
+        return kitResult;
+    }
+
+    /** "kit done/total: name" for the unit being worked on, or null when it is not a kit. */
+    private @Nullable String kitPhase() {
+        if (kitResult == null || index >= units.size()) return null;
+        Unit u = units.get(index);
+        if (u.kitTemplate == null) return null;
+        int total = 0, done = 0;
+        for (int i = 0; i < units.size(); i++) {
+            if (units.get(i).kitTemplate == null) continue;
+            total++;
+            if (i < index) done++;
+        }
+        String name = u.name == null ? "" : u.name;
+        return "kit " + (done + 1) + "/" + total + (name.isEmpty() ? "" : ": " + (name.length() > 40 ? name.substring(0, 40) : name));
+    }
+
+    /** A begun kit that is not a finished one: only these are taken apart (a complete kit is filed in its chain target like a restocked one). */
+    private static boolean emptiesBack(Unit u) {
+        return u.kitTemplate != null && !u.kitReady && u.begins > 0 && !(u.built && !u.kitShort);
+    }
+
+    /** The reason code of a kit given up on, from the words the flow and the host use for it. */
+    static String kitReasonOf(String why) {
+        String w = why == null ? "" : why.toLowerCase(java.util.Locale.ROOT);
+        if (w.contains("empty shulker") || w.contains("get a shulker")) return KitOrder.NO_SHULKER;
+        if (w.contains("carry room") || w.contains("inventory")) return KitOrder.INVENTORY_FULL;
+        if (w.contains("no headway") || w.contains("too many trips") || w.contains("held up") || w.contains("timed out")) return KitOrder.TIMEOUT;
+        if (w.contains("cancel")) return KitOrder.CANCELLED;
+        if (w.contains("not enough") || w.contains("no longer in the stash") || w.contains("nothing of it") || w.contains("none usable") || w.contains("no source")
+            || w.contains("couldn't take")) return KitOrder.ITEMS_SHORT;
+        return KitOrder.INTERRUPTED;
+    }
+
+    /** A kit unit has its outcome: true only the first time. */
+    private boolean settleKit(Unit u) {
+        return u.kitTemplate != null && kitResult != null && kitSettled.add(u);
+    }
+
+    /** What the order's craft lines have done (1.15.0). Null when the order has none. */
+    private @Nullable CraftLedger craftLedger;
+    /** When an order with craft lines ends, what is carried of it goes back: the report waits (a little) for that to be over. */
+    private Map<String, Long> returnPlanned = Map.of();
+    private long returnSince;
+    private boolean returnSettled = true;
+    /** The longest the final report waits for crafted items to be put back. */
+    public static final long RETURN_WAIT_MS = 90_000L;
     private String message = "";
     private String phase = "starting";
     private boolean cancelRequested, parked, planned, full;
@@ -350,6 +521,7 @@ public final class OrderFlow {
         Order o = order;
         if (o == null) return null;
         String id = OrderDriver.shortId(o.id);
+        if (o.restock) return state == State.Running ? "Kit restock: " + phase : "Kit restock: " + state.name().toLowerCase();
         return state == State.Running ? id + ": " + phase + " (" + Math.min(index, units.size()) + "/" + units.size() + " shulkers)" : id + ": " + state.name().toLowerCase();
     }
 
@@ -358,6 +530,7 @@ public final class OrderFlow {
         Order o = order;
         if (o == null) return null;
         String id = OrderDriver.shortId(o.id);
+        if (o.restock) return state == State.Running ? "Kit restock: " + phase : "Kit restock " + state.name().toLowerCase();
         return state == State.Running ? "Order " + id + ": " + phase : "Order " + id + " " + state.name().toLowerCase();
     }
 
@@ -404,6 +577,11 @@ public final class OrderFlow {
         unnamed = 0;
         unnamedReasons.clear();
         crafted = 0;
+        repair = null;
+        craftLedger = null;
+        returnPlanned = Map.of();
+        returnSettled = true;
+        repairKeys = repairExplicit = java.util.Set.of();
         cancelRequested = parked = planned = full = false;
         pausedSince = buildPausedSince = spaceWaitSince = spinHoldUntil = 0;
         lastWaitWhy = null;
@@ -420,7 +598,7 @@ public final class OrderFlow {
      */
     public @Nullable String offer(Order o) {
         if (order != null) return order.id.equals(o.id) ? null : "already working on another order";
-        if (!host.deliverySet()) return "no delivery container is set";
+        if (!host.deliverySet() && !o.restock) return "no delivery container is set";
 
         order = o;
         state = State.Running;
@@ -432,6 +610,12 @@ public final class OrderFlow {
         unnamed = 0;
         unnamedReasons.clear();
         crafted = 0;
+        repairKeys = o.repairKeys();
+        repairExplicit = o.repairExplicitKeys();
+        repair = repairKeys.isEmpty() ? null : new Repair.Report();
+        craftLedger = null;
+        kitResult = null;
+        kitSettled.clear();
         message = "";
         cancelRequested = parked = planned = full = false;
         pausedSince = buildPausedSince = spaceWaitSince = spinHoldUntil = 0;
@@ -462,6 +646,18 @@ public final class OrderFlow {
         Saved saved = host.saved(o.id);
         List<String> notes = new ArrayList<>();
         boolean resumed = saved != null && !saved.units.isEmpty();
+        List<Order.Lot> craftLots = List.of();
+        if (o.hasCraft() && craftLedger == null) {
+            craftLedger = startCraft(o);
+            if (!resumed) {
+                List<Order.Lot> made = craftLotsOf(o, craftLedger);
+                if (made == null) {
+                    host.say("The order's craft lines are cut into more than " + CraftOrder.MAX_LOTS + " loads: not crafted.");
+                    craftLedger = CraftLedger.refused(o.craftLines(), craftLedger.table(), craftLedger.maxFills(), CraftOrder.RECIPE_MISMATCH);
+                }
+                else craftLots = made;
+            }
+        }
 
         if (resumed) {
             for (Saved.UnitSave p : saved.units) {
@@ -476,6 +672,23 @@ public final class OrderFlow {
                 u.nameDone = p.nameDone;
                 u.nameFailure = p.nameFailure == null || p.nameFailure.isEmpty() ? null : p.nameFailure;
                 u.namedKey = p.namedKey == null || p.namedKey.isEmpty() ? null : p.namedKey;
+                if (p.kitTemplate != null && !p.kitTemplate.isEmpty()) {
+                    u.kitTemplate = p.kitTemplate;
+                    u.kitReady = p.kitReady;
+                    u.kitShort = p.kitShort;
+                    u.kitColor = p.kitColor == null || p.kitColor.isEmpty() ? null : p.kitColor;
+                    u.kitBase = p.kitBase == null || p.kitBase.isEmpty() ? null : p.kitBase;
+                }
+                if (p.lotCraft != null) {
+                    for (int i = 0; i < u.lots.size() && i < p.lotCraft.size(); i++) {
+                        Integer c = p.lotCraft.get(i);
+                        if (c != null && (c == Order.Lot.PENDING || c == Order.Lot.CRAFTED)) {
+                            Order.Lot lot = u.lots.get(i);
+                            u.lots.set(i, new Order.Lot(lot.key(), lot.variant(), lot.count(), c));
+                        }
+                    }
+                }
+                if (p.rekeys != null) for (int i = 0; i + 1 < p.rekeys.size(); i += 2) u.rekeys.add(new String[] {p.rekeys.get(i), p.rekeys.get(i + 1)});
                 plan.add(u);
             }
             start = Math.min(saved.done, plan.size());
@@ -485,7 +698,7 @@ public final class OrderFlow {
                 Unit u = plan.get(start);
                 u.have = true;
                 u.base = saved.deliveringBase;
-                u.content = u.kind == Unit.Kind.Bin ? BinTracker.lotTotals(u.lots) : Map.of(u.key, 1);
+                u.content = u.kitTemplate != null ? Map.of(u.kitTemplate, 1) : u.kind == Unit.Kind.Bin ? Repair.translate(BinTracker.lotTotals(u.lots), u.rekeys) : Map.of(u.key, 1);
             }
             // What was delivered before counts even if the rest cannot be done now
             shulkersDelivered = saved.shulkersDelivered;
@@ -493,14 +706,42 @@ public final class OrderFlow {
             unnamed = saved.unnamed;
             if (saved.unnamedReasons != null) unnamedReasons.addAll(saved.unnamedReasons);
             crafted = Math.max(0, saved.crafted);
+            if (repair != null && saved.repair != null) {
+                try {
+                    repair = Repair.Report.fromSaved(com.google.gson.JsonParser.parseString(saved.repair).getAsJsonObject());
+                } catch (RuntimeException e) {
+                    // A broken record is a fresh one: repairing never holds an order up
+                }
+            }
+            if (craftLedger != null && saved.craft != null) {
+                try {
+                    craftLedger.restore(com.google.gson.JsonParser.parseString(saved.craft).getAsJsonObject());
+                } catch (RuntimeException e) {
+                    // A broken record is a fresh ledger: the order goes on with its full budget
+                }
+            }
         }
         else {
-            StockPlanner.Plan fresh = host.plan(o);
-            if (fresh.failure() != null) return fresh.failure();
+            StockPlanner.Plan fresh = craftLots.isEmpty() ? host.plan(o) : host.plan(o, craftLots);
+            KitPlanner.Plan kitPlan = o.hasKit() ? kitPlanOf(o, fresh) : null;
+            boolean kitUnits = kitPlan != null && !kitPlan.units().isEmpty();
+            // An order of kit lines alone has no other unit: the stock planner's "nothing to deliver" is not a failure then
+            if (fresh.failure() != null && !(kitUnits && fresh.failure().equals("nothing to deliver"))) {
+                // An order that is only craft lines this bot can't craft fails with the reason, not just "nothing to deliver"
+                String note = craftLedger == null ? null : craftLedger.note();
+                return note == null || fresh.failure().contains(note) ? fresh.failure() : cutTo(fresh.failure(), MESSAGE_MAX - note.length() - 2) + "; " + note;
+            }
             plan.addAll(fresh.units());
             notes.addAll(fresh.notes());
-            // The i-th shulker of the plan (shulker lines, then empty shulkers, then bins) gets the i-th name
-            if (o.names != null) for (int i = 0; i < plan.size(); i++) plan.get(i).name = o.names.nameFor(i);
+            // Kit units go after the shulker and empty-shulker lines and before the packed bins (ready copies first within them)
+            if (kitPlan != null) {
+                int at = 0;
+                while (at < plan.size() && plan.get(at).kind != Unit.Kind.Bin) at++;
+                plan.addAll(at, kitPlan.units());
+                notes.addAll(kitPlan.notes());
+            }
+            // The i-th shulker of the plan (shulker lines, then empty shulkers, then bins) gets the i-th name; kit units are named for their template
+            if (o.names != null) for (int i = 0; i < plan.size(); i++) if (plan.get(i).kitTemplate == null) plan.get(i).name = o.names.nameFor(i);
         }
 
         String why = host.checkEmpties(new ArrayList<>(plan.subList(start, plan.size())));
@@ -512,6 +753,15 @@ public final class OrderFlow {
         problems.addAll(notes);
         planned = true;
         phase = "starting";
+        // A resumed order whose craft lines can't be carried out now (the table is gone, the check fails): what is left to craft is short
+        if (resumed && craftLedger != null && craftLedger.refusedAtStart()) craftAbandon(CraftOrder.RECIPE_MISMATCH);
+        if (resumed && craftLedger != null) {
+            Map<String, Long> gone = host.craftResumed(new ArrayList<>(units.subList(Math.min(start, units.size()), units.size())), craftLedger.savedSurplus());
+            if (!gone.isEmpty()) {
+                craftLedger.refund(gone);
+                saveCraft(null);
+            }
+        }
 
         if (!resumed) {
             Saved s = new Saved();
@@ -527,12 +777,203 @@ public final class OrderFlow {
                     p.lotCounts.add(lot.count());
                 }
                 p.name = u.name == null ? "" : u.name;
+                if (u.kitTemplate != null) {
+                    p.kitTemplate = u.kitTemplate;
+                    p.kitReady = u.kitReady;
+                    p.kitShort = u.kitShort;
+                    p.kitColor = u.kitColor == null ? "" : u.kitColor;
+                    p.kitBase = u.kitBase == null ? "" : u.kitBase;
+                }
+                for (Order.Lot lot : u.lots) p.lotCraft.add(lot.craftState());
                 s.units.add(p);
             }
+            if (craftLedger != null) s.craft = craftLedger.toSaved().toString();
             host.save(s);
         }
-        host.say("Taking order " + o.id + ": " + (units.size() - index) + " shulkers to deliver" + (index > 0 ? ", " + index + " already done." : "."));
+        if (o.restock) host.say("Kit restock: " + (units.size() - index) + " kit to build.");
+        else host.say("Taking order " + o.id + ": " + (units.size() - index) + " shulkers to deliver" + (index > 0 ? ", " + index + " already done." : "."));
         return null;
+    }
+
+    // Kit orders (1.16.0, KIT-CONTRACT v2 "Kit orders")
+
+    /**
+     * Step 1 and the planning of the kit lines. The check comes before any click: a block that is not a valid snapshot makes every kit short with
+     * template_mismatch (the rest of the order goes on). Null when there is nothing to build.
+     */
+    private KitPlanner.@Nullable Plan kitPlanOf(Order o, StockPlanner.Plan fresh) {
+        KitOrder.Snapshot snap = o.kit;
+        kitResult = new KitResult();
+        if (snap != null) for (KitOrder.Line l : snap.lines()) kitResult.line(l.template().id(), l.template().name(), l.count());
+        String bad = KitOrder.check(snap, host::maxStack);
+        int taken = 0;
+        for (Unit u : fresh.units()) if (u.kind == Unit.Kind.Bin || u.kind == Unit.Kind.Empty) taken++;
+        KitPlanner.Plan plan = bad != null || snap == null ? null : host.planKit(o, taken);
+        if (plan == null) {
+            if (bad == null && snap != null) bad = "this bot cannot build kits";
+            for (Order.Line l : o.kitLines()) kitResult.addShort(l.key(), l.count(), List.of(), KitOrder.TEMPLATE_MISMATCH, null);
+            if (bad != null) problems.add("kits: " + bad);
+            return null;
+        }
+        for (Unit u : plan.units()) if (u.kitReady) kitResult.ready(u.kitTemplate);
+        for (KitResult.Short s : plan.shorts()) kitResult.addShort(s.template(), s.kits(), s.items(), s.reason(), s.stored());
+        return plan;
+    }
+
+    // Craft orders (1.15.0, CRAFT-CONTRACT.md "Bot execution")
+
+    /**
+     * The ledger of a craft order: with the order's craft block checked against the bot's own recipe table ({@link CraftOrder#check}) before
+     * anything is clicked. When the bot can't carry the order out (no table fetched, craft orders off, the check failed) every craft line is
+     * short with {@link CraftOrder#RECIPE_MISMATCH} and nothing is crafted; the rest of the order goes on.
+     */
+    private CraftLedger startCraft(Order o) {
+        Recipes table = host.craftTable();
+        List<Order.Line> lines = o.craftLines();
+        if (table == null) {
+            host.say("This order has craft lines but this bot has no recipe table or craft orders are off: they are not crafted.");
+            return CraftLedger.refused(lines, Recipes.empty(), 0, CraftOrder.RECIPE_MISMATCH);
+        }
+        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills());
+        if (bad != null) {
+            host.say("The order's craft lines are not crafted: " + bad + ".");
+            return CraftLedger.refused(lines, table, host.craftMaxFills(), CraftOrder.RECIPE_MISMATCH);
+        }
+        return new CraftLedger(o.craft, lines, table, host.craftMaxFills());
+    }
+
+    /** The loads of the craft lines (merged per key, cut into stacks), none when the ledger has every line short already. */
+    private @Nullable List<Order.Lot> craftLotsOf(Order o, CraftLedger ledger) {
+        List<Order.Lot> out = new ArrayList<>();
+        if (ledger.shortTotal() > 0) return out;
+        Map<String, Long> byKey = new LinkedHashMap<>();
+        for (Order.Line l : o.craftLines()) byKey.merge(l.key(), (long) l.count(), Long::sum);
+        // Counted before anything is made: a huge line must not allocate its loads
+        long loads = 0;
+        for (var e : byKey.entrySet()) loads += (e.getValue() + Math.max(1, host.maxStack(e.getKey())) - 1) / Math.max(1, host.maxStack(e.getKey()));
+        if (loads > CraftOrder.MAX_LOTS) return null;
+        for (var e : byKey.entrySet()) {
+            int max = Math.max(1, host.maxStack(e.getKey()));
+            for (Order.Lot lot : Order.expand(e.getKey(), (int) (long) e.getValue(), max)) out.add(Order.Lot.toCraft(lot.key(), lot.count()));
+        }
+        return out;
+    }
+
+    /** The order's craft ledger, or null when it has no craft lines. */
+    public @Nullable CraftLedger craftLedger() {
+        return craftLedger;
+    }
+
+    /**
+     * The index of the load of this bin to craft next: of the loads still to craft the one whose craft line comes first in the order (the
+     * server planned the lines in that order, so the shared surplus and the budget go the way it planned), else the first in the bin. -1 for none.
+     */
+    public int nextCraftLot(Unit u) {
+        CraftLedger l = craftLedger;
+        int best = -1, bestRank = Integer.MAX_VALUE;
+        for (int i = 0; i < u.lots.size(); i++) {
+            Order.Lot lot = u.lots.get(i);
+            if (!lot.craft()) continue;
+            int rank = l == null ? 0 : l.rank(lot.key());
+            if (best < 0 || rank < bestRank) {
+                best = i;
+                bestRank = rank;
+            }
+        }
+        return best;
+    }
+
+    /** The host is starting a round of crafting for this bin (counted: a host that never finishes one does not hold the order). */
+    public void craftLoadsStarted(Unit u) {
+        u.craftLoadsWaitSince = 0;
+        u.craftLoadRounds++;
+    }
+
+    /** "crafting 3/11 fills: Spruce Stairs": the phase while a craft load is made; {@code extra} counts fills made in the chunk under way. */
+    public String craftPhase(String key, long extra) {
+        CraftLedger l = craftLedger;
+        long done = (l == null ? 0 : l.fills()) + Math.max(0, extra);
+        long total = Math.max(done, l == null ? 0 : l.plannedFills());
+        return "crafting " + done + "/" + total + " fills: " + Recipes.pretty(key);
+    }
+
+    /**
+     * A chunk of the craft load at {@code index} was made: {@code made} of its items are in hand, as stacks of exactly the sizes the bin
+     * expects, and it took {@code fillsMade} grid fills and {@code fromStock} from the stash. A load that came out smaller keeps the rest
+     * to be crafted when {@code reason} is null, else the rest is short with that reason. With 0 made and no reason nothing changes (a
+     * try cut short, to be made again).
+     */
+    public void craftChunk(Unit u, int index, int made, long fillsMade, Map<String, Long> fromStock, @Nullable String reason) {
+        CraftLedger l = craftLedger;
+        if (l == null || index < 0 || index >= u.lots.size() || !u.lots.get(index).craft()) return;
+        Order.Lot lot = u.lots.get(index);
+        int m = Math.max(0, Math.min(made, lot.count()));
+        l.madeChunk(lot.key(), m, fillsMade, fromStock);
+        if (m >= lot.count()) u.lots.set(index, lot.made());
+        else if (m > 0) {
+            u.lots.set(index, lot.withCount(m).made());
+            // The rest is another load of the bin; a shulker holds 27 stacks, so with no slot left for it the rest is short
+            if (reason == null && u.lots.size() < Order.SLOTS) u.lots.add(index + 1, lot.withCount(lot.count() - m));
+            else l.addShort(lot.key(), lot.count() - m, reason == null ? CraftOrder.INVENTORY_FULL : reason);
+        }
+        else if (reason != null) {
+            u.lots.remove(index);
+            l.addShort(lot.key(), lot.count(), reason);
+        }
+        saveCraft(u);
+    }
+
+    /** The craft load at {@code index} can't be made: it is short with this reason, and the bin goes on without it. */
+    public void craftLotShort(Unit u, int index, String reason) {
+        CraftLedger l = craftLedger;
+        if (l == null || index < 0 || index >= u.lots.size() || !u.lots.get(index).craft()) return;
+        Order.Lot lot = u.lots.remove(index);
+        l.addShort(lot.key(), lot.count(), reason);
+        saveCraft(u);
+    }
+
+    /** Crafting can't go on at all (no table, the block is no table, it can't be reached): every craft load still to make is short with this reason. */
+    public void craftAbandon(String reason) {
+        CraftLedger l = craftLedger;
+        if (l == null) return;
+        for (Unit u : units) {
+            for (int i = u.lots.size() - 1; i >= 0; i--) {
+                Order.Lot lot = u.lots.get(i);
+                if (!lot.craft()) continue;
+                u.lots.remove(i);
+                l.addShort(lot.key(), lot.count(), reason);
+            }
+        }
+        saveCraft(null);
+    }
+
+    /** The ledger changed outside a chunk (a refund): it is written to the saved plan. */
+    public void craftLedgerChanged() {
+        saveCraft(null);
+    }
+
+    /** The unit's lots and the ledger are written to the saved plan, so a restart carries on from here. */
+    private void saveCraft(@Nullable Unit changed) {
+        Order o = order;
+        Saved s = o == null ? null : host.saved(o.id);
+        if (s == null) return;
+        for (int at = 0; at < units.size() && at < s.units.size(); at++) {
+            Unit u = units.get(at);
+            if (changed != null && changed != u) continue;
+            Saved.UnitSave p = s.units.get(at);
+            p.lotKeys.clear();
+            p.lotVariants.clear();
+            p.lotCounts.clear();
+            p.lotCraft.clear();
+            for (Order.Lot lot : u.lots) {
+                p.lotKeys.add(lot.key());
+                p.lotVariants.add(lot.variant() == null ? "" : lot.variant());
+                p.lotCounts.add(lot.count());
+                p.lotCraft.add(lot.craftState());
+            }
+        }
+        if (craftLedger != null) s.craft = craftLedger.toSaved().toString();
+        host.save(s);
     }
 
     /** The server wants this order stopped. It is acted on at the next safe point. */
@@ -560,6 +1001,13 @@ public final class OrderFlow {
     /** The saved order the server should be asked about again, or null. */
     public @Nullable String resumeId() {
         return host.savedId();
+    }
+
+    /** The saved order has craft lines (its ledger is saved with it). */
+    public boolean resumeHasCraft() {
+        String id = host.savedId();
+        Saved s = id == null ? null : host.saved(id);
+        return s != null && s.craft != null;
     }
 
     /** Drops saved state of an order the server no longer holds for this bot. */
@@ -595,8 +1043,99 @@ public final class OrderFlow {
             case Failed -> "failed";
             case Cancelled -> "cancelled";
         };
-        String shown = state == State.Running && host.rereading() ? "re-reading containers" : phase;
-        return new Report(order.id, status, shown, Math.min(index, units.size()), units.size(), message, shulkersDelivered, new LinkedHashMap<>(delivered));
+        // An ended craft order reports once its crafted leftovers are put back (at most RETURN_WAIT_MS), so result.craft.returned is what went
+        // back, not what was meant to
+        if (state != State.Running && craftLedger != null && !returnSettled) {
+            if (host.craftReturning() && now - returnSince < RETURN_WAIT_MS) {
+                return new Report(order.id, "in_progress", "putting crafted items back", Math.min(index, units.size()), units.size(), message, shulkersDelivered,
+                    new LinkedHashMap<>(delivered), repair == null ? null : repair.toJson(), null);
+            }
+            Map<String, Long> still = host.craftStillCarried(), back = new LinkedHashMap<>();
+            for (var e : returnPlanned.entrySet()) {
+                long n = e.getValue() - Math.max(0, still.getOrDefault(e.getKey(), 0L));
+                if (n > 0) back.put(e.getKey(), n);
+            }
+            craftLedger.setReturned(back);
+            returnSettled = true;
+        }
+        String kp = state == State.Running ? kitPhase() : null;
+        String shown = state == State.Running && host.rereading() ? "re-reading containers" : kp != null && !phase.startsWith("paused") ? kp : phase;
+        JsonObject kitJson = kitResult == null || !kitResult.any() ? null : kitResult.toJson();
+        return new Report(order.id, status, shown, Math.min(index, units.size()), units.size(), message, shulkersDelivered, new LinkedHashMap<>(delivered),
+            repair == null ? null : repair.toJson(), craftLedger == null || !craftLedger.any() ? null : craftLedger.toResult(), kitJson);
+    }
+
+    // Repair (1.13.0, REPAIR-CONTRACT.md)
+
+    /** The keys of the item lines wanted for repair (none when the order did not ask for any). */
+    public java.util.Set<String> repairKeys() {
+        return running() ? repairKeys : java.util.Set.of();
+    }
+
+    /** The keys of the lines that asked for repair themselves; the others are wanted only when damaged (contract v1.2). */
+    public java.util.Set<String> repairExplicitKeys() {
+        return running() ? repairExplicit : java.util.Set.of();
+    }
+
+    /** The repair result of the order so far, or null when nothing is wanted for repair. The host fills it in; {@link #repairChanged} saves it. */
+    public Repair.@Nullable Report repairReport() {
+        return repair;
+    }
+
+    /** The host changed the repair result: it is saved with the plan, so a restart keeps it. */
+    public void repairChanged() {
+        Order o = order;
+        Saved s = o == null || repair == null ? null : host.saved(o.id);
+        if (s == null) return;
+        s.repair = repair.toSaved().toString();
+        host.save(s);
+    }
+
+    /**
+     * A repaired item of this bin has another key now (its damage is part of it). The lot that was asked for under the old key
+     * and variant takes the new ones, so the stack still matches the bin, and the shulker's content is counted back to the key
+     * the order asked for. Saved with the plan.
+     * @return false when the unit has no such lot
+     */
+    public boolean rekey(Unit u, String oldKey, @Nullable String oldVariant, String newKey, @Nullable String newVariant) {
+        int at = -1;
+        for (int i = 0; i < u.lots.size(); i++) {
+            Order.Lot lot = u.lots.get(i);
+            if (lot.key().equals(oldKey) && (oldVariant == null || lot.variant() == null || lot.variant().equals(oldVariant))) {
+                at = i;
+                break;
+            }
+        }
+        if (at < 0) return false;
+        Order.Lot lot = u.lots.get(at);
+        // What the order asked for: the key before any earlier repair of this item
+        String asked = oldKey;
+        for (int i = u.rekeys.size() - 1; i >= 0; i--) {
+            if (u.rekeys.get(i)[0].equals(oldKey)) {
+                asked = u.rekeys.get(i)[1];
+                u.rekeys.remove(i);
+                break;
+            }
+        }
+        u.lots.set(at, new Order.Lot(newKey, newVariant, lot.count()));
+        if (!newKey.equals(asked)) u.rekeys.add(new String[] {newKey, asked});
+        Order o = order;
+        Saved s = o == null ? null : host.saved(o.id);
+        int unit = units.indexOf(u);
+        if (s != null && unit >= 0 && unit < s.units.size()) {
+            Saved.UnitSave p = s.units.get(unit);
+            if (at < p.lotKeys.size()) {
+                p.lotKeys.set(at, newKey);
+                p.lotVariants.set(at, newVariant == null ? "" : newVariant);
+            }
+            p.rekeys.clear();
+            for (String[] r : u.rekeys) {
+                p.rekeys.add(r[0]);
+                p.rekeys.add(r[1]);
+            }
+            host.save(s);
+        }
+        return true;
     }
 
     // Reports from the host
@@ -642,6 +1181,7 @@ public final class OrderFlow {
     /** The bin's finished shulker exists. */
     public void built(Unit u) {
         u.built = true;
+        if (u.kitTemplate != null && kitResult != null && !u.kitShort) kitResult.built(u.kitTemplate);
     }
 
     /**
@@ -651,6 +1191,23 @@ public final class OrderFlow {
      */
     public void builtShort(Unit u, List<Order.Lot> packed, String reason) {
         if (packed.isEmpty()) return;
+        if (u.kitTemplate != null) {
+            // A kit that cannot be completed is never delivered (it is named and kept when it holds two kinds, see next()); what it lacks is listed
+            Map<String, Integer> have = BinTracker.lotTotals(packed);
+            u.kitMissing.clear();
+            for (Order.Lot lot : u.lots) {
+                int got = have.getOrDefault(lot.key(), 0);
+                int lack = Math.max(0, lot.count() - got);
+                have.put(lot.key(), Math.max(0, got - lot.count()));
+                if (lack > 0) u.kitMissing.add(new KitResult.Miss(lot.key(), lot.key(), lack));
+            }
+            u.lots.clear();
+            u.lots.addAll(packed);
+            u.kitShort = true;
+            u.built = true;
+            problems.add("kit " + (units.indexOf(u) + 1) + " built short: " + reason);
+            return;
+        }
         u.lots.clear();
         u.lots.addAll(packed);
         u.built = true;
@@ -699,6 +1256,11 @@ public final class OrderFlow {
     public void skip(String why) {
         skips++;
         problems.add(why);
+        if (index < units.size()) {
+            Unit ku = units.get(index);
+            if (settleKit(ku)) kitResult.addShort(ku.kitTemplate, 1, ku.kitMissing, kitReasonOf(why), null);
+            if (emptiesBack(ku)) host.kitEmptyBack(ku);
+        }
         advance();
     }
 
@@ -749,7 +1311,8 @@ public final class OrderFlow {
                 return new Idle();
             }
 
-            String problem = host.deliverySet() ? host.deliveryProblem() : "the delivery container is gone";
+            // A restock job delivers nothing: the sorter files its kit
+            String problem = order != null && order.restock ? null : host.deliverySet() ? host.deliveryProblem() : "the delivery container is gone";
             if (problem != null) {
                 finish(shulkersDelivered > 0 ? State.Delivered : State.Failed, problem);
                 return new Idle();
@@ -761,15 +1324,29 @@ public final class OrderFlow {
             if (slot != -1) {
                 if (!u.have) {
                     u.have = true;
-                    u.content = new HashMap<>(host.contentOf(u, slot));
+                    u.content = new HashMap<>(Repair.translate(host.contentOf(u, slot), u.rekeys));
                 }
                 // Back in the inventory: whatever was seen in the container was not it
                 u.confirmed = false;
                 u.verifying = false;
                 // Named first, if the order wants a name on it; naming never holds the order up
-                if (u.name != null && !u.nameDone && u.nameFailure == null) {
+                if (u.name != null && !u.nameDone && u.nameFailure == null && !(u.kitShort && KitPlanner.kinds(u.lots) < 2)) {
                     Name name = naming(u, slot);
                     if (name != null) return name;
+                }
+                // A kit that cannot be completed is never delivered: named and kept (the sorter files it as an incomplete copy) when it holds two kinds,
+                // else reported short and left to the put-back
+                if (u.kitTemplate != null && (u.kitShort || (order != null && order.restock))) {
+                    if (u.kitShort) {
+                        boolean store = u.nameDone && KitPlanner.kinds(u.lots) >= 2;
+                        // Not stored: the shulker is emptied and its items put back, never left mixed for the generic sorter
+                        if (!store) host.kitEmptyBack(u);
+                        if (settleKit(u)) kitResult.addShort(u.kitTemplate, 1, u.kitMissing, KitOrder.ITEMS_SHORT, store ? KitResult.STORED_INCOMPLETE : KitResult.STORED_RETURNED);
+                    }
+                    else settleKit(u);
+                    // The kit (complete, or an incomplete copy) stays carried, named: the sorter files it in its chain target
+                    advance();
+                    continue;
                 }
                 if (full) {
                     full = false;
@@ -841,6 +1418,7 @@ public final class OrderFlow {
                 // It left the inventory: it counts only if the delivery container was seen to hold it
                 if (u.confirmed) {
                     for (var e : u.content.entrySet()) delivered.merge(e.getKey(), e.getValue(), Integer::sum);
+                    if (settleKit(u)) kitResult.delivered(u.kitTemplate);
                     shulkersDelivered++;
                     countUnnamed(u);
                     advance();
@@ -874,6 +1452,22 @@ public final class OrderFlow {
                     return new Idle();
                 }
                 buildPausedSince = 0;
+                // Its craft loads (1.15.0) are made first, a chunk at a time; what can't be made is short and the bin goes on without it
+                if (craftLedger != null && u.nextCraftLot() >= 0) {
+                    long now = clock.getAsLong();
+                    if (u.craftLoadsWaitSince == 0) u.craftLoadsWaitSince = now;
+                    if (now - u.craftLoadsWaitSince > CRAFT_START_WAIT_MS || u.craftLoadRounds >= MAX_CRAFT_ROUNDS) {
+                        for (int i = u.lots.size() - 1; i >= 0; i--) if (u.lots.get(i).craft()) craftLotShort(u, i, CraftOrder.TIMEOUT);
+                        continue;
+                    }
+                    phase = craftPhase(u.lots.get(nextCraftLot(u)).key(), 0);
+                    return new CraftLoads(u);
+                }
+                // Nothing of it could be made, and it has nothing else: no shulker is built, and no reason is added (the craft note has it)
+                if (u.lots.isEmpty()) {
+                    advance();
+                    continue;
+                }
                 // No empty shulker for it: one is crafted first, when crafting is on
                 if (host.craftingOn() && !host.emptyAvailable(u)) {
                     Craft c = crafting(u);
@@ -1027,6 +1621,7 @@ public final class OrderFlow {
             s.unnamed = unnamed;
             s.unnamedReasons = new ArrayList<>(unnamedReasons);
             s.crafted = crafted;
+            if (repair != null) s.repair = repair.toSaved().toString();
             host.save(s);
         }
     }
@@ -1042,7 +1637,7 @@ public final class OrderFlow {
             if (got < e.getValue()) shortLines.add(e.getKey() + " " + got + "/" + e.getValue());
         }
 
-        boolean anything = shulkersDelivered > 0;
+        boolean anything = shulkersDelivered > 0 || o.restock;
         // The unnamed note is added by finish, at the end and whole
         finish(anything ? State.Delivered : State.Failed, endNote(anything, problems, shortLines));
     }
@@ -1094,9 +1689,21 @@ public final class OrderFlow {
      * MESSAGE_MAX.
      */
     static String withNotes(String text, @Nullable String unnamedNote, @Nullable String craftedNote) {
+        return withNotes(text, unnamedNote, craftedNote, null);
+    }
+
+    /** As above, and the note about items not fully repaired (1.13.0) after them. */
+    static String withNotes(String text, @Nullable String unnamedNote, @Nullable String craftedNote, @Nullable String repairNote) {
+        return withNotes(text, unnamedNote, craftedNote, repairNote, null);
+    }
+
+    /** As above, and the note about craft lines not crafted (1.15.0) last: "<n> item(s) not crafted: <reasons>". */
+    static String withNotes(String text, @Nullable String unnamedNote, @Nullable String craftedNote, @Nullable String repairNote, @Nullable String craftOrderNote) {
         List<String> tail = new ArrayList<>();
         if (unnamedNote != null && !text.contains(ShulkerNames.UNNAMED_MARK)) tail.add(unnamedNote);
         if (craftedNote != null && !text.contains(craftedNote)) tail.add(craftedNote);
+        if (repairNote != null && !text.contains(repairNote)) tail.add(repairNote);
+        if (craftOrderNote != null && !text.contains(craftOrderNote)) tail.add(craftOrderNote);
         if (tail.isEmpty()) return cut(text);
         String note = String.join("; ", tail);
         if (text.isEmpty()) return cut(note);
@@ -1109,12 +1716,33 @@ public final class OrderFlow {
     public void finish(State end, String text) {
         if (order == null || state != State.Running) return;
         settleConfirmed();
+        // The craft lines still open are short (cancelled, or the order ended first); what is carried of them goes back
+        if (craftLedger != null) {
+            craftLedger.closeOpen(end == State.Cancelled ? CraftOrder.CANCELLED : CraftOrder.INTERRUPTED);
+            craftLedger.setDelivered(delivered, order.requested());
+            returnPlanned = host.craftCarried();
+            host.craftWatch(returnPlanned);
+            returnSince = clock.getAsLong();
+            returnSettled = false;
+        }
+        // The kits still open are short (cancelled, or the order ended first)
+        if (kitResult != null) {
+            for (int i = Math.max(0, index); i < units.size(); i++) {
+                Unit ku = units.get(i);
+                if (settleKit(ku)) {
+                    kitResult.addShort(ku.kitTemplate, 1, ku.kitMissing, end == State.Cancelled ? KitOrder.CANCELLED : KitOrder.INTERRUPTED, null);
+                    if (emptiesBack(ku)) host.kitEmptyBack(ku);
+                }
+            }
+        }
         // Every way an order ends carries the one note about shulkers that went without their names
         // Added once: endNote may already hold it (perhaps cut short at MESSAGE_MAX); the whole message stays within MESSAGE_MAX
-        text = withNotes(text, unnamedNote(), craftedNote());
+        text = withNotes(text, unnamedNote(), craftedNote(), repair == null ? null : repair.note(), craftLedger == null ? null : craftLedger.note());
+        String kitNote = kitResult == null ? null : kitResult.note();
+        if (kitNote != null && !text.contains(kitNote)) text = text.isEmpty() ? kitNote : cutTo(text, Math.max(20, MESSAGE_MAX - kitNote.length() - 2)) + "; " + kitNote;
         state = end;
         message = text;
         phase = end.name().toLowerCase();
-        host.say("Order " + order.id + " " + phase + (text.isEmpty() ? "." : ": " + text));
+        host.say((order.restock ? "Kit restock " : "Order " + order.id + " ") + phase + (text.isEmpty() ? "." : ": " + text));
     }
 }

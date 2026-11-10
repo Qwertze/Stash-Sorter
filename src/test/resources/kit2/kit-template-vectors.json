@@ -1,0 +1,2788 @@
+{
+ "version": 2,
+ "strip": [
+  "minecraft:bundle_contents",
+  "minecraft:container",
+  "minecraft:custom_data",
+  "minecraft:custom_name",
+  "minecraft:damage",
+  "minecraft:repair_cost"
+ ],
+ "match": [
+  {
+   "label": "M1 same items, other slot order",
+   "templateKey": "food",
+   "template": [
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    }
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    }
+   ],
+   "expect": "complete"
+  },
+  {
+   "label": "M2 one count off (bread 63)",
+   "templateKey": "food",
+   "template": [
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    }
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 63,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    }
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M3 one slot swapped for a stick",
+   "templateKey": "food",
+   "template": [
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    }
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:golden_carrot",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:cooked_beef",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:bread",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:stick",
+     "count": 1,
+     "components": {}
+    }
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M4 any-variant slot, enchanted sword in the box",
+   "templateKey": "x",
+   "template": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "any": true
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "complete"
+  },
+  {
+   "label": "M5 exact slot sharpness V, plain sword in the box",
+   "templateKey": "g",
+   "template": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M6 same totals split differently",
+   "templateKey": "mini crystal",
+   "template": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 32,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 32,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 32,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 32,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "complete"
+  },
+  {
+   "label": "M7 part built, unnamed",
+   "templateKey": "mini crystal",
+   "template": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M8 helmet renamed potato",
+   "templateKey": "g",
+   "template": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      },
+      "minecraft:custom_name": "potato"
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "complete"
+  },
+  {
+   "label": "M9 damaged sword (damage 300)",
+   "templateKey": "g",
+   "template": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      },
+      "minecraft:damage": 300
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "complete"
+  },
+  {
+   "label": "M10 different repair cost",
+   "templateKey": "g",
+   "template": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      },
+      "minecraft:repair_cost": 7
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "complete"
+  },
+  {
+   "label": "M11 sharpness IV instead of V",
+   "templateKey": "g",
+   "template": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:netherite_helmet",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:protection": 4
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M12 rockets flight 1 instead of 3",
+   "templateKey": "r",
+   "template": [
+    {
+     "id": "minecraft:firework_rocket",
+     "count": 64,
+     "components": {
+      "minecraft:fireworks": {
+       "flight_duration": 3
+      }
+     }
+    },
+    {
+     "id": "minecraft:firework_rocket",
+     "count": 64,
+     "components": {
+      "minecraft:fireworks": {
+       "flight_duration": 3
+      }
+     }
+    },
+    {
+     "id": "minecraft:elytra",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:firework_rocket",
+     "count": 64,
+     "components": {
+      "minecraft:fireworks": {
+       "flight_duration": 1
+      }
+     }
+    },
+    {
+     "id": "minecraft:firework_rocket",
+     "count": 64,
+     "components": {
+      "minecraft:fireworks": {
+       "flight_duration": 1
+      }
+     }
+    },
+    {
+     "id": "minecraft:elytra",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M13 healing potions swapped for harming",
+   "templateKey": "p",
+   "template": [
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_healing"
+      }
+     }
+    },
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_healing"
+      }
+     }
+    },
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_healing"
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_harming"
+      }
+     }
+    },
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_harming"
+      }
+     }
+    },
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_harming"
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M13b the same with any-variant potion slots",
+   "templateKey": "p",
+   "template": [
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "any": true
+    },
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "any": true
+    },
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "any": true
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_harming"
+      }
+     }
+    },
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_harming"
+      }
+     }
+    },
+    {
+     "id": "minecraft:splash_potion",
+     "count": 1,
+     "components": {
+      "minecraft:potion_contents": {
+       "potion": "minecraft:strong_harming"
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "complete"
+  },
+  {
+   "label": "M14 incomplete: named Mini Crystal, crystals missing",
+   "templateKey": "mini crystal",
+   "template": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": "mini crystal",
+   "box": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "incomplete"
+  },
+  {
+   "label": "M15 incomplete contents, other name",
+   "templateKey": "mini crystal",
+   "template": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": "my crystals",
+   "box": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M16 named Mini Crystal, totems only (one kind)",
+   "templateKey": "mini crystal",
+   "template": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": "mini crystal",
+   "box": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M17 named Mini Crystal with an extra item",
+   "templateKey": "mini crystal",
+   "template": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": "mini crystal",
+   "box": [
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:end_crystal",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:obsidian",
+     "count": 64,
+     "components": {}
+    },
+    {
+     "id": "minecraft:stick",
+     "count": 1,
+     "components": {}
+    }
+   ],
+   "expect": "none"
+  },
+  {
+   "label": "M18 any + exact sword, box has sharpness V and plain",
+   "templateKey": "m",
+   "template": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "any": true
+    },
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "complete"
+  },
+  {
+   "label": "M18b any + exact sword, box has two plain swords",
+   "templateKey": "m",
+   "template": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "any": true
+    },
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {
+      "minecraft:enchantments": {
+       "minecraft:sharpness": 5
+      }
+     }
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "boxName": null,
+   "box": [
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:netherite_sword",
+     "count": 1,
+     "components": {}
+    },
+    {
+     "id": "minecraft:totem_of_undying",
+     "count": 1,
+     "components": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect": "none"
+  }
+ ],
+ "hash": [
+  {
+   "template": {
+    "id": "t-0000mini",
+    "name": "Mini Crystal",
+    "category": "pvp",
+    "chest": null,
+    "color": null,
+    "keep": 0,
+    "slots": [
+     {
+      "key": "minecraft:totem_of_undying",
+      "count": 1,
+      "match": "minecraft:totem_of_undying"
+     },
+     {
+      "key": "minecraft:totem_of_undying",
+      "count": 1,
+      "match": "minecraft:totem_of_undying"
+     },
+     {
+      "key": "minecraft:end_crystal",
+      "count": 64,
+      "match": "minecraft:end_crystal"
+     },
+     {
+      "key": "minecraft:end_crystal",
+      "count": 64,
+      "match": "minecraft:end_crystal"
+     },
+     {
+      "key": "minecraft:obsidian",
+      "count": 64,
+      "match": "minecraft:obsidian"
+     },
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "canonical": "tpl-v2\nt-0000mini\nMini Crystal\npvp\n\n\n0\nminecraft:totem_of_undying minecraft:totem_of_undying 1,minecraft:totem_of_undying minecraft:totem_of_undying 1,minecraft:end_crystal minecraft:end_crystal 64,minecraft:end_crystal minecraft:end_crystal 64,minecraft:obsidian minecraft:obsidian 64,,,,,,,,,,,,,,,,,,,,,,\n",
+   "sha1": "d9cf8cbc680b6b9dccdc308801a082f2b77277c2"
+  },
+  {
+   "template": {
+    "id": "t-0000food",
+    "category": "farming",
+    "name": "Food",
+    "color": "orange",
+    "slots": [
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:golden_carrot",
+      "count": 64,
+      "match": "minecraft:golden_carrot"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:cooked_beef",
+      "count": 64,
+      "match": "minecraft:cooked_beef"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     },
+     {
+      "key": "minecraft:bread",
+      "count": 64,
+      "match": "minecraft:bread"
+     }
+    ],
+    "chest": "118,64,-30",
+    "keep": 3
+   },
+   "canonical": "tpl-v2\nt-0000food\nFood\nfarming\n118,64,-30\norange\n3\nminecraft:golden_carrot minecraft:golden_carrot 64,minecraft:golden_carrot minecraft:golden_carrot 64,minecraft:golden_carrot minecraft:golden_carrot 64,minecraft:golden_carrot minecraft:golden_carrot 64,minecraft:golden_carrot minecraft:golden_carrot 64,minecraft:golden_carrot minecraft:golden_carrot 64,minecraft:golden_carrot minecraft:golden_carrot 64,minecraft:golden_carrot minecraft:golden_carrot 64,minecraft:golden_carrot minecraft:golden_carrot 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:cooked_beef minecraft:cooked_beef 64,minecraft:bread minecraft:bread 64,minecraft:bread minecraft:bread 64,minecraft:bread minecraft:bread 64,minecraft:bread minecraft:bread 64,minecraft:bread minecraft:bread 64,minecraft:bread minecraft:bread 64,minecraft:bread minecraft:bread 64,minecraft:bread minecraft:bread 64,minecraft:bread minecraft:bread 64\n",
+   "sha1": "a46f739d7d37be27edbc8ac9527a15d67b9cb4e2"
+  }
+ ],
+ "settingsHash": {
+  "v1": "51f1510ce6282be5d046b67bf54619d4bdec7dd3",
+  "string": "v2\n51f1510ce6282be5d046b67bf54619d4bdec7dd3\nchest pvp 118,64,-30\nchest building 121,64,-33\nchest c:shop 125,64,-33\ncat c:shop\tShop kits\nas crystal kit\tnone\nas etc\tbuilding\ntpl t-0000food a46f739d7d37be27edbc8ac9527a15d67b9cb4e2\ntpl t-0000mini d9cf8cbc680b6b9dccdc308801a082f2b77277c2\n",
+  "v2": "a111900f6ee3ecdbca49f5acf4fd9debda0210f8"
+ }
+}

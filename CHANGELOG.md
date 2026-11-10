@@ -5,6 +5,255 @@ All notable changes to Stash Sorter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-11-09
+
+### Fixed
+- **A stash area set on the website left the sorter waiting forever.** The website writes the area's dimension as `minecraft:overworld`, the bot's own is `overworld`, and the
+  check that the area applies here compared them as plain text, so `stash area` said "in another dimension" and the sorter did nothing (a website rescan read nothing).
+  Every comparison of dimensions now goes through one helper (`Dimensions.same`), which treats the two forms as the same; a stash file that already holds the namespaced
+  dimension works as it is (the stored form is kept, because the area hash is made from it). A real wait for the area's dimension is now said once a minute with both
+  dimensions, and a website rescan that has waited 2 minutes behind it reports the reason to the server as its status.
+
+## [1.16.0] - 2026-11-09
+
+### Added
+- **Kit sorting v2, phase 3a** (KIT-CONTRACT v2 draft, revisions 3 and 4). A shulker box is now a kit by the seven types of the shared
+  `kit-types.json` table (pvp, travel, redstone, farming, building, starter, other; fingerprint `c3ffa894...`) instead of the v1 score: an assortment covers
+  at least three quarters of its slots (half with the word kit, or a word of the type, in its name), a box of a single kind of item is stock and never a
+  kit, and the stash's `treatAs` overrides win. The v1 score is used until the server sends v2 settings (an older server never does).
+- **Kit templates.** A shulker that matches a template of the website's Kit Builder (every item present, counts met, no extras; variants by match key) is a
+  complete copy; a box that carries the template's name with some of it missing is an incomplete copy (`template_incomplete`) and the report says what is
+  missing. Match keys leave out the custom name, damage, repair cost, custom data, container and bundle contents (and a shulker's block entity data), so
+  a damaged or renamed copy still matches; the index carries them as `items[].match`, including shulker contents.
+- **Chain of chests.** A kit goes to the first usable of: its name's rule, its template's chest, its category's chest, the general kits chest. A stored kit
+  only moves up its chain, never down because a chest filled up. A full chain is not a warning; a chain with no existing chest is. Category and template
+  chests are kit-reserved like the kits chest.
+- **Report and heartbeat.** The kit report carries `classifier`, `types[]` (with `why`), `others`, `templates` (complete, incomplete, elsewhere, carried,
+  missing) and `restock` (its state; see phase 3c). The heartbeat carries `kitsHash2`, the hash of the cached v2 settings (null without them).
+
+- **Kit orders, phase 3b** (KIT-CONTRACT v2 revisions 3 and 4). The bot takes orders with `type: "kit"` lines (the claim carries `kitOrders: 1`; the heartbeat
+  carries `kitOrders {v, enabled, restock, craft}` while kit sorting is on and the type table is readable; `stash` setting `kitOrders`). Before any click the
+  kit block is checked (version 1, 27 slots, counts within the stack size); a failure makes every kit short with `template_mismatch` and the rest of the order
+  goes on. Complete copies are fetched from pickable containers (renamed when the name differs); each other kit is built from the fullest incomplete copy
+  in its chain target (when every stack of it sits in a template slot with that slot's count), else an empty shulker of the template colour, else any
+  (noted `colour_substituted`). Items are gathered by match key within `take` (exact slots: least damaged first; `#*` slots: plain first, then least damaged,
+  then the lowest key), one stack of each kind first, through the existing bin builder (ClickPlanner, BinStep), named at the anvil with the template name,
+  and delivered. Routed kits (incomplete copies included) are never unpacked as sources. A kit that cannot be completed is never delivered: with two or more
+  kinds and a name it stays in the inventory as an incomplete copy for the sorter to file in its chain target, otherwise it is reported `returned`.
+  `result.kit` has `made`, `short` (per item, with `stored`) and `notes`; the phase reads `kit n/m: name`; cancel and giving way work as for bins.
+- **Kit restock, phase 3c** (not tried in the game yet). An idle job after everything is put away and before compaction: while kit sorting and kit orders are on,
+  `kitRestock` (on) offers the order machine a restock order for one template with a keep count: top-ups of the fullest incomplete copy in its chain target
+  first, then new copies (most missing first, then by id), only from unreserved stock, never crafted, experience bottles kept above the reserve of 1728, at
+  least `kitRestockMinEmpty` (2) empty shulkers left, at most `kitRestockPerHour` (12) jobs an hour (the stamps are kept in
+  `plugins/qwerte-stash/kit-restock.json`, so a restart does not reset the cap). The job is the kit-order build (same bin builder, naming at the anvil); it is never
+  reported to the server and never saved, nothing is delivered, and the named kit stays carried for the sorter to file in its chain target (an incomplete copy when
+  it fell short with two kinds and a name, otherwise its items are put back). It gives way at once to a waiting order, a player, the queue or a switch-off: it is
+  cancelled and what it carries is put back. The report's `restock` shows `idle`, `building` (`topping_up`), `waiting` or `blocked` with the reason, and the
+  heartbeat says `kitOrders.restock`.
+- **Review fixes (code and security review of 1.16.0).** A base copy may hold part of a slot (40 of 64): the missing count is added to that stack, and the bin
+  tracker counts a stack that is the sum of two lots of its kind. A kit holds at most 27 stacks (same-variant pieces merge; a slot that would need more is
+  unavailable). A kit that is not built (no shulker, fewer than two kinds) gives back what it drew. A kit that cannot be completed and cannot be stored, or a
+  cancelled build, is emptied back (the shulker taken apart, items and shulker put away), never left mixed. Restock does not start while an order is saved to
+  resume, before the first heartbeat reply of a connection, or with orders off, and stops when orders are switched off; its wording is "Kit restock" in logs and
+  the Now-doing card. Skipped kits report their real reason. Restock prefers plain, then unnamed stacks, and never takes enchanted stacks for any-variant
+  slots. The restock record drops stamps far in the future and sorts the rest. `ShulkerNames` refuses names with control, zero-width or bidi format characters, or unpaired surrogates (in
+  templates and at the anvil). One scan of the stash serves all templates of a restock decision (at most 16). Claimed orders are parsed with `SafeJson` (depth limit 32).
+  A take entry must be a slot match key of the block's templates. The kit lookup of the router is built once per view.
+- **Re-review fixes.** A topped-up slot counts as one stack against the 27, so a full template with a part-filled base can be completed. The kit to empty back is
+  tied to the unit's own unnamed shulker (a stored incomplete copy is never taken apart), waits while shulker handling is paused, and the queue is cleared on
+  reset; a complete kit is no longer emptied when an order is cancelled (it is filed in its chain target). Heartbeat replies are parsed with `SafeJson` (depth limit 32). Restock
+  looks at the first 16 kits with a keep count (by id); the rest are not restocked.
+- **Fix** (found by the restock tests): kit lines were also counted by the item planner, which made a kit-only order fail with "none usable in the stash".
+
+### Changed
+- Kit settings may carry a `types` part (categories, chests, treatAs, templates) with its own hash; the v1 hash formula is unchanged, and settings without the
+  part work as before.
+
+### Notes
+- Kit orders and restock have not been tried in the game yet. Restock starts only after the first heartbeat reply of a connection, with
+  orders on and no order held or to be resumed; it is not timed from the connection.
+- Exact-amount gathering takes whole stacks only.
+- The Qwerte addon does kit sorting with the v1 score only. Its kit v2 and Kit Builder bot work come in a later addon release, and its
+  local `build-kits` stays until then.
+- Jar `StashSorter-1.16.0.jar`, SHA-256 `9b408bab0a84f07e7f2e0317e560aa4a647897fd91abc25bd24093ab3616f4e4`, 788 automated tests.
+
+## [1.15.2] - 2026-11-09
+
+### Added
+- **Stash area editor, the plugin side** (area contract v1.0 draft, see the Stash Manager server's AREA-CONTRACT). The stash area (the perimeter) can be set,
+  expanded and cleared from the website; the bot takes it from the heartbeat reply (`areaHash`, `area`). The heartbeat carries `area`: `hash` (SHA-1 of
+  `"area-v1\n" + minX,minY,minZ,maxX,maxY,maxZ,dimension + "\n"`, or of no area), the `area` in use, `derived` (the bot's working box when none is set: the
+  read, in-scope containers' blocks widened by 2 sideways and 1 up and down, cut to 256×128×256 around its centre), `edited` (changed in game, until the
+  server has it), `pending` (`hash` and `why`: `busy`, `far` or `dimension`) and `containersOutside`. It needs the player name, and is left out without one.
+- **An area is applied only between tasks.** A received area is checked (shape, 256×128×256, the Y limits of its dimension, and that it is the stash's
+  dimension), then queued; the sorter's tick applies it once no order is held or resumable, no job runs, no shulker is handled, placed or pending, no
+  repair, craft, anvil or naming run is going, and nothing is carried for a task. A change of area never cuts a walk, an order or a pass short. A website area
+  more than 128 blocks (horizontally) from the bot waits (`far`), and so does one for another dimension (`dimension`).
+- **`stash area` changes also wait** (`here1`/`here2`, `<x1> <y1> <z1> <x2> <y2> <z2>`, `clear`): the command thread only queues the change and the sorter's tick
+  applies it between tasks (with the sorter neither on nor driven, nothing could apply it, so it is applied at once). `stash area` shows what is waiting and
+  why. A local change sets `edited` so the server takes it.
+- Everything is optional both ways: an older server sends no `areaHash`, and the bot keeps its own area.
+
+## [1.15.1] - 2026-11-09
+
+### Fixed
+- **Every crafting table showed as `unreachable` on a stash without a perimeter.** The 1.15.0 check for the website table (the stash's dimension and
+  within 64 blocks of the stash area) read the area from `stash area`, which most stashes never set, and refused the table when there was none.
+  A stash without a perimeter now uses the box of its containers widened by the search radius (`stash radius`, `stash height`) as its area, and
+  the dimension the containers are read in when none was recorded. A table is out of bounds only when it is really in another dimension or far away.
+
+### Changed (review)
+- A table set by hand (`stash craftingtable`) that is outside the limits is never used for craft orders, and never forgotten or overwritten: craft orders
+  use a table of their own (found, placed or crafted) meanwhile, and `auto` is not reported unless another route exists.
+- The area of a stash without a perimeter is its containers' box widened by the search radius, at most 128 across and 64 high around the bot (the region
+  the table search looks through); the dimension is taken from the bot only when it read the stash's containers this session (else `no_dimension`). Found
+  tables are judged against the same area.
+- A held craft order is always claimed with `craftOrders: 1`, whatever the table is like for the moment.
+- **Older servers:** a server that answers 400 to the newer `craftOrders` fields (`table: "auto"`, `tableWhy`, `botTable`) gets the 1.15.0 shape from then
+  on (`auto` as `unset`, no new fields), for that server and session. Deploy the server first.
+- The bot's own table is made of plain stacks only (no named or enchanted items), and at most 1 table is put down for an order and 3 an hour (counted in
+  the settings file, shown in `stash craftorders`). A found table that turns out unusable is skipped and the search is made once more; a start that
+  starts nothing is retried after a short wait and given up on after three tries. The survey of the stash for table materials is kept until the stash
+  changes.
+
+- **Crafting a table for shulker boxes** (1.10.0) now uses plain, unnamed planks, logs or crafting tables only: named, enchanted or otherwise patched stacks
+  are never used to make or place a table (the same rule as for craft orders).
+- Whether a table is near the stash no longer depends on where the bot stands: with no perimeter it must be within the search radius (and height) plus 64 blocks
+  of one of the stash's containers. The dimension a container was read in is remembered for the session and used instead of the bot's current one. Only a 400
+  whose error names the craft fields (`craftOrders`, `tableWhy`, `botTable`, `table`) switches to the 1.15.0 shape, which is tried again every 10 minutes; any
+  other 400 is a normal error. A table is counted against the caps (1 per order, 3 per hour) only when it is really put down.
+
+- New `tableWhy` code `no_material`: no table is known or found, none is in the stash, and there are no planks or logs to make one of. With crafting and
+  craft orders on and a recipe table held, `craftOrders` is now always sent, with `table: "unset"`, `enabled: true` and the reason, so the website shows why
+  (the claim flag stays off); it is `null` only when crafting or craft orders are off or there is no recipe table. The 1.15.0 shape for an older server
+  still leaves `tableWhy` out.
+
+### Added
+- **Craft orders no longer need a website table.** With none set, the bot finds a crafting table standing in the stash area, else takes one out of
+  the stash and puts it down at a safe spot, else crafts one (4 planks, or a log made into planks first, in the 2x2 grid) and puts that down, as for
+  shulker box crafting. That table is kept as the bot's own and reused; if it goes missing the search starts again. All of it within the same limits
+  (the stash's dimension, within 64 blocks of the area, height -64 to 320). A website table still takes priority. The planks, logs or table the bot
+  uses for itself are never taken from what the order's craft lines count on. If none can be had the lines are short with `no_table`.
+- Heartbeat `craftOrders`: `table` can be `"auto"` (no website table; the bot finds, places or crafts one, counted as usable), `tableWhy`
+  (`no_area`, `no_dimension`, `wrong_dimension`, `too_far`, `not_table`, `no_stand`, `path_failed`, `not_loaded` or null) and `botTable`
+  (`{"pos":"x,y,z","source":"found"|"placed"|"crafted"}` or null; the server hides it from streamers). The claim carries `craftOrders: 1` when crafting is on,
+  craft orders are on, a recipe table is held, and either the website table works or the auto path is available (a table is found, or the stash holds a table,
+  planks or logs, and the stash has an area and a dimension). `stash craftorders` shows the state, the reason and the bot's own table (no positions).
+
+## [1.15.0] - 2026-11-09
+
+### Added
+- **Crafting from the stash** (craft contract v1.0; see the Stash Manager server's CRAFT-CONTRACT.md and PROTOCOL.md). The build planner and the
+  Printer can order items the stash does not hold but can make from what it does hold. The order has `craft` lines and a `craft` block (the server's
+  plan: the recipes, the grid fills, the ingredients it may take from the stash, what is left over). The bot crafts them at the crafting table set
+  for the stash **on the website** (not the one of `stash craftingtable`), and delivers them in the order's shulkers. It needs `stash crafting on`
+  and `stash craftorders on` (the default), and a recipe table fetched from the server (below).
+  - **Before any click** the bot checks the order's craft block (version 1; the block names the hash of the bot's own recipe table; every recipe
+    is in the table with the same result and count; every ingredient is accepted by a cell of its recipe; the grid fills are within `craftOrderMaxFills`;
+    every ingredient id is a plain id). If anything is wrong every craft line is short with `recipe_mismatch`, nothing is crafted and the rest of the
+    order goes on.
+  - **Craft loads join the packer** as loads of the result item, and are crafted per shulker just before it is built: a sub-plan with the server's
+    own algorithm, but only the recipes of the order's `craft.steps` and only the ingredients of its `take` (never more of an id than `take` over the
+    whole order, never an alternative outside it), at most 4 levels deep. Ingredients come from the stash by the same rules as the order's item lines,
+    plain stacks only. Several recipes' worth is crafted in chunks as big as the free carry slots allow (the stacks taken from the stash, one for each
+    step's product, the result and a spare); a chunk is never more than one stack of the item, and the result is made exactly the load's size. The
+    surplus of the steps between, and of the item itself, stays carried from one shulker to the next and goes back to the stash by the normal put-back
+    when the order ends (also after a cancel or a failure); `result.craft.returned` lists it.
+  - **A craft never fails an order.** A line that can not be made is short with a reason (`no_table`, `table_missing`, `table_blocked`, `ingredients_short`,
+    `inventory_full`, `recipe_mismatch`, `grid_stuck`, `timeout`, `interrupted`, `cap`, `cancelled`), the shulker is built without it, and the order's message
+    gets "<n> item(s) not crafted: <reasons>". A table that is not set, is no crafting table, or can not be reached or opened (twice) ends crafting for the rest
+    of the order. Yielding to players is as for other crafts (one retry, then `interrupted`). A cancel stops at a safe point, empties the grid, puts everything
+    back and reports `cancelled` with `result.craft`.
+  - The status carries `result.craft` (`fills`, `made`, `short`, `used`, `returned`) and the phase "crafting 3/11 fills: Spruce Stairs". A restart in the middle
+    carries on from the saved ledger.
+  - **Heartbeat.** `craftOrders` (`v`, `enabled`, `recipes`, `mc`, `table`: `unset`, `ok`, `unloaded`, `not_table`, `unreachable` or `other_dimension`;
+    `maxFills`; `seen`: up to 8 crafting tables standing in the stash area, for the website's quick pick) and `craftHash`; the reply may carry `craft` (the
+    website's crafting table, checked against its own hash, cached atomically in `plugins/qwerte-stash/craft-settings.json`, never logged) and
+    `recipesHash`. The claim carries `craftOrders: 1` only while the bot can craft; without it the server never gives it a craft order. A bot with no
+    recipe table sends `craftOrders: null`.
+  - New settings: `stash craftorders on/off` (`craftOrders`, default on; needs crafting on), `stash craftorders maxfills <n>` (`craftOrderMaxFills`, 2048) and
+    `stash craftorders maxperhour <n>` (`craftOrderMaxPerHour`, 4096 grid fills an hour), all on the website too.
+- **Recipe tables are fetched, not shipped.** `GET /api/v1/bot/recipes?mc=<version>` (signed like every other request, with `If-None-Match`) gives the table the
+  server built from the game jar; the plugin checks its shape, computes its `tableHash` (SHA-1 over the recipes sorted by id, as the contract defines it) and
+  caches it atomically as `plugins/qwerte-stash/recipes-<mc>.json`, with the hash stored alongside: a cached file whose hash computed again does not match is
+  discarded. It is fetched at start (when there is none) and whenever a heartbeat reply's `recipesHash` is not the hash of the table the bot holds, at most once
+  a minute, with a back-off after a failure.
+
+### Notes
+- The heartbeat's `craftOrders.seen` (up to 8 crafting tables standing in the stash area, as "x,y,z") is always sent while the bot can craft; the website
+  needs it for its quick pick, and the server hides it from forced-streamer users. The website crafting table itself is never logged by the plugin. The
+  table must be in the stash's dimension and within 64 blocks of the stash area (y from -64 to 320); otherwise it is reported as `unreachable` /
+  `other_dimension` and crafting stops with `table_blocked`.
+- Craft orders are refused (`recipe_mismatch`) when a craft line asks for more than 100,000, the lines for more than 1,000,000 in all, a line is not covered
+  by the steps that make it, or the lines would need more than 4096 loads; order lines with a count over 1,000,000 are not read.
+- The craft ledger is saved with the surplus carried: after a restart the carried stacks are set aside again slot by slot, and surplus that is no longer
+  carried is given back to the budget. The budget is charged from what was gathered for a chunk, never from a later plan. The final report waits (at most 90
+  seconds) for the crafted leftovers to be put back, so `result.craft.returned` is what really went back; crafted items that did not reach a delivered
+  shulker add "<n> crafted item(s) not delivered" to the message.
+
+### Changed
+- **The bundled recipe table (`qwerte-stash/recipes/1.21.4.json`) was removed from the plugin and is now fetched from the Stash Manager server.**
+  **Shulker box crafting (1.8.0) now needs a Stash Manager server that has the recipes route** (`GET /api/v1/bot/recipes`; the server update that is
+  deployed together with this plugin). It uses the same table, so until a table has been fetched nothing is crafted: shulker box crafting is off, `stash
+  crafting` and the log say "no recipe table", the heartbeat reports shulker box crafting as not enabled, and no craft orders are taken. **With an older
+  server (no recipes route) shulker box crafting stays off for good**; update the server first, or stay on plugin 1.14.0.
+- Shulker box crafting and craft orders use the same crafting code; a crafted stack is merged into a stack of the same kind the craft owns instead of taking a
+  new slot for every fill, and a grid slot is never given more than the stack size of its item.
+
+## [1.14.0] - 2026-11-08
+
+### Added
+- **Kit sorting** (kit contract v1.1; see the Stash Manager server's PROTOCOL.md, "Additions: kits"). A shulker box of any
+  colour that scores as a "kit" goes to the chest you pick on the Stash Manager website. The score is points: 2 for the word "kit" or "kits" in
+  its custom name (a whole word: "PvP Kit", "kit_3" count, "Kitchen", "Toolkit" and "Kitsune" do not), 3 for an item mix (for example three or
+  more pieces of gear, five wool colours), 1 when all 27 slots are used, 4 for at least `opMin` OP items (netherite or diamond gear, totems,
+  crystals, elytra...; counted per item, so 3 totems, or a sword and 2 god apples, qualify; `opMin` is 3 by default and is set per stash). A box is a
+  kit when its total reaches the threshold (4 points by default). A box of a single item is a kit only when all 27 slots are filled, and an empty
+  box never is. The points, the threshold and `opMin` are set per stash on the website. The item lists are a shared table (`kit-items.json`,
+  a copy of the contract's file).
+  A named kit can get its own chest by name (the name needs no word "kit"); an unnamed kit only ever goes to the kits chest. Once a kit name
+  has its chest, every future shulker with that name that scores as a kit goes there, in Tiers mode and in Signs mode, and the bot keeps doing
+  so from the rules it saved (`plugins/qwerte-stash/kit-settings.json`, written atomically, checked on every load) while the server is offline
+  or too old to know kits. A kit with no rule and no kits chest is sorted as before; a mixed shulker in a chest signed "kit" keeps going to it
+  as before when no kit setting applies. If the chosen chest is full the kit takes the normal path: one already stored stays until the chest has
+  room, one from a drop-off goes to overflow. If it is missing (not read yet, excluded, a drop-off, unreachable) the kit has no destination: a
+  stored one stays, one from a drop-off goes to overflow, and a warning is given once per kit until the settings change. New settings, a new
+  scoring included, make the sorter plan the whole stash again. Each shulker is scored once and the result is kept for that stack. The settings the server sends are checked against their own hash and refused whole when the content does not hash to it.
+- The kits chest and every kit rule's chest are reserved: nothing but kits goes in. They are left out of overflow (misc and unsigned),
+  sign scoring, the Tiers plan, compacting, repacking and auto-labelling.
+- Kit routing never applies while an order, a repair, a put-back, a craft, an anvil run or a naming run holds the carried stacks: those are handled by that job, not by kit routing.
+- A kit with a target (a rule or the kits chest, found or missing) is kept whole: repacking never takes it apart. With no target it is repacked as before.
+- The heartbeat carries `kitsHash` and `kitsReportHash`; the reply may carry `kits` (checked whole: keys, container ids, at most 200 rules,
+  or the object is ignored and a warning is logged once), `kitsHash` and `needKitsReport`. The bot sends `POST /api/v1/kits/report` (its
+  containers with free slots, where each kit is (with its score), and which kits it carries; no sign text beyond the first line, cut to 32
+  characters) only after a reply has carried `needKitsReport`, at most once every 10 seconds and only when the report changed or the server
+  asked. Everything is optional both ways: an older server or bot ignores it.
+- Setting `kitSorting` (`stash kitSorting on/off`, default on, "Kit sorting" on the website): off turns the feature off here (no routing, no
+  reserved chests, nothing about kits sent). The saved rules are kept.
+
+## [1.13.0] - 2026-11-07
+
+### Added
+- **Repair items with XP bottles before delivery** (order repair contract v1.2, [PROTOCOL.md](https://github.com/Qwertze/Qwertze/blob/dev/stash-manager-server/PROTOCOL.md),
+  "Additions: repair with XP bottles"). An order can ask for "Repair all items" or "Repair" on single lines.
+  Before the stacks of a shulker are packed, each wanted item is checked live. A shulker box gives "not a single item". Otherwise the
+  checks are "no Mending", then "not damaged", then "not a single item" (a stackable item). Under "Repair all items" only damaged lines are
+  wanted (no entries for undamaged tools or stackable items). Each item that is not fully repaired gets its own entry in `partial` or
+  `skipped`; repaired items are only counted. The bot checks first that it has free slots for the gear it will put aside, takes
+  Experience Bottles from the stash (`ceil(damage / 14)` per item plus a few spare), holds the bottles in the off hand and the item to repair in the
+  main hand (a bottle can only be thrown from a hand, so one item at a time), stands still looking down and throws in small batches,
+  checking the durability after each. The bot's own damaged Mending armour, the off-hand and main-hand items are stored in free inventory slots first so
+  they take no XP, and everything it moved is put back: on a cancel or a failure, when another module takes the bot over (before it gives way),
+  when the module is switched off (best effort), and, if the bot went offline in between, at the next start before anything else (the moves
+  are kept in the stash file and checked against what is there: an entry whose item does not fit its slot is dropped). A player within 8 blocks,
+  or orbs that vanish without repairing, stop the throwing and it is tried once more per order after it has been quiet for a while; then the item is
+  delivered as it is ("interrupted"). At most about 2 minutes of throwing per order (kept across a restart; with none left the items are
+  skipped as "interrupted" before anything is gathered or moved). Leftover bottles go back to the stash, also after a cancel or a timeout. A park
+  drops the run without a report. Repairing never fails or holds up an order. Bottles in shulkers are not used (loose stacks only).
+- The index marks stacks with Mending (`mending: true`), the heartbeat says `repair: true`, the order's `repairAll` and line `repair` are
+  read, and the result carries `repair` (`bottlesUsed`, `repaired`, `partial`, `skipped`); the message gets "N item(s) not fully repaired: reasons".
+  Everything is optional both ways: an older server or bot ignores it.
+
 ## [1.12.2] - 2026-11-06
 
 ### Added

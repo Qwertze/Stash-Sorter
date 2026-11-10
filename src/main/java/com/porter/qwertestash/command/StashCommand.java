@@ -16,6 +16,8 @@ import com.porter.qwertestash.module.StashSorter;
 import com.porter.qwertestash.module.StashTracker;
 import com.porter.qwertestash.stash.Containers;
 import com.porter.qwertestash.stash.AnvilSpot;
+import com.porter.qwertestash.stash.AreaPending;
+import com.porter.qwertestash.stash.AreaRules;
 import com.porter.qwertestash.stash.CraftingTableSpot;
 import com.porter.qwertestash.stash.DeliverySpot;
 import com.porter.qwertestash.stash.Stash;
@@ -78,6 +80,7 @@ public class StashCommand extends Command {
                 "signDelay <0-60>",
                 "autoLabel on/off",
                 "unsignedOverflow on/off",
+                "kitSorting on/off",
                 "labels",
                 "stayOn on/off",
                 "recheck <seconds>",
@@ -128,6 +131,10 @@ public class StashCommand extends Command {
                 "anvil",
                 "crafting on/off",
                 "crafting",
+                "craftorders on/off",
+                "craftorders maxfills <n>",
+                "craftorders maxperhour <n>",
+                "craftorders",
                 "craftingtable here",
                 "craftingtable <x> <y> <z> [dimension]",
                 "craftingtable clear",
@@ -251,10 +258,14 @@ public class StashCommand extends Command {
                         c.getSource().getEmbed().title("No Stash Area").description("There is no stash area set.").primaryColor();
                         return;
                     }
-                    stash.area = null;
                     stash.cornerA = stash.cornerB = null;
-                    areaChanged(stash);
-                    c.getSource().getEmbed().title("Stash Area Cleared").description("Stash area cleared, finding containers around the bot again.");
+                    if (stash.area == null) {
+                        stash.markDirty();
+                        stash.save();
+                        c.getSource().getEmbed().title("Corners Cleared").description("The corner that was set is forgotten.").primaryColor();
+                        return;
+                    }
+                    queueArea(c.getSource().getEmbed(), stash, null, "Stash Area Cleared", "Stash area cleared, finding containers around the bot again.");
                 }))
                 .then(literal("here1").executes(c -> {
                     setCorner(c.getSource().getEmbed(), true);
@@ -324,6 +335,11 @@ public class StashCommand extends Command {
             .then(literal("unsignedOverflow").then(argument("toggle", toggle()).executes(c -> {
                 CONFIG.unsignedOverflow = getToggle(c, "toggle");
                 c.getSource().getEmbed().title("Unsigned Overflow " + toggleStrCaps(CONFIG.unsignedOverflow));
+            })))
+            .then(literal("kitSorting").then(argument("toggle", toggle()).executes(c -> {
+                CONFIG.kitSorting = getToggle(c, "toggle");
+                c.getSource().getEmbed().title("Kit Sorting " + toggleStrCaps(CONFIG.kitSorting));
+                Stashes.version++;
             })))
             .then(literal("labels").executes(c -> {
                 c.getSource().getEmbed().title("Labels").description(MODULE.get(StashSorter.class).labelsReport()).primaryColor();
@@ -595,6 +611,25 @@ public class StashCommand extends Command {
                             ? "A plain shulker box is crafted when an order or compaction needs an empty one and the stash has none." + (CraftingTableSpot.isSet() ? "" : " With no crafting table set one is looked for in the stash area, taken from the stash or crafted when needed (`stash craftingtable here` picks one by hand).")
                             : "Nothing is crafted.").primaryColor();
                 })))
+            .then(literal("craftorders")
+                .executes(c -> {
+                    craftOrdersStatus(c.getSource().getEmbed());
+                })
+                .then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.craftOrders = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Craft Orders " + toggleStrCaps(CONFIG.craftOrders))
+                        .description(CONFIG.craftOrders
+                            ? "Orders with craft lines are taken, when crafting is on" + (CONFIG.enableCrafting ? "" : " (it is off now: `stash crafting on`)") + " and a recipe table has been fetched from the Stash Manager server."
+                            : "Orders with craft lines are not taken: the server will not give this bot one.").primaryColor();
+                }))
+                .then(literal("maxfills").then(argument("fills", integer(1, 100000)).executes(c -> {
+                    CONFIG.craftOrderMaxFills = getInteger(c, "fills");
+                    c.getSource().getEmbed().title("Craft Order Fills").description("One craft order may make at most " + CONFIG.craftOrderMaxFills + " grid fills.").primaryColor();
+                })))
+                .then(literal("maxperhour").then(argument("fills", integer(0, 100000)).executes(c -> {
+                    CONFIG.craftOrderMaxPerHour = getInteger(c, "fills");
+                    c.getSource().getEmbed().title("Craft Order Fills Per Hour").description("At most " + CONFIG.craftOrderMaxPerHour + " grid fills for craft orders in any one hour.").primaryColor();
+                }))))
             .then(literal("craftNeverUse")
                 .then(literal("add").then(argument("item", word()).executes(c -> {
                     String id = itemId(getString(c, "item"));
@@ -773,6 +808,15 @@ public class StashCommand extends Command {
                 + corner(stash.cornerA != null ? stash.cornerA : stash.cornerB) + "). Set the other with `stash area here" + (stash.cornerA != null ? 2 : 1) + "`.").primaryColor();
         }
         else embed.title("No Stash Area").description("No stash area set: containers within radius " + CONFIG.radius + " and height " + CONFIG.height + " of the bot are used.").primaryColor();
+        AreaPending.Request pending = AreaPending.get();
+        if (pending != null) {
+            String why = switch (AreaPending.why()) {
+                case "far" -> "the area is more than 128 blocks from the bot";
+                case "dimension" -> "the bot is in another dimension";
+                default -> "waiting until the bot is between tasks";
+            };
+            embed.addField("Waiting To Be Applied", (pending.box() == null ? "clear the area" : Stash.describe(pending.box())) + " (" + (pending.website() ? "from the website" : "from a command") + "): " + why);
+        }
     }
 
     private static String corner(int[] c) {
@@ -808,10 +852,30 @@ public class StashCommand extends Command {
                 + Stash.MAX_WIDTH + "×" + Stash.MAX_HEIGHT + "×" + Stash.MAX_DEPTH + " (width × height × depth).").errorColor();
             return;
         }
-        stash.area = new Stash.Area(a, b, Stash.currentDimension());
         stash.cornerA = stash.cornerB = null;
+        queueArea(embed, stash, bounds, "Stash Area Set", "Stash area set: " + Stash.describe(bounds) + ".");
+    }
+
+    /**
+     * A change of the stash area from the command thread: it is only queued (AreaPending); the sorter's tick applies it between tasks, so a held
+     * order or a walk is never cut short. With the sorter neither on nor driven nothing runs to apply it, so it is applied here at once.
+     * @param bounds minX, minY, minZ, maxX, maxY, maxZ, or null to clear
+     */
+    private static void queueArea(Embed embed, Stash stash, int[] bounds, String title, String done) {
+        StashSorter sorter = MODULE.get(StashSorter.class);
+        if (sorter.isEnabled() || sorter.isDriven()) {
+            AreaPending.queue(new AreaPending.Request(bounds, Stash.currentDimension(), false));
+            stash.markDirty();
+            stash.save();
+            embed.title("Stash Area Queued").description((bounds == null ? "Clearing the stash area" : "Setting the stash area to " + Stash.describe(bounds))
+                + " waits until the bot is between tasks (no order, job or carried stacks); `stash area` shows it.").primaryColor();
+            return;
+        }
+        stash.area = bounds == null ? null : new Stash.Area(new int[] {bounds[0], bounds[1], bounds[2]}, new int[] {bounds[3], bounds[4], bounds[5]}, Stash.currentDimension());
+        AreaPending.discard();
+        AreaPending.markEdited(AreaRules.hashOf(bounds, bounds == null ? null : Stash.currentDimension()));
         areaChanged(stash);
-        embed.title("Stash Area Set").description("Stash area set: " + Stash.describe(bounds) + ".").primaryColor();
+        embed.title(title).description(done).primaryColor();
     }
 
     /**
@@ -902,14 +966,27 @@ public class StashCommand extends Command {
             .addField("Crafting", toggleStr(CONFIG.enableCrafting) + ", crafting table " + (CraftingTableSpot.isSet() ? CraftingTableSpot.source() : "none yet: one is looked for in the stash area, taken from the stash or crafted, when needed"));
     }
 
+    private static void craftOrdersStatus(Embed embed) {
+        com.porter.qwertestash.orders.Recipes table = com.porter.qwertestash.orders.Recipes.current();
+        embed.title("Craft Orders").primaryColor()
+            .addField("Enabled", toggleStr(CONFIG.craftOrders) + (CONFIG.enableCrafting ? "" : ", but crafting is off (`stash crafting on`)"))
+            .addField("Recipe Table", table == null ? "none fetched yet: no craft orders are taken, and no shulker boxes crafted, until the Stash Manager server has sent one"
+                : "Minecraft " + table.version() + ", " + table.size() + " recipes, hash " + table.hash().substring(0, 8))
+            .addField("Crafting Table", MODULE.get(StashSorter.class).craftOrderTableLine())
+            .addField("Tables Put Down", MODULE.get(StashSorter.class).craftTablePlacementsLine())
+            .addField("Bot's Own Table", MODULE.get(StashSorter.class).botTable() == null ? "none in use" : MODULE.get(StashSorter.class).botTable().source() + " (position hidden)")
+            .addField("Caps", CONFIG.craftOrderMaxFills + " grid fills per order, " + CONFIG.craftOrderMaxPerHour + " per hour (" + MODULE.get(StashSorter.class).craftOrderFillsLastHour() + " used this hour)")
+            .addField("What", "items the website's planner says the stash can make; crafted at the crafting table set on the website (not `stash craftingtable`)");
+    }
+
     private static void craftingStatus(Embed embed) {
         embed.title("Crafting").primaryColor()
-            .addField("Enabled", toggleStr(CONFIG.enableCrafting))
+            .addField("Enabled", toggleStr(CONFIG.enableCrafting) + (com.porter.qwertestash.orders.Recipes.current() == null ? ", but no recipe table has been fetched from the Stash Manager server yet: nothing is crafted until it has" : ""))
             .addField("Crafting Table", CraftingTableSpot.isSet() ? CraftingTableSpot.source() + " (`stash craftingtable` shows it)" + (CraftingTableSpot.usable() ? "" : ", but the block there is not a crafting table now") : "none yet: one is looked for in the stash area, taken from the stash or crafted, when needed")
             .addField("Crafted This Hour", MODULE.get(StashSorter.class).craftedLastHour() + " of " + CONFIG.craftMaxPerHour)
             .addField("Caps", CONFIG.craftMaxPerOrder + " per order, " + CONFIG.craftMaxOpsPerTask + " grid fills per task, " + CONFIG.craftMaxPerHour + " per hour")
             .addField("Never Used", CONFIG.craftNeverUse.isEmpty() ? "nothing listed" : String.join(", ", CONFIG.craftNeverUse))
-            .addField("What", "plain shulker boxes only, for orders (bins and empty-shulker lines) and compaction; from shells, a chest, planks or logs in the stash");
+            .addField("What", "plain shulker boxes for orders (bins and empty-shulker lines) and compaction, from shells, a chest, planks or logs in the stash; and the craft lines of orders (`stash craftorders`)");
     }
 
     // The crafting table: set like the anvil, and shown only where the delivery container is
@@ -1252,6 +1329,7 @@ public class StashCommand extends Command {
             .addField("Watch Chests", toggleStr(CONFIG.watchAccess) + " (re-read " + CONFIG.accessRescanSeconds + "s after another player closes one; needs tracking on)")
             .addField("Auto Label", toggleStr(CONFIG.autoLabel) + " (signs mode, a sign every " + CONFIG.labelGapSeconds + "s at most, see `stash labels`)")
             .addField("Unsigned Overflow", toggleStr(CONFIG.unsignedOverflow) + " (signs mode, stacks with no room go in unsigned containers after misc/other/overflow ones)")
+            .addField("Kit Sorting", toggleStr(CONFIG.kitSorting) + " (a shulker that scores as a kit goes to the chest picked on the website)")
             .addField("Orphaned Shulkers", orphanLine())
             .addField("Watch Signs", toggleStr(CONFIG.watchSigns) + " (changes used after " + CONFIG.signSettleSeconds + "s, a sign gone or blank for 60s; needs tracking on)")
             .addField("Auto Drop", toggleStr(CONFIG.autoDrop) + " (gives back what a player dropped near the bot, within " + (int) CONFIG.autoDropRange + " blocks)")

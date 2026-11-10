@@ -13,6 +13,7 @@ import com.porter.qwertestash.manager.ProxyEnv;
 import com.porter.qwertestash.manager.ProxyPolicy;
 import com.porter.qwertestash.manager.ConsoleRunner;
 import com.porter.qwertestash.manager.DeliveryContents;
+import com.porter.qwertestash.manager.KitReport;
 import com.porter.qwertestash.manager.DashboardLink;
 import com.porter.qwertestash.manager.ManagerHttp;
 import com.porter.qwertestash.manager.ManagerIndex;
@@ -23,6 +24,15 @@ import com.porter.qwertestash.orders.OrderDriver;
 import com.porter.qwertestash.orders.OrderFlow;
 import com.porter.qwertestash.stash.AnvilSpot;
 import com.porter.qwertestash.stash.DeliverySpot;
+import com.porter.qwertestash.manager.RecipeStore;
+import com.porter.qwertestash.manager.RecipeSync;
+import com.porter.qwertestash.orders.Recipes;
+import com.porter.qwertestash.stash.CraftSettings;
+import com.porter.qwertestash.stash.CraftStore;
+import com.porter.qwertestash.stash.KitItems;
+import com.porter.qwertestash.stash.KitScore;
+import com.porter.qwertestash.stash.KitSettings;
+import com.porter.qwertestash.stash.KitStore;
 import com.porter.qwertestash.stash.Stash;
 import com.porter.qwertestash.stash.Stash.Box;
 import com.porter.qwertestash.stash.Stashes;
@@ -132,9 +142,35 @@ public class StashManager extends Module {
     private List<DeliveryContents.Chest> deliveryChests = List.of();
     private String deliveryWho = "";
     private final DeliveryContents.Schedule deliverySchedule = new DeliveryContents.Schedule();
+    // Kit sorting (1.14.0, KIT-CONTRACT.md): the report as last built (every few seconds), what the server last said about it, and what was sent
+    private KitReport.@Nullable Built kitReport;
+    private long kitCheckedAt, kitAttemptAt;
+    private String kitWho = "";
+    private boolean kitReportKnown, kitAsked;
+    private @Nullable String kitSentHash, kitRejectedHash, kitInvalidSaid;
+    // After a 409 owner conflict the report is not tried again for this long
+    private long kitBlockedUntil;
+    // What the report was last built from, and when
+    private String kitSig = "";
+    private long kitBuiltAt;
+    private static final long KIT_CONFLICT_WAIT_MS = 5 * 60_000L;
     private boolean orderDriven;
     private long lastOrderDrive;
     private boolean heartbeatSeen;
+
+    // Crafting from the stash (1.15.0, CRAFT-CONTRACT.md): the recipe table is fetched from the server, not shipped; the website's crafting
+    // table arrives in the heartbeat reply. Tick thread, except the fetch itself (a worker).
+    private final RecipeSync recipeSync = new RecipeSync();
+    private final ThreadPoolExecutor recipeIo = worker("qwerte-stash-manager-recipes");
+    private boolean recipeCacheTried, recipeSaid;
+    private String recipeWho = "";
+    private @Nullable String craftInvalidSaid;
+    // An older server (the 1.15.0 one) answers 400 to the newer craftOrders fields: remembered for the session and for that server
+    private boolean craftLegacy, craftSentOrders;
+    private long craftLegacyAt;
+    private static final long CRAFT_LEGACY_RETRY_MS = 10 * 60_000L;
+    private @Nullable String craftLegacyFor;
+    private static final long CRAFT_SEEN_MS = 15_000;
 
     /** What `stash orders` shows. Updated on the tick, read from the command thread. */
     public record OrdersStatus(@Nullable String current, int pending, @Nullable String blocker) {
@@ -505,6 +541,9 @@ public class StashManager extends Module {
     /** Drops every bit of session state; replies still on their way are ignored. */
     private void reset() {
         generation++;
+        craftLegacy = false;
+        craftLegacyFor = null;
+        recipeSync.reset();
         results.clear();
         current = null;
         fingerprint = Long.MIN_VALUE;
@@ -640,6 +679,8 @@ public class StashManager extends Module {
             || !built.player().equals(ManagerIndex.clamp(name, 256))) return;
 
         refreshDelivery(stash, name, now);
+        refreshKits(stash, name, now);
+        tickRecipes(base, key, now);
 
         // Another bot owns this stash name: one heartbeat a minute finds out when that changes
         if (conflictOwner != null) {
@@ -664,9 +705,10 @@ public class StashManager extends Module {
             });
         }
         else if (now - lastHeartbeat >= HEARTBEAT_MS || !sig().equals(sentSig)) beat(base, key, built, now);
-        else if (!orderStep(base, key, built, now) && !inFlight && deliveryReport != null && deliverySchedule.due(scheduleKey(deliveryReport), now)) {
+        else if (!orderStep(base, key, built, now) && !inFlight) {
             // Last in line: the index, the heartbeat and the order's requests all go first
-            sendDelivery(base, key, deliveryReport, now);
+            if (deliveryReport != null && deliverySchedule.due(scheduleKey(deliveryReport), now)) sendDelivery(base, key, deliveryReport, now);
+            else if (kitReportDue(built, now)) sendKits(base, key, kitReport, now);
         }
     }
 
@@ -680,7 +722,24 @@ public class StashManager extends Module {
         long done = rescanDone;
         DeliverySpot.Spot spot = DeliverySpot.get();
         ManagerIndex.Delivery delivery = spot == null ? null : new ManagerIndex.Delivery(spot.x(), spot.y(), spot.z(), spot.dimension());
-        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash()), key, (code, body) -> {
+        // A different server is asked afresh
+        if (craftLegacyFor != null && !craftLegacyFor.equals(String.valueOf(base))) craftLegacy = false;
+        // An older server may have been updated since: the newer shape is tried again every 10 minutes
+        if (craftLegacy && now - craftLegacyAt >= CRAFT_LEGACY_RETRY_MS) craftLegacy = false;
+        ManagerIndex.Craft craftNow = craftBody(built);
+        ManagerIndex.AreaReport areaNow = areaBody();
+        String sentAreaHash = areaNow == null ? null : areaNow.hash();
+        craftSentOrders = craftNow.orders() != null;
+        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash(), kitsBody(built), craftNow, areaNow), key, (code, body) -> {
+            if (ManagerIndex.craftShapeRefused(code, body, craftSentOrders, craftLegacy)) {
+                // Not a failure of the server: it does not know the newer fields. Sent again at once in the 1.15.0 shape, and from now on
+                craftLegacy = true;
+                craftLegacyFor = String.valueOf(base);
+                craftLegacyAt = System.currentTimeMillis();
+                LOG.info("{}the server refused the newer craft fields (possibly an older Stash Manager server; update it): using the 1.15.0 shape, the newer one is tried again in 10 minutes.", PREFIX);
+                lastHeartbeat = 0;
+                return true;
+            }
             if (code != 200) return false;
             heartbeatSeen = true;
             driver().onHeartbeat(body);
@@ -693,6 +752,9 @@ public class StashManager extends Module {
             // Only a server that answers with a needDelivery key (true or false) knows the delivery report
             deliverySchedule.supported(DeliveryContents.supportsDelivery(body));
             if (deliveryReport != null && DeliveryContents.needsDelivery(body)) deliverySchedule.ask();
+            kitsReplied(built, body);
+            craftReplied(built, body);
+            areaReplied(body, sentAreaHash);
             long id = ManagerIndex.rescanId(body);
             if (id >= 0) startRescan(id);
             return true;
@@ -754,6 +816,319 @@ public class StashManager extends Module {
         }, true);
     }
 
+    // Crafting from the stash (1.15.0, CRAFT-CONTRACT.md)
+
+    private String craftSig = "-";
+    private long craftSeenAt;
+    private List<String> craftSeen = List.of();
+
+    /** Recipe table: loaded from the cache once, fetched at start when there is none and whenever the server's hash (heartbeat reply) differs. Tick thread. */
+    private void tickRecipes(URI base, String key, long now) {
+        String mc = mcVersion();
+        if (!RecipeStore.validMc(mc)) return;
+        loadRecipeCache();
+        Recipes held = Recipes.current();
+        if (!recipeSync.due(now, held == null ? null : held.hash())) return;
+        recipeSync.started();
+        String heldHash = held == null ? null : held.hash();
+        String botId = new LinkHost().botId();
+        int gen = generation;
+        URI url;
+        try {
+            url = URI.create(base + "/api/v1/bot/recipes?mc=" + java.net.URLEncoder.encode(mc, java.nio.charset.StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException e) {
+            recipeSync.failed(now, -1);
+            return;
+        }
+        try {
+            recipeIo.execute(() -> {
+                ManagerHttp.Response response;
+                try {
+                    response = ManagerHttp.call("GET", url, null, key, botId, 5_000, 20_000, 30_000, null, heldHash == null ? null : RecipeStore.quote(heldHash));
+                } catch (Throwable t) {
+                    response = new ManagerHttp.Response(-1, "", t.getClass().getSimpleName());
+                }
+                ManagerHttp.Response done = response;
+                results.add(() -> {
+                    if (gen != generation) {
+                        recipeSync.failed(System.currentTimeMillis(), -1);
+                        return;
+                    }
+                    recipesFetched(mc, done);
+                });
+            });
+        } catch (RuntimeException e) {
+            recipeSync.failed(now, -1);
+        }
+    }
+
+    /** The cached recipe table is loaded once, before anything needs to know whether the bot has one. Tick thread. */
+    private void loadRecipeCache() {
+        if (recipeCacheTried || Recipes.current() != null) return;
+        String mc = mcVersion();
+        if (!RecipeStore.validMc(mc)) return;
+        recipeCacheTried = true;
+        Recipes cached = RecipeStore.shared().load(mc);
+        if (cached != null) {
+            Recipes.setCurrent(cached);
+            LOG.info("{}recipe table for {} loaded from the cache ({} recipes, hash {}).", PREFIX, mc, cached.size(), cached.hash().substring(0, 8));
+        }
+    }
+
+    private void recipesFetched(String mc, ManagerHttp.Response r) {
+        long now = System.currentTimeMillis();
+        if (r.code() == 304) {
+            recipeSync.succeeded(now);
+            return;
+        }
+        if (r.code() == 200) {
+            try {
+                Recipes table = RecipeStore.shared().accept(mc, r.body(), r.etag());
+                Recipes.setCurrent(table);
+                recipeSync.succeeded(now);
+                recipeSaid = false;
+                LOG.info("{}recipe table for {} fetched ({} recipes, hash {}). Craft orders and shulker box crafting use it.", PREFIX, mc, table.size(), table.hash().substring(0, 8));
+                return;
+            } catch (RecipeStore.Invalid e) {
+                LOG.warn("{}the recipe table from the server was refused: {}.", PREFIX, e.getMessage());
+                recipeSync.failed(now, 400);
+                return;
+            }
+        }
+        recipeSync.failed(now, r.code());
+        // Said once per run of failures (not every retry): without a table nothing is crafted
+        if (!recipeSaid && Recipes.current() == null) {
+            recipeSaid = true;
+            LOG.warn("{}no recipe table: the server answered {} for the recipes of {}. Craft orders and shulker box crafting stay off until it sends one.", PREFIX,
+                r.code() < 0 ? "nothing" : r.code(), mc);
+        }
+    }
+
+    /** What the heartbeat says about craft orders changes: a heartbeat of its own is sent (the table recipe hash, the setting, the table state). */
+    private String craftSignature() {
+        Recipes table = Recipes.current();
+        // The kit capability is part of the signature: a change of it sends a heartbeat of its own
+        ManagerIndex.KitCaps caps = kitCaps();
+        String kit = caps == null ? "" : "/k" + caps.enabled() + caps.restock() + caps.craft();
+        if (table == null) return "-" + kit;
+        StashSorter s = sorter();
+        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + kit;
+    }
+
+    /**
+     * The craft fields of the heartbeat. A bot with no recipe table sends craftOrders as an explicit null (it is never given a craft order);
+     * one with a table says whether it takes them, the hash of its table, the state of the website's crafting table and the tables it has
+     * seen, and asks for the settings with the hash of what it has cached. Tick thread.
+     */
+    private ManagerIndex.Craft craftBody(ManagerIndex.Built built) {
+        StashSorter s = sorter();
+        Recipes table = Recipes.current();
+        if (!com.porter.qwertestash.stash.CraftTableState.sendOrders(CONFIG.enableCrafting, CONFIG.craftOrders, table != null)) return new ManagerIndex.Craft(null, null);
+        boolean on = true;
+        String status = s.craftTableStatus();
+        long now = System.currentTimeMillis();
+        if (now - craftSeenAt >= CRAFT_SEEN_MS) {
+            craftSeenAt = now;
+            craftSeen = s.seenTables();
+        }
+        CraftSettings cached = CraftStore.shared().get(built.server(), built.stash());
+        ManagerIndex.CraftOrders orders = new ManagerIndex.CraftOrders(on, table.hash(), mcVersion(), status, Math.max(1, CONFIG.craftOrderMaxFills), craftSeen, s.craftTableWhy(), s.botTable());
+        if (craftLegacy) orders = orders.asLegacy();
+        return new ManagerIndex.Craft(orders, cached == null ? null : cached.hash());
+    }
+
+    /** What a heartbeat reply says about crafting: the server's recipe hash, and new craft settings (the website's table), checked and cached. Tick thread. */
+    private void craftReplied(ManagerIndex.Built built, String body) {
+        ManagerIndex.CraftReply reply = ManagerIndex.craftReply(body);
+        recipeSync.serverHash(reply.recipesHash());
+        if (reply.invalid() != null) {
+            if (!reply.invalid().equals(craftInvalidSaid)) LOG.warn("{}ignoring craft settings from the server: {}.", PREFIX, reply.invalid());
+            craftInvalidSaid = reply.invalid();
+        }
+        else if (reply.settings() != null) {
+            craftInvalidSaid = null;
+            if (CraftStore.shared().put(built.server(), built.stash(), reply.settings())) {
+                // The position is not logged
+                LOG.info("{}craft settings updated (revision {}, a crafting table is {}).", PREFIX, reply.settings().rev(), reply.settings().table() == null ? "not set" : "set");
+            }
+        }
+    }
+
+    // The stash area (1.15.2, AREA-CONTRACT.md)
+
+    private @Nullable String areaIgnoredHash;
+
+    /** The area fields of the heartbeat, or null with no stash (nothing to say) or an area whose dimension is not known. Tick thread. */
+    private ManagerIndex.@Nullable AreaReport areaBody() {
+        Stash s = Stashes.current();
+        if (s == null) return null;
+        StashSorter sorter = sorter();
+        int[] box = null;
+        String dimension = null;
+        if (s.area != null) {
+            box = Stash.boundsOf(s.area);
+            dimension = s.area.dimension != null ? s.area.dimension : s.dimension;
+            if (dimension == null) return null;
+        }
+        List<int[]> blocks = new java.util.ArrayList<>();
+        int outside = 0;
+        for (Box b : s.boxes) {
+            if (b.delivery) continue;
+            if (s.area != null && !s.boxInArea(b)) outside++;
+            if (b.known() && s.inScope(b)) for (com.aquarius.mc.block.BlockPos p : b.parts) blocks.add(new int[] {p.x(), p.y(), p.z()});
+        }
+        com.porter.qwertestash.stash.AreaPending.Request pending = com.porter.qwertestash.stash.AreaPending.get();
+        return new ManagerIndex.AreaReport(com.porter.qwertestash.stash.AreaRules.hashOf(box, dimension), box, dimension,
+            s.area == null ? com.porter.qwertestash.stash.AreaRules.derived(blocks) : null, com.porter.qwertestash.stash.AreaPending.edited(),
+            pending == null ? null : pending.hash(), pending == null ? null : com.porter.qwertestash.stash.AreaPending.why(), outside);
+    }
+
+    /**
+     * What a heartbeat reply says about the area (AreaSync decides): an acknowledgement ends our edit only when it is for the hash we edited to; an
+     * area for us is queued unless a change of ours is waiting or not acknowledged yet. Tick thread.
+     */
+    private void areaReplied(String body, @Nullable String sentHash) {
+        ManagerIndex.AreaReply r = ManagerIndex.areaReply(body);
+        com.porter.qwertestash.stash.AreaPending.acknowledge(r.hash());
+        Stash s = Stashes.current();
+        ManagerIndex.AreaReport now = areaBody();
+        if (s == null || now == null) return;
+        com.porter.qwertestash.stash.AreaSync.Action action = com.porter.qwertestash.stash.AreaSync.react(r, now.hash(), com.porter.qwertestash.stash.AreaPending.get(),
+            com.porter.qwertestash.stash.AreaPending.edited(), s.dimension);
+        if (action.warn() != null) {
+            if (!action.warn().equals(areaIgnoredHash)) LOG.warn("{}ignoring the stash area from the server: {}.", PREFIX, action.warn());
+            areaIgnoredHash = action.warn();
+        }
+        if (action.queue() != null) {
+            com.porter.qwertestash.stash.AreaPending.queue(action.queue());
+            LOG.info("{}a stash area from the server waits to be applied between tasks.", PREFIX);
+        }
+    }
+
+    // Kit sorting (1.14.0, KIT-CONTRACT.md)
+
+    /** The kit fields of the heartbeat, or null with kit sorting off (nothing about kits is said then). Tick thread. */
+    private ManagerIndex.@Nullable Kits kitsBody(ManagerIndex.Built built) {
+        if (!CONFIG.kitSorting) return null;
+        KitSettings cached = KitStore.shared().get(built.server(), built.stash());
+        KitReport.Built report = kitReport;
+        return new ManagerIndex.Kits(cached == null ? null : cached.hash(), report == null ? null : report.hash(), cached == null || cached.types() == null ? null : cached.types().hash(), kitCaps());
+    }
+
+    /**
+     * The kit order capability of this bot (KIT-CONTRACT v2): kit sorting on and the type table readable; {@code enabled} follows the kit orders setting.
+     * {@code craft} only when the bot also sends craftOrders. Null when it cannot build kits at all. Tick thread.
+     */
+    private ManagerIndex.@Nullable KitCaps kitCaps() {
+        if (!CONFIG.kitSorting || com.porter.qwertestash.stash.KitTypes.shared() == null) return null;
+        boolean craft = com.porter.qwertestash.stash.CraftTableState.sendOrders(CONFIG.enableCrafting, CONFIG.craftOrders, Recipes.current() != null);
+        return new ManagerIndex.KitCaps(CONFIG.kitOrders, CONFIG.kitRestock, craft);
+    }
+
+    /** What a heartbeat reply says about kits: new settings are checked, cached and the sorter woken; the report is asked for or not. Tick thread. */
+    private void kitsReplied(ManagerIndex.Built built, String body) {
+        if (!CONFIG.kitSorting) return;
+        ManagerIndex.KitsReply reply = ManagerIndex.kitsReply(body);
+        // Only a server that answers with a needKitsReport key (true or false) knows the report route
+        kitReportKnown = reply.reportKnown();
+        kitAsked = reply.reportKnown() && reply.needReport();
+        if (reply.invalid() != null) {
+            if (!reply.invalid().equals(kitInvalidSaid)) LOG.warn("{}ignoring kit settings from the server: {}.", PREFIX, reply.invalid());
+            kitInvalidSaid = reply.invalid();
+        }
+        else if (reply.settings() != null) {
+            kitInvalidSaid = null;
+            if (KitStore.shared().put(built.server(), built.stash(), reply.settings())) {
+                // The sorter plans everything again: kits stored elsewhere move once their chest has room
+                Stashes.version++;
+                kitCheckedAt = 0;
+                LOG.info("{}kit settings updated (revision {}, {} rules{}).", PREFIX, reply.settings().rev(), reply.settings().rules().size(),
+                    reply.settings().kitsChest() == null ? "" : ", a kits chest");
+            }
+        }
+    }
+
+    /**
+     * Keeps the kit report current: rebuilt every few seconds from the stash as it is and what the bot carries. Cheap (containers and
+     * shulker names only), and on the tick, where the inventory can be read.
+     */
+    private void refreshKits(Stash stash, String name, long now) {
+        if (!CONFIG.kitSorting) {
+            // Off: nothing is said about kits, and what was learned from the server is forgotten (asked again when it is turned on)
+            kitReport = null;
+            kitReportKnown = false;
+            kitAsked = false;
+            kitSentHash = null;
+            kitRejectedHash = null;
+            kitWho = "";
+            return;
+        }
+        String who = stash.server + "|" + stash.name;
+        if (!who.equals(kitWho)) {
+            // Another server or stash: the reply that unlocked the report route was about the old one
+            kitWho = who;
+            kitReport = null;
+            kitReportKnown = false;
+            kitAsked = false;
+            kitSentHash = null;
+            kitRejectedHash = null;
+            kitBlockedUntil = 0;
+            kitCheckedAt = 0;
+            kitSig = "";
+        }
+        if (now - kitCheckedAt < 5000) return;
+        kitCheckedAt = now;
+        try {
+            // Looked at every 5 s, rebuilt (every shulker scored) only when something it is built from changed, and at least once a minute
+            List<com.porter.qwertestash.stash.Item> carried = sorter().inventoryShulkers();
+            com.porter.qwertestash.orders.KitRestock.Decision restock = sorter().restockState();
+            String sig = KitReport.fingerprint(stash, CONFIG.managerIncludeExcluded) + "|" + Stashes.version + "|" + KitStore.shared().version() + "|"
+                + KitReport.carriedSignature(carried) + "|" + name + "|" + restock.state() + restock.template() + restock.reason();
+            if (kitReport != null && sig.equals(kitSig) && now - kitBuiltAt < 60_000) return;
+            // Only boxes that are kits by this stash's scoring are reported (the defaults until settings have been cached)
+            KitSettings cached = KitStore.shared().get(ManagerIndex.clamp(stash.server, 256), ManagerIndex.clamp(stash.name, 256));
+            kitReport = KitReport.buildV2(stash, CONFIG.managerIncludeExcluded, name, carried,
+                cached == null ? KitScore.Scoring.DEFAULT : cached.scoring(), KitItems.shared(), cached, restock);
+            kitSig = sig;
+            kitBuiltAt = now;
+        } catch (RuntimeException e) {
+            LOG.debug("{}couldn't build the kit report: {}", PREFIX, e.toString());
+            kitReport = null;
+        }
+    }
+
+    /**
+     * Whether to send the report now: only after a heartbeat reply carried needKitsReport (an older server never sees the route), at
+     * most every 10 s, and only when its hash changed or the server asked. A report the server refused is not sent again until it changes.
+     */
+    private boolean kitReportDue(ManagerIndex.Built built, long now) {
+        KitReport.Built r = kitReport;
+        if (r == null || now < kitBlockedUntil) return false;
+        return KitReport.due(CONFIG.kitSorting, kitReportKnown, r.server().equals(built.server()) && r.stash().equals(built.stash()), now - kitAttemptAt,
+            r.hash(), kitSentHash, kitRejectedHash, kitAsked);
+    }
+
+    /** POST /api/v1/kits/report, signed like the index. Soft: the answer never feeds the manager's backoff or status. */
+    private void sendKits(URI base, String key, KitReport.Built report, long now) {
+        kitAttemptAt = now;
+        send(base, "/api/v1/kits/report", report.json(), key, (code, body) -> {
+            if (code == 200) {
+                kitSentHash = report.hash();
+                kitRejectedHash = null;
+                kitAsked = false;
+            }
+            else if (code == 400 || code == 413) {
+                LOG.debug("{}the server refused the kit report ({}).", PREFIX, code);
+                kitRejectedHash = report.hash();
+            }
+            else if (code == 409) {
+                // Another bot owns the stash name: no point asking again for a while
+                kitBlockedUntil = System.currentTimeMillis() + KIT_CONFLICT_WAIT_MS;
+            }
+            return true;
+        }, true);
+    }
+
     /** The bot account's name, from the profile the server gave it. */
     private static @Nullable String playerName() {
         try {
@@ -771,6 +1146,20 @@ public class StashManager extends Module {
         OrderDriver d = driver;
         if (d == null) {
             d = new OrderDriver(sorter().orderFlow(), System::currentTimeMillis, (level, text) -> ActivityFeed.INSTANCE.event("Stash Orders", level, text));
+            // Whether the claim carries craftOrders is worked out when the claim is made, never earlier: the cached recipe table is loaded first,
+            // so an order held over a restart is not claimed without the flag (the server would fail it as "downgraded")
+            d.craftOrdersWhen(() -> {
+                loadRecipeCache();
+                StashSorter s = sorter();
+                OrderFlow f = s.orderFlow();
+                // A held craft order is always claimed with the flag, whatever the table is like for the moment
+                return com.porter.qwertestash.stash.CraftTableState.claimFlag(s.craftOrdersCapable(), f.craftLedger() != null || f.resumeHasCraft());
+            });
+            // The claim carries kitOrders: 1 for a bot that can build kits; a kit order held over a restart is claimed with it as well
+            d.kitOrdersWhen(() -> {
+                ManagerIndex.KitCaps caps = kitCaps();
+                return caps != null && (caps.enabled() || sorter().orderFlow().kitResult() != null);
+            });
             driver = d;
         }
         return d;
@@ -815,11 +1204,12 @@ public class StashManager extends Module {
             ManagerIndex.Naming namingState = namingNow();
             naming = namingState;
             // So is a change of the anvil or of the bot's XP level
-            ManagerIndex.Crafting craftingState = new ManagerIndex.Crafting(CONFIG.enableCrafting, com.porter.qwertestash.stash.CraftingTableSpot.usable(), com.porter.qwertestash.stash.CraftingTableSpot.source());
+            ManagerIndex.Crafting craftingState = new ManagerIndex.Crafting(CONFIG.enableCrafting && Recipes.current() != null, com.porter.qwertestash.stash.CraftingTableSpot.usable(), com.porter.qwertestash.stash.CraftingTableSpot.source());
             crafting = craftingState;
             ManagerIndex.DeliveryStorage storageState = s.deliveryStorage();
             storage = storageState;
-            blockerSig = (next == null ? "" : next) + "|" + (spot == null ? "-" : String.valueOf(spot.hashCode())) + "|" + namingState.anvil() + "/" + namingState.xpLevels() + "/" + namingState.anvilSource()
+            craftSig = craftSignature();
+            blockerSig = (next == null ? "" : next) + "|" + craftSig + "|" + (spot == null ? "-" : String.valueOf(spot.hashCode())) + "|" + namingState.anvil() + "/" + namingState.xpLevels() + "/" + namingState.anvilSource()
                 + "|" + craftingState.enabled() + "/" + craftingState.table() + "/" + craftingState.tableSource()
                 + "|" + (storageState == null ? "-" : storageState.autoExpand() + "/" + storageState.chests() + "/" + storageState.full() + "/" + storageState.canExpand() + "/" + storageState.blocked());
             driver();
@@ -895,6 +1285,9 @@ public class StashManager extends Module {
      * @return true when a request was sent
      */
     private boolean orderStep(URI base, String key, ManagerIndex.Built built, long now) {
+        // Restock gives way to a claimable order, a player or a switch-off (tick thread, like the order flow)
+        sorter().restockHint(heartbeatSeen && driver().pending() > 0, heartbeatSeen);
+        sorter().restockYieldCheck();
         if (!CONFIG.acceptOrders && !sorter().orderFlow().holdsOrder() && sorter().orderFlow().resumeId() == null) return false;
         String player = playerName();
         OrderDriver.Request request = driver().next(CONFIG.acceptOrders, blocker, built.server(), built.stash(), player, true);
@@ -1004,6 +1397,17 @@ public class StashManager extends Module {
      */
     private void driveSorter(@Nullable Stash stash) {
         StashSorter sorter = sorter();
+        // A website rescan that has waited 2 minutes behind an area in another dimension says why (the heartbeat's rescan status)
+        String waitWhy = sorter.areaWait(System.currentTimeMillis());
+        if (waitWhy != null && lastRescanAt >= sorter.areaWaitSince() && rescanBlocked == null) {
+            rescanBlocked = waitWhy;
+            lastHeartbeat = 0;
+            LOG.warn("{}the website rescan cannot go ahead: {}.", PREFIX, waitWhy);
+        }
+        else if (waitWhy == null && rescanBlocked != null && rescanBlocked.startsWith("the stash area is in another dimension")) {
+            rescanBlocked = null;
+            lastHeartbeat = 0;
+        }
         if (!rescanning) {
             engaged = false;
             return;
@@ -1155,6 +1559,7 @@ public class StashManager extends Module {
         }
         conflictOwner = owner;
         conflictRetryAt = System.currentTimeMillis() + CONFLICT_RETRY_MS;
+        kitBlockedUntil = System.currentTimeMillis() + KIT_CONFLICT_WAIT_MS;
         backoff = 0;
         nextAttemptAt = 0;
         lastPushedId = null;

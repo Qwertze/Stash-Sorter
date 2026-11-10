@@ -52,6 +52,46 @@ public final class BinTracker {
         return left;
     }
 
+    /**
+     * As {@link #unmatched} for what is in the shulker: a stack there may be the sum of several lots of its kind (a kit top-up is shift-clicked
+     * into the base copy's stack and merges with it), so a stack that is exactly the sum of the lots of its kind still unmatched counts for them all.
+     */
+    public static List<Integer> unmatchedPacked(List<Order.Lot> lots, List<Held> have) {
+        List<Integer> left = new ArrayList<>(unmatched(lots, have));
+        if (left.size() < 2) return left;
+        boolean[] used = new boolean[have.size()];
+        for (int i = 0; i < lots.size(); i++) {
+            if (left.contains(i)) continue;
+            Order.Lot lot = lots.get(i);
+            for (int h = 0; h < have.size(); h++) {
+                Held s = have.get(h);
+                if (!used[h] && s.count() == lot.count() && sameKind(lot, s.key(), s.variant())) {
+                    used[h] = true;
+                    break;
+                }
+            }
+        }
+        for (int h = 0; h < have.size(); h++) {
+            if (used[h]) continue;
+            Held s = have.get(h);
+            List<Integer> group = new ArrayList<>();
+            int sum = 0;
+            for (int i : left) {
+                Order.Lot lot = lots.get(i);
+                if (!sameKind(lot, s.key(), s.variant())) continue;
+                group.add(i);
+                sum += lot.count();
+                if (sum == s.count() && group.size() >= 2) {
+                    left.removeAll(group);
+                    used[h] = true;
+                    break;
+                }
+                if (sum > s.count()) break;
+            }
+        }
+        return left;
+    }
+
     /** The lots left after what is in the shulker and what is carried exactly. */
     public static List<Order.Lot> remaining(List<Order.Lot> lots, List<Held> packed, List<Held> carried) {
         List<Order.Lot> afterPacked = new ArrayList<>();
@@ -64,7 +104,7 @@ public final class BinTracker {
     /** The lots not yet in the shulker (carried or still to fetch). */
     public static List<Order.Lot> notPacked(List<Order.Lot> lots, List<Held> packed) {
         List<Order.Lot> out = new ArrayList<>();
-        for (int i : unmatched(lots, packed)) out.add(lots.get(i));
+        for (int i : unmatchedPacked(lots, packed)) out.add(lots.get(i));
         return out;
     }
 
@@ -99,7 +139,7 @@ public final class BinTracker {
         List<Held> pool = new ArrayList<>(carried);
         List<Order.Lot> missing = new ArrayList<>();
         List<Integer> missingAt = new ArrayList<>();
-        List<Integer> lotIndex = new ArrayList<>(unmatched(lots, packed));
+        List<Integer> lotIndex = new ArrayList<>(unmatchedPacked(lots, packed));
         for (int i = 0; i < open.size(); i++) {
             Order.Lot lot = open.get(i);
             Held exact = null;

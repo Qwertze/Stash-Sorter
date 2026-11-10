@@ -64,6 +64,29 @@ public final class ItemKeys {
         return new Keys(with(base, shown, 8), with(base, full, 16));
     }
 
+    /**
+     * The match key of a stack (KIT-CONTRACT v2, revision 4): the same algorithm as the index key over the component patch with the strip set removed
+     * first: always the custom name, damage, repair cost, custom data, container contents and bundle contents, and for shulker boxes the block
+     * entity data. Everything else counts (enchantments, trims, potion contents, fireworks, dyed colour, banner patterns, ...). With nothing left it
+     * is the plain id. Stable for this bot and stash, like the index key; not comparable with the addon's.
+     */
+    public static String matchKey(String id, DataComponents components, boolean shulker) {
+        String base = "minecraft:" + id;
+        if (components == null) return base;
+        Map<DataComponentType<?>, DataComponent<?, ?>> all = components.getDataComponents();
+        if (all == null || all.isEmpty()) return base;
+        List<DataComponent<?, ?>> kept = new ArrayList<>();
+        for (DataComponent<?, ?> c : all.values()) {
+            if (c == null || strippedFromMatch(c.getType(), shulker)) continue;
+            kept.add(c);
+        }
+        return with(base, kept, 8);
+    }
+
+    private static boolean strippedFromMatch(DataComponentType<?> type, boolean shulker) {
+        return type == DataComponentTypes.CUSTOM_NAME || type == DataComponentTypes.DAMAGE || type == DataComponentTypes.REPAIR_COST || left(type, shulker);
+    }
+
     private static boolean left(DataComponentType<?> type, boolean shulker) {
         return type == DataComponentTypes.CUSTOM_DATA || type == DataComponentTypes.CONTAINER || type == DataComponentTypes.BUNDLE_CONTENTS
             || (shulker && type == DataComponentTypes.BLOCK_ENTITY_DATA);

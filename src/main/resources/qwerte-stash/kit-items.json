@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "note": "Kit detection table for KIT-CONTRACT v1.1. A shulker has an item mix when, for at least one group, it holds at least `min` distinct item ids from that group's `items`. `op` lists the OP / end-game items. Unknown ids never match. Copy this file byte for byte into every codebase.",
+  "op": [
+    "minecraft:netherite_helmet", "minecraft:netherite_chestplate", "minecraft:netherite_leggings", "minecraft:netherite_boots",
+    "minecraft:diamond_helmet", "minecraft:diamond_chestplate", "minecraft:diamond_leggings", "minecraft:diamond_boots",
+    "minecraft:netherite_sword", "minecraft:netherite_pickaxe", "minecraft:netherite_axe", "minecraft:netherite_shovel", "minecraft:netherite_hoe",
+    "minecraft:diamond_sword", "minecraft:diamond_pickaxe", "minecraft:diamond_axe", "minecraft:diamond_shovel", "minecraft:diamond_hoe",
+    "minecraft:mace", "minecraft:trident", "minecraft:bow", "minecraft:crossbow", "minecraft:elytra",
+    "minecraft:enchanted_golden_apple", "minecraft:totem_of_undying", "minecraft:end_crystal",
+    "minecraft:netherite_ingot", "minecraft:netherite_block", "minecraft:nether_star", "minecraft:beacon", "minecraft:heavy_core",
+    "minecraft:netherite_upgrade_smithing_template"
+  ],
+  "groups": [
+    { "id": "gear", "min": 3, "items": [
+      "minecraft:netherite_helmet", "minecraft:netherite_chestplate", "minecraft:netherite_leggings", "minecraft:netherite_boots",
+      "minecraft:diamond_helmet", "minecraft:diamond_chestplate", "minecraft:diamond_leggings", "minecraft:diamond_boots",
+      "minecraft:turtle_helmet", "minecraft:elytra", "minecraft:shield",
+      "minecraft:netherite_sword", "minecraft:netherite_pickaxe", "minecraft:netherite_axe", "minecraft:netherite_shovel", "minecraft:netherite_hoe",
+      "minecraft:diamond_sword", "minecraft:diamond_pickaxe", "minecraft:diamond_axe", "minecraft:diamond_shovel", "minecraft:diamond_hoe",
+      "minecraft:mace", "minecraft:bow", "minecraft:crossbow", "minecraft:trident", "minecraft:flint_and_steel",
+      "minecraft:totem_of_undying", "minecraft:enchanted_golden_apple", "minecraft:golden_apple", "minecraft:golden_carrot",
+      "minecraft:end_crystal", "minecraft:obsidian", "minecraft:crying_obsidian", "minecraft:respawn_anchor", "minecraft:glowstone",
+      "minecraft:ender_pearl", "minecraft:ender_chest", "minecraft:firework_rocket", "minecraft:experience_bottle",
+      "minecraft:potion", "minecraft:splash_potion", "minecraft:lingering_potion", "minecraft:chorus_fruit",
+      "minecraft:arrow", "minecraft:spectral_arrow", "minecraft:tipped_arrow", "minecraft:shulker_shell",
+      "minecraft:cobweb", "minecraft:wind_charge"
+    ] },
+    { "id": "concrete", "min": 5, "items": [
+      "minecraft:white_concrete", "minecraft:orange_concrete", "minecraft:magenta_concrete", "minecraft:light_blue_concrete",
+      "minecraft:yellow_concrete", "minecraft:lime_concrete", "minecraft:pink_concrete", "minecraft:gray_concrete",
+      "minecraft:light_gray_concrete", "minecraft:cyan_concrete", "minecraft:purple_concrete", "minecraft:blue_concrete",
+      "minecraft:brown_concrete", "minecraft:green_concrete", "minecraft:red_concrete", "minecraft:black_concrete"
+    ] },
+    { "id": "concrete_powder", "min": 5, "items": [
+      "minecraft:white_concrete_powder", "minecraft:orange_concrete_powder", "minecraft:magenta_concrete_powder", "minecraft:light_blue_concrete_powder",
+      "minecraft:yellow_concrete_powder", "minecraft:lime_concrete_powder", "minecraft:pink_concrete_powder", "minecraft:gray_concrete_powder",
+      "minecraft:light_gray_concrete_powder", "minecraft:cyan_concrete_powder", "minecraft:purple_concrete_powder", "minecraft:blue_concrete_powder",
+      "minecraft:brown_concrete_powder", "minecraft:green_concrete_powder", "minecraft:red_concrete_powder", "minecraft:black_concrete_powder"
+    ] },
+    { "id": "wool", "min": 5, "items": [
+      "minecraft:white_wool", "minecraft:orange_wool", "minecraft:magenta_wool", "minecraft:light_blue_wool",
+      "minecraft:yellow_wool", "minecraft:lime_wool", "minecraft:pink_wool", "minecraft:gray_wool",
+      "minecraft:light_gray_wool", "minecraft:cyan_wool", "minecraft:purple_wool", "minecraft:blue_wool",
+      "minecraft:brown_wool", "minecraft:green_wool", "minecraft:red_wool", "minecraft:black_wool"
+    ] },
+    { "id": "glass", "min": 5, "items": [
+      "minecraft:glass", "minecraft:tinted_glass",
+      "minecraft:white_stained_glass", "minecraft:orange_stained_glass", "minecraft:magenta_stained_glass", "minecraft:light_blue_stained_glass",
+      "minecraft:yellow_stained_glass", "minecraft:lime_stained_glass", "minecraft:pink_stained_glass", "minecraft:gray_stained_glass",
+      "minecraft:light_gray_stained_glass", "minecraft:cyan_stained_glass", "minecraft:purple_stained_glass", "minecraft:blue_stained_glass",
+      "minecraft:brown_stained_glass", "minecraft:green_stained_glass", "minecraft:red_stained_glass", "minecraft:black_stained_glass"
+    ] },
+    { "id": "glass_panes", "min": 5, "items": [
+      "minecraft:glass_pane",
+      "minecraft:white_stained_glass_pane", "minecraft:orange_stained_glass_pane", "minecraft:magenta_stained_glass_pane", "minecraft:light_blue_stained_glass_pane",
+      "minecraft:yellow_stained_glass_pane", "minecraft:lime_stained_glass_pane", "minecraft:pink_stained_glass_pane", "minecraft:gray_stained_glass_pane",
+      "minecraft:light_gray_stained_glass_pane", "minecraft:cyan_stained_glass_pane", "minecraft:purple_stained_glass_pane", "minecraft:blue_stained_glass_pane",
+      "minecraft:brown_stained_glass_pane", "minecraft:green_stained_glass_pane", "minecraft:red_stained_glass_pane", "minecraft:black_stained_glass_pane"
+    ] },
+    { "id": "terracotta", "min": 5, "items": [
+      "minecraft:terracotta",
+      "minecraft:white_terracotta", "minecraft:orange_terracotta", "minecraft:magenta_terracotta", "minecraft:light_blue_terracotta",
+      "minecraft:yellow_terracotta", "minecraft:lime_terracotta", "minecraft:pink_terracotta", "minecraft:gray_terracotta",
+      "minecraft:light_gray_terracotta", "minecraft:cyan_terracotta", "minecraft:purple_terracotta", "minecraft:blue_terracotta",
+      "minecraft:brown_terracotta", "minecraft:green_terracotta", "minecraft:red_terracotta", "minecraft:black_terracotta"
+    ] },
+    { "id": "glazed_terracotta", "min": 5, "items": [
+      "minecraft:white_glazed_terracotta", "minecraft:orange_glazed_terracotta", "minecraft:magenta_glazed_terracotta", "minecraft:light_blue_glazed_terracotta",
+      "minecraft:yellow_glazed_terracotta", "minecraft:lime_glazed_terracotta", "minecraft:pink_glazed_terracotta", "minecraft:gray_glazed_terracotta",
+      "minecraft:light_gray_glazed_terracotta", "minecraft:cyan_glazed_terracotta", "minecraft:purple_glazed_terracotta", "minecraft:blue_glazed_terracotta",
+      "minecraft:brown_glazed_terracotta", "minecraft:green_glazed_terracotta", "minecraft:red_glazed_terracotta", "minecraft:black_glazed_terracotta"
+    ] },
+    { "id": "dyes", "min": 5, "items": [
+      "minecraft:white_dye", "minecraft:orange_dye", "minecraft:magenta_dye", "minecraft:light_blue_dye",
+      "minecraft:yellow_dye", "minecraft:lime_dye", "minecraft:pink_dye", "minecraft:gray_dye",
+      "minecraft:light_gray_dye", "minecraft:cyan_dye", "minecraft:purple_dye", "minecraft:blue_dye",
+      "minecraft:brown_dye", "minecraft:green_dye", "minecraft:red_dye", "minecraft:black_dye"
+    ] },
+    { "id": "valuables", "min": 3, "items": [
+      "minecraft:diamond_block", "minecraft:emerald_block", "minecraft:gold_block", "minecraft:iron_block",
+      "minecraft:netherite_block", "minecraft:lapis_block", "minecraft:beacon"
+    ] },
+    { "id": "light", "min": 4, "items": [
+      "minecraft:glowstone", "minecraft:sea_lantern", "minecraft:ochre_froglight", "minecraft:verdant_froglight",
+      "minecraft:pearlescent_froglight", "minecraft:shroomlight", "minecraft:end_rod", "minecraft:lantern",
+      "minecraft:soul_lantern", "minecraft:redstone_lamp", "minecraft:jack_o_lantern", "minecraft:torch", "minecraft:soul_torch"
+    ] },
+    { "id": "redstone", "min": 4, "items": [
+      "minecraft:redstone", "minecraft:repeater", "minecraft:comparator", "minecraft:piston", "minecraft:sticky_piston",
+      "minecraft:observer", "minecraft:hopper", "minecraft:rail", "minecraft:powered_rail", "minecraft:detector_rail",
+      "minecraft:activator_rail", "minecraft:redstone_lamp", "minecraft:redstone_torch", "minecraft:lever",
+      "minecraft:dispenser", "minecraft:dropper", "minecraft:target", "minecraft:daylight_detector", "minecraft:redstone_block",
+      "minecraft:slime_block", "minecraft:honey_block", "minecraft:tripwire_hook", "minecraft:note_block", "minecraft:crafter"
+    ] },
+    { "id": "building", "min": 6, "items": [
+      "minecraft:oak_log", "minecraft:spruce_log", "minecraft:birch_log", "minecraft:jungle_log", "minecraft:acacia_log",
+      "minecraft:dark_oak_log", "minecraft:mangrove_log", "minecraft:cherry_log", "minecraft:pale_oak_log",
+      "minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks", "minecraft:acacia_planks",
+      "minecraft:dark_oak_planks", "minecraft:mangrove_planks", "minecraft:cherry_planks", "minecraft:pale_oak_planks",
+      "minecraft:stone", "minecraft:smooth_stone", "minecraft:stone_bricks", "minecraft:deepslate_bricks", "minecraft:polished_deepslate",
+      "minecraft:bricks", "minecraft:polished_andesite", "minecraft:polished_diorite", "minecraft:polished_granite",
+      "minecraft:sandstone", "minecraft:smooth_sandstone", "minecraft:quartz_block", "minecraft:smooth_quartz",
+      "minecraft:polished_blackstone_bricks", "minecraft:tuff_bricks", "minecraft:mud_bricks", "minecraft:prismarine_bricks",
+      "minecraft:dark_prismarine", "minecraft:nether_bricks", "minecraft:copper_block"
+    ] },
+    { "id": "chessboard", "min": 2, "items": [
+      "minecraft:black_concrete", "minecraft:white_concrete", "minecraft:black_wool", "minecraft:white_wool",
+      "minecraft:black_terracotta", "minecraft:white_terracotta", "minecraft:black_stained_glass", "minecraft:white_stained_glass"
+    ] },
+    { "id": "end", "min": 3, "items": [
+      "minecraft:purpur_block", "minecraft:purpur_pillar", "minecraft:purpur_stairs", "minecraft:purpur_slab",
+      "minecraft:end_stone", "minecraft:end_stone_bricks", "minecraft:end_stone_brick_stairs", "minecraft:end_stone_brick_slab",
+      "minecraft:end_stone_brick_wall", "minecraft:end_rod", "minecraft:chorus_flower"
+    ] }
+  ]
+}

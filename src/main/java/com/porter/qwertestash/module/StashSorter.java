@@ -40,17 +40,26 @@ import com.porter.qwertestash.manager.ManagerIndex;
 import com.porter.qwertestash.orders.AnvilNamer;
 import com.porter.qwertestash.orders.BinTracker;
 import com.porter.qwertestash.orders.ClickPlanner;
+import com.porter.qwertestash.orders.CraftBatch;
+import com.porter.qwertestash.orders.CraftCharge;
+import com.porter.qwertestash.orders.CraftResume;
 import com.porter.qwertestash.orders.CraftGrid;
 import com.porter.qwertestash.orders.CraftHealth;
+import com.porter.qwertestash.orders.CraftLedger;
+import com.porter.qwertestash.orders.CraftOrder;
 import com.porter.qwertestash.orders.CraftPlanner;
 import com.porter.qwertestash.orders.CraftPool;
 import com.porter.qwertestash.orders.CraftSlots;
+import com.porter.qwertestash.orders.CraftSub;
 import com.porter.qwertestash.orders.ChestStack;
 import com.porter.qwertestash.orders.CraftTrip;
 import com.porter.qwertestash.orders.DeliveryBook;
 import com.porter.qwertestash.orders.DeliveryRoom;
 import com.porter.qwertestash.orders.Recipes;
 import com.porter.qwertestash.orders.Order;
+import com.porter.qwertestash.orders.Repair;
+import com.porter.qwertestash.orders.RepairRun;
+import com.porter.qwertestash.orders.RepairTrip;
 import com.porter.qwertestash.orders.SourcePicker;
 import com.porter.qwertestash.orders.SourceRules;
 import com.porter.qwertestash.orders.BinStep;
@@ -60,6 +69,14 @@ import com.porter.qwertestash.orders.Unit;
 import com.porter.qwertestash.stash.AnvilFinder;
 import com.porter.qwertestash.stash.AnvilSpot;
 import com.porter.qwertestash.stash.Containers;
+import com.porter.qwertestash.stash.AreaPending;
+import com.porter.qwertestash.stash.AreaRules;
+import com.porter.qwertestash.stash.AreaSync;
+import com.porter.qwertestash.stash.CraftBounds;
+import com.porter.qwertestash.stash.CraftSettings;
+import com.porter.qwertestash.stash.CraftTableCap;
+import com.porter.qwertestash.stash.CraftTableState;
+import com.porter.qwertestash.stash.CraftStore;
 import com.porter.qwertestash.stash.CraftingTableFinder;
 import com.porter.qwertestash.stash.CraftingTableSpot;
 import com.porter.qwertestash.stash.DeliverySpot;
@@ -67,6 +84,9 @@ import com.porter.qwertestash.stash.GoneBoxes;
 import com.porter.qwertestash.stash.GoneWatch;
 import com.porter.qwertestash.stash.PlaceSearch;
 import com.porter.qwertestash.stash.Item;
+import com.porter.qwertestash.stash.KitRouting;
+import com.porter.qwertestash.stash.KitSettings;
+import com.porter.qwertestash.stash.KitStore;
 import com.porter.qwertestash.stash.Stash;
 import com.porter.qwertestash.stash.Stash.Box;
 import com.porter.qwertestash.stash.StashIndex;
@@ -160,7 +180,7 @@ public class StashSorter extends AbstractFieldModule {
     private static final int OWN_WINDOW_GRACE_MS = 10_000;
     private static final int REREAD_COOLDOWN_MS = 60_000;
 
-    private enum Job { Survey, Take, Deposit, Dump, Fetch, Clean, Fill, Compact, FetchSigns, Label, Gather, Ground, Explore, Unpack, Deliver, Name, Craft, Anvil, Chest }
+    private enum Job { Survey, Take, Deposit, Dump, Fetch, Clean, Fill, Compact, FetchSigns, Label, Gather, Ground, Explore, Unpack, Deliver, Name, Craft, Anvil, Chest, Repair }
 
     private enum Step { Walking, Opening, Working }
 
@@ -695,9 +715,16 @@ public class StashSorter extends AbstractFieldModule {
         undoAnvilSwapNow();
         anvilRun = null;
         resetChestRun();
+        resetRepair();
         anvilSpot = null;
         anvilStep = null;
         craftKeep.clear();
+        orderCraftLots.clear();
+        kitEmptyQueue.clear();
+        orderCraftSurplus.clear();
+        CraftingTableSpot.useWebsite(null);
+        CraftingTableSpot.sideMode(false);
+        CraftingTableSpot.sideClear();
         craftCard = null;
         craftCardDetail = null;
         orders.clearDeliveryFailure();
@@ -925,6 +952,18 @@ public class StashSorter extends AbstractFieldModule {
         if (heldBefore != -1) back.add(new SetHeldItem(heldBefore));
         InventoryAction anvilBack = anvilSwapBackAction();
         if (anvilBack != null) back.add(anvilBack);
+        // Gear a repair trip stowed, and the item and bottles it had in hand, go back (best effort; what is not done stays in the saved
+        // ledger and is undone at the next start)
+        Stash gearStash = orders.st();
+        if (gearStash != null && gearStash.repairGear != null && !gearStash.repairGear.isEmpty() && openContainerId() == 0 && !holdingCursor()) {
+            for (int[] m : Repair.undoPlan(Repair.parseLedger(gearStash.repairGear), this::windowId)) {
+                back.add(new ClickItem(0, m[0], ClickItemAction.LEFT_CLICK));
+                back.add(new ClickItem(0, m[1], ClickItemAction.LEFT_CLICK));
+            }
+            gearStash.repairGear = null;
+            gearStash.markDirty();
+            gearStash.save();
+        }
         if (!back.isEmpty() && openContainerId() == 0) {
             INVENTORY.submit(InventoryActionRequest.builder().owner(this).actions(back).priority(SORTER_PRIORITY).build());
         }
@@ -949,9 +988,16 @@ public class StashSorter extends AbstractFieldModule {
         undoAnvilSwapNow();
         anvilRun = null;
         resetChestRun();
+        resetRepair();
         anvilSpot = null;
         anvilStep = null;
         craftKeep.clear();
+        orderCraftLots.clear();
+        kitEmptyQueue.clear();
+        orderCraftSurplus.clear();
+        CraftingTableSpot.useWebsite(null);
+        CraftingTableSpot.sideMode(false);
+        CraftingTableSpot.sideClear();
         craftCard = null;
         craftCardDetail = null;
         breakRetries = 0;
@@ -1187,7 +1233,16 @@ public class StashSorter extends AbstractFieldModule {
 
         // The search for an anvil standing goes on a tick's worth at a time
         if (anvilScanNow != null) advanceAnvilScan();
+        // The website's table stands in for ours only while a chunk of a craft order runs
+        if (CraftingTableSpot.websiteActive() && (craft == null || craft.oc == null)) CraftingTableSpot.useWebsite(null);
+        // And the side slot of the bot's own table for an order lasts as long as the order does
+        if (CraftingTableSpot.sideModeOn() && !orders.flow.running()) {
+            CraftingTableSpot.sideMode(false);
+            CraftingTableSpot.sideClear();
+        }
         if (tableScanNow != null) advanceTableScan();
+        // With craft orders on, the crafting tables standing in the stash area are looked for now and then: the website offers them as a quick pick
+        else if (stash != null && job == null && craftOrdersBase() && Alerts.online() && tickCount - tableScanDoneAt > TABLE_SEEN_TICKS) startTableScan();
 
         // Items stuck in the crafting table's grid: nothing else until they are taken back out (or the table is closed)
         if (tableStuck && holdTable()) return;
@@ -1208,8 +1263,9 @@ public class StashSorter extends AbstractFieldModule {
             if (!deferredAccess.isEmpty()) releaseDeferred();
             if (!staleBoxes.isEmpty()) applyStale();
             applySignChanges();
+            applyPendingArea();
             if (sortSeen != sorts() && !sortChanged()) return;
-            if (exploreSeen != Stashes.exploreVersion || !Objects.equals(exploreDimension, Stash.currentDimension())) exploreChanged();
+            if (exploreSeen != Stashes.exploreVersion || !com.porter.qwertestash.stash.Dimensions.same(exploreDimension, Stash.currentDimension())) exploreChanged();
             if (idle && orders.flow.holdsOrder()) idle = false;
             if (idle && !wakeUp()) {
                 // Stay-on mode with nothing to sort: ground items are looked at now and then, once nothing else is going on
@@ -1251,6 +1307,7 @@ public class StashSorter extends AbstractFieldModule {
         else if (job == Job.Explore) tickExplore();
         else if (job == Job.Unpack) tickUnpack();
         else if (job == Job.Name) tickName();
+        else if (job == Job.Repair) tickRepair();
         else if (job == Job.Craft) tickCraft();
         else if (job == Job.Anvil) tickAnvilPlace();
         else if (job == Job.Chest) tickChestPlace();
@@ -1378,7 +1435,7 @@ public class StashSorter extends AbstractFieldModule {
      */
     private void exploreChanged() {
         // Read before resetExplore takes the new one: a change of dimension says nothing about which containers were broken
-        boolean sameDimension = Objects.equals(exploreDimension, Stash.currentDimension());
+        boolean sameDimension = com.porter.qwertestash.stash.Dimensions.same(exploreDimension, Stash.currentDimension());
         exploreSeen = Stashes.exploreVersion;
         for (Box box : stash.boxes) box.unreachable = false;
         failedSurvey.clear();
@@ -1450,6 +1507,45 @@ public class StashSorter extends AbstractFieldModule {
         return goneWatch.blocker(stash.dimension, Stash.currentDimension(), standing, now);
     }
 
+    /**
+     * A queued stash area (from the website or from `stash area`, see AreaPending) is applied here, on the tick, and only between tasks (AreaRules.busyWhy);
+     * a website area further than 128 blocks from the bot waits, and so does one for another dimension. Applying replaces the area, saves it and
+     * runs the usual change path (the sorter explores it afresh). A changed area never cuts a walk, order, box or pass short.
+     */
+    private void applyPendingArea() {
+        AreaPending.Request r = AreaPending.get();
+        Stash s = stash;
+        if (r == null || s == null) return;
+        BlockPos feet = playerFeet();
+        String busy = AreaRules.busyWhy(orders.flow.holdsOrder() || orders.flow.resumeId() != null, job != null, handle != null || compact != null || activeBin != null,
+            s.inFlight != null || pendingResume != null, repair != null || repairTrip != null || craft != null || anvilRun != null || chestRun != null || naming != null,
+            putBackTrip || !activeCarried().isEmpty());
+        // The dimension of a command's area is resolved now: the one it was queued with, else the bot's
+        String dimension = AreaSync.resolveDimension(r.dimension(), Stash.currentDimension());
+        if (r.box() != null && dimension == null) {
+            AreaPending.setWhy(AreaRules.BUSY);
+            return;
+        }
+        String why = AreaRules.pendingWhy(r.box(), dimension, Stash.currentDimension(), r.website(), feet.x() + 0.5, feet.z() + 0.5, busy);
+        AreaPending.setWhy(why == null ? AreaRules.BUSY : why);
+        if (why != null) return;
+        if (r.box() == null) {
+            s.area = null;
+        }
+        else {
+            s.area = new Stash.Area(new int[] {r.box()[0], r.box()[1], r.box()[2]}, new int[] {r.box()[3], r.box()[4], r.box()[5]}, dimension);
+        }
+        s.cornerA = s.cornerB = null;
+        // Only the request that was applied is removed: one queued meanwhile stays. A change made in game is reported until the server has this area
+        AreaPending.clear(r);
+        if (!r.website()) AreaPending.markEdited(AreaRules.hashOf(r.box(), r.box() == null ? null : dimension));
+        Stashes.exploreVersion++;
+        Stashes.version++;
+        s.markDirty();
+        s.save();
+        info("The stash area was {}.", r.box() == null ? "cleared" : "changed");
+    }
+
     /** A container of the stash was read: the stash's dimension is recorded (once), and this world is shown to be the stash's. */
     private void noteStashRead(Box box) {
         // A read that worked ends the waiting and the back-off
@@ -1458,6 +1554,7 @@ public class StashSorter extends AbstractFieldModule {
         if (box.delivery || stash == null) return;
         String here = Stash.currentDimension();
         if (here == null) return;
+        box.readIn = here;
         if (stash.dimension == null) {
             stash.dimension = here;
             stash.markDirty();
@@ -1648,7 +1745,7 @@ public class StashSorter extends AbstractFieldModule {
 
     private void tickExplore() {
         int[] b = stash.bounds();
-        if (b == null || exploreSeen != Stashes.exploreVersion || !Objects.equals(exploreDimension, Stash.currentDimension())) {
+        if (b == null || exploreSeen != Stashes.exploreVersion || !com.porter.qwertestash.stash.Dimensions.same(exploreDimension, Stash.currentDimension())) {
             // Changed under us: between jobs it starts over
             endExplore();
             return;
@@ -2825,6 +2922,8 @@ public class StashSorter extends AbstractFieldModule {
         Map<String, Group> groups = new HashMap<>();
         for (Item item : sources) {
             if (Containers.isSignItem(item.id)) continue;
+            // A kit with a chest of its own is never homeless, and never gets a new category
+            if (kitRouted(item)) continue;
             Item subject = labelSubject(item);
             if (mixedShulker(item) && !keepWholeBoxes().isEmpty()) continue;
 
@@ -2893,7 +2992,7 @@ public class StashSorter extends AbstractFieldModule {
     private Map<Box, Containers.Face> labelCandidateBoxes() {
         Map<Box, Containers.Face> out = new LinkedHashMap<>();
         for (Box box : stash.boxes) {
-            if (!box.sortable() || box.dropOff || box.labelFailed || !box.labels.isEmpty() || box.autoLabel != null) continue;
+            if (!box.sortable() || box.dropOff || box.labelFailed || !box.labels.isEmpty() || box.autoLabel != null || kitReserved(box)) continue;
             if (signPending(box) || staleBoxes.contains(box.pos) || deferredAccess.containsKey(box)) continue;
 
             boolean empty = true;
@@ -3803,6 +3902,8 @@ public class StashSorter extends AbstractFieldModule {
             else reportCantOpen(target);
         }
 
+        // A repair trip puts the gear back before it lets go (it carries on with that while giving way, see tickRepairWhileAway)
+        if (job == Job.Repair && repairTrip != null && !repairUndoMode) repairYieldAbort = true;
         activity.releaseOurPathing();
         restoreRules();
         if (job != null) {
@@ -3815,7 +3916,13 @@ public class StashSorter extends AbstractFieldModule {
         startWaiting(reason);
     }
 
+    /** While giving way with a repair trip in hand, the trip is told to stop and ticks on to put what it moved back. */
+    private void tickRepairWhileAway() {
+        if (job == Job.Repair && repairTrip != null && repairYieldAbort && !busy()) tickRepair();
+    }
+
     private void tickYielding() {
+        tickRepairWhileAway();
         noteWaiting(foreignNow ? lastReason : null);
         if (cleanupStep()) {
             swapStep = 0;
@@ -3906,6 +4013,7 @@ public class StashSorter extends AbstractFieldModule {
      */
     private boolean tickWaiting(Activity.@Nullable Reason foreign) {
         noteWaiting(foreign);
+        tickRepairWhileAway();
 
         // A late answer to our own click: a window of ours opened while we were waiting
         if (openContainerId() != 0 && ownsWindow()) {
@@ -4014,6 +4122,10 @@ public class StashSorter extends AbstractFieldModule {
             AnvilNamer n = naming;
             if (n != null) n.abort("gave way to another module");
             else endNaming(new AnvilNamer.Outcome(AnvilNamer.CLOSED, true, false));
+            return;
+        }
+        if (job == Job.Repair) {
+            // Nothing in the world was let go of: the trip carries on where it was (it stops itself if someone is near)
             return;
         }
         if (job == Job.Anvil) {
@@ -4378,6 +4490,7 @@ public class StashSorter extends AbstractFieldModule {
             takeRoom = null;
             carriedHomesCache = null;
             signedCache = null;
+            kitRoutingSnap = null;
         }
     }
 
@@ -4412,13 +4525,20 @@ public class StashSorter extends AbstractFieldModule {
     private boolean pickJob() {
         // The perimeter was set in another dimension: nothing here is the stash's
         if (stash.areaSet() && !stash.hasArea()) {
-            if (!elsewhereSaid) {
-                elsewhereSaid = true;
-                info("The stash area is in another dimension, waiting until the bot is back there.");
+            long now = System.currentTimeMillis();
+            if (areaWaitSince == 0) areaWaitSince = now;
+            // Said again every minute, with both dimensions, so the wait is never silent
+            if (now - areaWaitLogAt >= 60_000L) {
+                areaWaitLogAt = now;
+                info("The stash area is in another dimension ({}) and the bot is in {}: waiting until it is back there.", stash.area.dimension, Stash.currentDimension());
             }
             return false;
         }
         elsewhereSaid = false;
+        areaWaitSince = 0;
+        areaWaitLogAt = 0;
+        // What a repair cut short by a restart moved is put back before anything else is read, explored or resumed
+        if (repair == null && repairTrip == null && startGearUndo()) return true;
         // The delivery container is kept out of the sort (flagged and excluded) from the moment it is set
         syncDeliveryBox();
         checkOrphans();
@@ -4463,6 +4583,12 @@ public class StashSorter extends AbstractFieldModule {
         if (chestRun != null) {
             if (continueChestRun()) return true;
             if (chestRun != null) return false;
+        }
+
+        // What a repair cut short by a restart moved is put back first, then a repair under way goes on until it is over
+        if (repair != null) {
+            if (continueRepair()) return true;
+            if (repair != null) return false;
         }
 
         // Orders come before sorting (and keep a driven run going while one is in hand)
@@ -4586,7 +4712,7 @@ public class StashSorter extends AbstractFieldModule {
             Box best = null;
             int bestSlot = -1;
             for (Box box : stash.boxes) {
-                if (!box.sortable() || box.stale || blocked(box, Job.Fetch) || signPending(box)) continue;
+                if (!box.sortable() || box.stale || blocked(box, Job.Fetch) || signPending(box) || kitReserved(box)) continue;
                 for (int i = 0; i < box.contents.length; i++) {
                     if (!strays(box.contents[i]).isEmpty() && (best == null || closer(box, best))) {
                         best = box;
@@ -4619,6 +4745,9 @@ public class StashSorter extends AbstractFieldModule {
 
         // Everything is put away: items lying on the ground in the stash area are fetched next, and then put away too
         if (startGround(false)) return true;
+
+        // Idle: kit restock (after drop-offs, repair routing and repair passes, before compaction)
+        if (startRestock()) return true;
 
         // Everything is where it belongs: full shulkers' worth of anything are packed, which frees chest slots
         if (startCompaction() && continueCompaction()) return true;
@@ -4853,7 +4982,7 @@ public class StashSorter extends AbstractFieldModule {
         boolean changed = false;
         for (Stash.Orphan orphan : new ArrayList<>(stash.orphans)) {
             if (orphan.pos.equals(busy) || (pendingResume != null && orphan.pos.equals(pendingResume.placed))) continue;
-            if (orphan.dimension != null && here != null && !orphan.dimension.equals(here)) continue;
+            if (orphan.dimension != null && here != null && !com.porter.qwertestash.stash.Dimensions.same(orphan.dimension, here)) continue;
             if (!Containers.isLoaded(orphan.pos) || World.getBlock(orphan.pos.x(), orphan.pos.y(), orphan.pos.z()).name().endsWith("shulker_box")) continue;
             stash.orphans.remove(orphan);
             changed = true;
@@ -4880,7 +5009,7 @@ public class StashSorter extends AbstractFieldModule {
             return false;
         }
         String here = Stash.currentDimension();
-        if (record.dimension != null && here != null && !record.dimension.equals(here)) {
+        if (record.dimension != null && here != null && !com.porter.qwertestash.stash.Dimensions.same(record.dimension, here)) {
             if (!resumeDimensionSaid) {
                 resumeDimensionSaid = true;
                 alert("A shulker of mine is standing at {} in {}, the bot is in {}. No shulkers are put down, and it is finished once the bot is back there.",
@@ -5128,7 +5257,7 @@ public class StashSorter extends AbstractFieldModule {
      * one whose sign is changing.
      */
     private boolean compactSource(Box b) {
-        return b.sortable() && !b.stale && !b.dropOff && !b.noCompact && !signPending(b) && b.labels.stream().noneMatch(Categories::isKeepWhole);
+        return b.sortable() && !b.stale && !b.dropOff && !b.noCompact && !signPending(b) && !kitReserved(b) && b.labels.stream().noneMatch(Categories::isKeepWhole);
     }
 
     /**
@@ -5148,7 +5277,9 @@ public class StashSorter extends AbstractFieldModule {
      * An unnamed shulker that is empty, or holds only this plan's item.
      */
     private boolean isPlanShulker(@Nullable Item s, CompactPlan plan) {
-        if (s == null || !s.isShulker() || s.customName) return false;
+        if (s == null || !s.isShulker()) return false;
+        // The base of a kit build is an incomplete copy: it carries its template name
+        if (s.customName && !(plan.bin != null && plan.bin.unit.kitBase != null)) return false;
         if (plan.bin != null) {
             for (Item inside : s.contents) if (!BinTracker.owns(plan.bin.lots, inside.indexKey(), inside.variant, inside.count)) return false;
             return true;
@@ -5416,12 +5547,48 @@ public class StashSorter extends AbstractFieldModule {
      * An unnamed empty shulker in the stash that may be taken: in a chest signed for shulkers first, then the nearest,
      * never one in a kit chest or a container marked compactSkip, and not one the offhand shulker would clash with.
      */
+    /** The shulker with this group key in a container the bot may take from, or null. */
+    private @Nullable Found findShulkerByKey(String key) {
+        Found best = null;
+        for (Box box : stash.boxes) {
+            if (!box.sortable() || box.stale || box.dropOff || box.delivery || blocked(box, Job.Fetch) || signPending(box) || box.contents == null) continue;
+            for (int i = 0; i < box.contents.length; i++) {
+                Item it = box.contents[i];
+                if (it == null || !it.isShulker() || !key.equals(ManagerIndex.shulkerKey(it))) continue;
+                if (best == null || closer(box, best.box())) best = new Found(box, i);
+                break;
+            }
+        }
+        return best;
+    }
+
+    /** The item id of an empty shulker of a template colour ("plain" is the undyed one). */
+    static String colourShulkerId(String colour) {
+        return colour.equals("plain") ? "shulker_box" : colour + "_shulker_box";
+    }
+
+    /** As {@link #findEmptyShulker()}, only shulkers of this colour (a template colour name, or "plain"). */
+    private @Nullable Found findEmptyShulker(String colour) {
+        String id = colourShulkerId(colour), offhand = offhandId();
+        Found best = null;
+        for (Box box : stash.boxes) {
+            if (!box.sortable() || box.stale || box.noCompact || signPending(box) || blocked(box, Job.Fetch) || kitReserved(box) || box.contents == null) continue;
+            for (int i = 0; i < box.contents.length; i++) {
+                Item item = box.contents[i];
+                if (!emptyShulker(item) || item.id.equals(offhand) || !item.id.equals(id)) continue;
+                if (best == null || closer(box, best.box())) best = new Found(box, i);
+                break;
+            }
+        }
+        return best;
+    }
+
     private @Nullable Found findEmptyShulker() {
         String offhand = offhandId();
         Found best = null;
         boolean bestSigned = false;
         for (Box box : stash.boxes) {
-            if (!box.sortable() || box.stale || box.noCompact || signPending(box) || blocked(box, Job.Fetch)) continue;
+            if (!box.sortable() || box.stale || box.noCompact || signPending(box) || blocked(box, Job.Fetch) || kitReserved(box)) continue;
             if (box.labels.stream().anyMatch(Categories::isKeepWhole)) continue;
             boolean signed = box.labels.stream().anyMatch(l -> l.toLowerCase(java.util.Locale.ROOT).contains("shulker"));
             for (int i = 0; i < box.contents.length; i++) {
@@ -5618,8 +5785,22 @@ public class StashSorter extends AbstractFieldModule {
             }
             want = it -> isPlanShulker(it, plan);
         }
+        else if (plan.bin != null && plan.bin.unit.kitBase != null) {
+            // A kit build starts from the incomplete copy found for it (its group key), not an empty shulker
+            String baseKey = plan.bin.unit.kitBase;
+            Found found = findShulkerByKey(baseKey);
+            if (found == null) {
+                abortCompaction("the incomplete copy to top up has moved");
+                return continueCompaction();
+            }
+            box = found.box();
+            slot = found.slot();
+            want = it -> it != null && it.isShulker() && baseKey.equals(ManagerIndex.shulkerKey(it));
+        }
         else {
-            Found found = findEmptyShulker();
+            // A kit build takes an empty shulker of the template colour, else any (noted colour_substituted when the finished kit is delivered)
+            Found found = plan.bin != null && plan.bin.unit.kitColor != null ? findEmptyShulker(plan.bin.unit.kitColor) : null;
+            if (found == null) found = findEmptyShulker();
             if (found == null) {
                 abortCompaction("no empty shulker");
                 return continueCompaction();
@@ -5627,7 +5808,9 @@ public class StashSorter extends AbstractFieldModule {
             box = found.box();
             slot = found.slot();
             String offhand = offhandId();
-            want = it -> emptyShulker(it) && !it.id.equals(offhand);
+            Item chosen = box.contents[slot];
+            String wantId = plan.bin != null && plan.bin.unit.kitTemplate != null && chosen != null ? chosen.id : null;
+            want = it -> emptyShulker(it) && !it.id.equals(offhand) && (wantId == null || wantId.equals(it.id));
         }
         plan.jobs++;
         wantSlot = slot;
@@ -5640,6 +5823,9 @@ public class StashSorter extends AbstractFieldModule {
      * wanted in it, it is broken and picked up.
      */
     private boolean startPackJob(CompactPlan plan) {
+        // The stacks of an order the order wants repaired are repaired before they go into the shulker
+        if (plan.bin != null && !plan.aborting && beginRepair(plan)) return true;
+        if (repairBegan) return false;
         plan.jobs++;
         if (plan.placedPos != null) {
             startHandling(Job.Fill, -1, plan.key);
@@ -5748,7 +5934,7 @@ public class StashSorter extends AbstractFieldModule {
      */
     private boolean gatherOne(Container c) {
         // A craft's inputs, or an anvil to put down
-        Bin gathering = compact == null ? gatheringBin() : null;
+        Bin gathering = repairBottles != null ? repairBottles : compact == null ? gatheringBin() : null;
         if (gathering != null) {
             if (gatherLeft <= 0 || freeCarryCount() <= 1) return false;
             return takeLot(c, gathering, target.pos, true);
@@ -5971,7 +6157,7 @@ public class StashSorter extends AbstractFieldModule {
                 Box from = null;
                 int fromSlot = -1;
                 for (Box box : stash.boxes) {
-                    if (!box.sortable() || box.stale || box.dropOff || blocked(box, Job.Fetch) || signPending(box)) continue;
+                    if (!box.sortable() || box.stale || box.dropOff || blocked(box, Job.Fetch) || signPending(box) || kitReserved(box)) continue;
                     for (int i = 0; i < box.contents.length; i++) {
                         Item s = box.contents[i];
                         if ((bulkWithRoom(s, id) || (startNew && emptyShulker(s))) && (from == null || closer(box, from))) {
@@ -6030,6 +6216,9 @@ public class StashSorter extends AbstractFieldModule {
 
         Item main = Categories.dominantContent(shulker);
         if (main == null) return List.of();
+
+        // A kit that settings route (or would route to a missing chest) is kept whole; with no setting for it, repacking is as in 1.13.0
+        if (kitWhole(shulker)) return List.of();
 
         // A chest signed for kits takes mixed shulkers whole instead
         if (!keepWholeBoxes().isEmpty()) return List.of();
@@ -7918,7 +8107,7 @@ public class StashSorter extends AbstractFieldModule {
 
         clickRefused = false;
         boolean busy = switch (job) {
-            case Survey, Clean, Fill, Label, Ground, Explore, Unpack, Name, Craft, Anvil, Chest -> false;
+            case Survey, Clean, Fill, Label, Ground, Explore, Unpack, Name, Craft, Anvil, Chest, Repair -> false;
             case FetchSigns -> fetchSignsOne(c);
             case Take -> takeOne(c);
             case Fetch -> fetchOne(c);
@@ -8719,17 +8908,25 @@ public class StashSorter extends AbstractFieldModule {
      */
     private void plan() {
         tierBoxes.clear();
+        // The kit view is looked at again once per pass, whatever the cheap checks say
+        kitState = null;
+        kitRoutingSnap = kitRoutingLive();
         if (CONFIG.mode != Mode.Tiers) return;
 
-        List<Box> ordered = stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff).sorted(Comparator.comparingInt(b -> b.order)).toList();
+        // Kit-reserved containers hold kits only, and kits that have a chest of their own are not part of the tiers
+        KitRouting.View kitsNow = kitView();
+        List<Box> ordered = stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && (kitsNow == null || !kitsNow.reserved(b))).sorted(Comparator.comparingInt(b -> b.order)).toList();
 
         // How many stacks of each tier there are, including drop-offs and what we're carrying
         int[] counts = new int[5];
         for (Box box : stash.boxes) {
             if (!box.sortable()) continue;
-            for (Item item : box.contents) if (item != null) counts[tier(item)]++;
+            for (Item item : box.contents) if (item != null && !kitRouted(item)) counts[tier(item)]++;
         }
-        for (int slot : carriedSlots()) counts[tier(inventoryItem(slot))]++;
+        for (int slot : carriedSlots()) {
+            Item carriedItem = inventoryItem(slot);
+            if (carriedItem == null || !kitRouted(carriedItem)) counts[tier(carriedItem)]++;
+        }
 
         // Fill the containers in order, a tier at a time. A container can end up shared by two tiers.
         int index = 0, used = 0;
@@ -8768,6 +8965,17 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     private List<Box> computeDestinations(Item item) {
+        // A shulker that scores as a kit goes where the website says, before Tiers, signs and contents are looked at
+        KitRouting.View kitRules = kitView();
+        if (kitRules != null) {
+            KitRouting.Route route = kitRules.route(item);
+            if (route.decision().routed() && kitRoutingOn()) {
+                if (route.kind() == KitRouting.Kind.MISSING) kitMissing(route.decision());
+                else if (route.fallback()) kitFallback(route.decision());
+                return kitRules.destinations(route);
+            }
+        }
+
         if (CONFIG.mode == Mode.Tiers) return tierBoxes.getOrDefault(tier(item), List.of());
 
         // A shulker goes where what it's mostly full of goes: a shulker of totems belongs with the totems. Only when
@@ -8820,8 +9028,9 @@ public class StashSorter extends AbstractFieldModule {
         int best = 0;
         List<Box> result = new ArrayList<>();
         Categories.Described described = Categories.describe(item);
+        KitRouting.View kitsNow = kitView();
         for (Box box : stash.boxes) {
-            if (!box.sortable() || box.dropOff) continue;
+            if (!box.sortable() || box.dropOff || (kitsNow != null && kitsNow.reserved(box))) continue;
 
             int score = Categories.boxScore(scoredLabels(box), described);
 
@@ -8889,7 +9098,7 @@ public class StashSorter extends AbstractFieldModule {
     private int unrecognisedSigns(boolean say) {
         int count = 0;
         for (Box box : stash.boxes) {
-            if (!box.sortable() || box.dropOff || box.labels.isEmpty()) continue;
+            if (!box.sortable() || box.dropOff || box.labels.isEmpty() || kitReserved(box)) continue;
             if (box.labels.stream().anyMatch(Categories::recognises)) continue;
             count++;
             if (say && unrecognisedReported.add(box)) {
@@ -8907,7 +9116,7 @@ public class StashSorter extends AbstractFieldModule {
     private void reportStrays() {
         if (CONFIG.mode != Mode.Signs) return;
         for (Box box : stash.boxes) {
-            if (!box.sortable() || box.dropOff || box.labels.isEmpty() || isMisc(box)) continue;
+            if (!box.sortable() || box.dropOff || box.labels.isEmpty() || isMisc(box) || kitReserved(box)) continue;
             if (box.labels.stream().anyMatch(Categories::isKeepWhole) || box.labels.stream().noneMatch(Categories::recognises)) continue;
 
             // Shulkers go by what is in them, so this asks where each stack belongs rather than scoring its name
@@ -8967,7 +9176,7 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     private boolean takesAnything(Box b, boolean signedMisc) {
-        if (!b.sortable() || b.dropOff || b.free() <= 0 || blocked(b, Job.Dump) || signPending(b)) return false;
+        if (!b.sortable() || b.dropOff || b.free() <= 0 || blocked(b, Job.Dump) || signPending(b) || kitReserved(b)) return false;
         if (signedMisc) return isMisc(b);
 
         // Only in signs mode, and only a container whose sign state has been read: no sign, not even a blank one
@@ -9024,7 +9233,137 @@ public class StashSorter extends AbstractFieldModule {
      * Chests signed for kits, which take mixed shulkers whole.
      */
     private List<Box> keepWholeBoxes() {
-        return stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && b.labels.stream().anyMatch(Categories::isKeepWhole)).toList();
+        KitRouting.View kitsNow = kitView();
+        return stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && (kitsNow == null || !kitsNow.reserved(b)) && b.labels.stream().anyMatch(Categories::isKeepWhole)).toList();
+    }
+
+    // Kit sorting (1.14.0, KIT-CONTRACT.md "What the bot does"). The settings come from the cache the Stash Manager reply fills
+    // (KitStore, also while offline). The view is the settings against this stash: which box an id is and which boxes are kit-reserved.
+    // It is rebuilt when the settings, the stash or its boxes change, and the checks to know that are plain int compares.
+    // One immutable holder, read without a lock: the hit path is a volatile read and four compares.
+    private record KitState(@Nullable Stash stash, int store, int version, int boxes, KitRouting.@Nullable View view) {
+    }
+
+    private volatile @Nullable KitState kitState;
+    // Whether kit routing was allowed when the planning pass began; it does not change during the pass. Null outside a pass.
+    private volatile @Nullable Boolean kitRoutingSnap;
+    // A kit whose chest is missing or cannot take kits is said once per key and container until the settings change
+    private final Set<String> kitWarned = new HashSet<>();
+    private int kitWarnedStore = -1;
+
+    /** The kit settings against the stash, or null when kit sorting is off or nothing is set. Tick thread. */
+    private KitRouting.@Nullable View kitView() {
+        Stash st = stash;
+        if (!CONFIG.kitSorting || st == null) return null;
+        int store = KitStore.shared().version(), version = Stashes.version, boxes = st.boxes.size();
+        KitState s = kitState;
+        if (s != null && s.stash() == st && s.store() == store && s.version() == version && s.boxes() == boxes) return s.view();
+        return rebuildKitView(st, store, version, boxes);
+    }
+
+    private synchronized KitRouting.@Nullable View rebuildKitView(Stash st, int store, int version, int boxes) {
+        // The warnings start again only when the settings changed; a view rebuilt every planning pass must not repeat them
+        if (store != kitWarnedStore) {
+            synchronized (kitWarned) {
+                kitWarned.clear();
+            }
+            kitWarnedStore = store;
+        }
+        KitSettings settings = KitStore.shared().get(ManagerIndex.clamp(st.server, 256), ManagerIndex.clamp(st.name, 256));
+        KitRouting.View view = settings == null ? null : new KitRouting.View(st, settings);
+        kitState = new KitState(st, store, version, boxes, view);
+        return view;
+    }
+
+    /** The kits chest or the chest of a kit rule: nothing but kit shulkers goes in, and it is out of overflow, sign scoring, the tiers, compacting, repacking and labelling. */
+    private boolean kitReserved(Box box) {
+        KitRouting.View v = kitView();
+        return v != null && v.reserved(box);
+    }
+
+    /**
+     * Whether kit routing may apply to what is in hand: never while an order, a repair or a put-back holds the carried stacks (those go
+     * where the order, the repair or the put-back says, whatever their names). Planning passes run with none of them going.
+     */
+    private boolean kitRoutingOn() {
+        Boolean snap = kitRoutingSnap;
+        return snap != null ? snap : kitRoutingLive();
+    }
+
+    /** Nothing that carries stacks for its own purpose is going: no order, repair (and its trip), craft, naming, chest or put-back. */
+    private boolean kitRoutingLive() {
+        return repair == null && repairTrip == null && craft == null && anvilRun == null && naming == null && !putBackTrip && !orders.engaged();
+    }
+
+    /** The chest a kit shulker is routed to (a rule's or the kits chest), whatever is going on, or null. */
+    private @Nullable Box kitHome(@Nullable Item item) {
+        KitRouting.View v = kitView();
+        if (v == null || item == null) return null;
+        KitRouting.Route r = v.route(item);
+        return v.destinations(r).isEmpty() ? null : r.box();
+    }
+
+    /** The containers of a kit's chain (its rule's, its template's, its category's, the general kits chest) that resolve; empty for anything else. */
+    private List<Box> kitChain(@Nullable Item item) {
+        KitRouting.View v = kitView();
+        return v == null || item == null ? List.of() : v.chainBoxes(item);
+    }
+
+    /** A put-back may go to a kit-reserved chest only when every stack going there is a kit routed to it. */
+    private boolean originAllowed(Box from, List<Integer> slots) {
+        if (!kitReserved(from)) return true;
+        if (slots.isEmpty()) return false;
+        for (int slot : slots) if (!kitChain(inventoryItem(slot)).contains(from)) return false;
+        return true;
+    }
+
+    /** Kit sorting is on and a rule or the kits chest applies to this kit (found or missing): it is never unpacked or repacked. */
+    private boolean kitWhole(Item shulker) {
+        return CONFIG.kitSorting && KitRouting.keptWhole(kitView(), shulker);
+    }
+
+    /** A kit shulker that has a say in where it goes (a chest, or none to take it). */
+    private boolean kitRouted(Item item) {
+        KitRouting.View v = kitView();
+        return v != null && v.route(item).decision().routed() && kitRoutingOn();
+    }
+
+    /** A kit goes to a lower level of its chain (its own chest or its category's is full or missing): said once per kit and level until the settings change. */
+    private void kitFallback(KitRouting.Decision d) {
+        boolean first;
+        synchronized (kitWarned) {
+            first = kitWarned.add("fallback\t" + (d.key() == null ? "\u0000" : d.key()) + "\t" + d.kind());
+        }
+        if (first) info("A kit goes to {} because the chests before it are full or missing.", d.kind() == KitRouting.Kind.KITS_CHEST ? "the general kits chest" : "its category's chest");
+    }
+
+    private void kitMissing(KitRouting.Decision d) {
+        boolean first;
+        synchronized (kitWarned) {
+            // A null key (unnamed) is a sentinel no name can be, so an unnamed kit and a kit named "null" are told apart
+            first = kitWarned.add((d.key() == null ? "\u0000" : d.key()) + "\t" + d.container());
+        }
+        String what = d.key() == null ? "an unnamed kit" : "the kit \"" + d.key() + "\"";
+        if (first) {
+            warn("The chest picked for {} ({}) is missing or can't take kits (not read yet, excluded, a drop-off or unreachable). Such a kit stays where it is, and one from a drop-off goes to overflow.", what, d.container());
+        }
+        // The container id is a position, like the positions the other warnings give; the proxy log is not streamer-facing
+    }
+
+    /** The shulker boxes in the bot's inventory (main inventory and hotbar), for the kit report. Tick thread. */
+    public List<Item> inventoryShulkers() {
+        List<ItemStack> inv = CACHE.getPlayerCache().getPlayerInventory();
+        List<Item> out = new ArrayList<>();
+        for (int window = 9; window <= 44 && window < inv.size(); window++) {
+            ItemStack stack = inv.get(window);
+            // Only a shulker box is read into an Item: this runs every few seconds
+            if (stack == null || stack.getAmount() <= 0) continue;
+            ItemData data = ItemRegistry.REGISTRY.get(stack.getId());
+            if (data == null || !data.name().endsWith("shulker_box")) continue;
+            Item item = Item.of(stack);
+            if (item != null && item.isShulker()) out.add(item);
+        }
+        return out;
     }
 
     /**
@@ -9324,6 +9663,7 @@ public class StashSorter extends AbstractFieldModule {
             case Craft -> "crafting a shulker box at the crafting table";
             case Anvil -> "putting an anvil down to name order shulkers at";
             case Chest -> "putting another chest up for the delivery storage";
+            case Repair -> "repairing order items with experience bottles";
             case Explore -> "exploring the stash area (" + exploredChunks.size() + " chunks seen, " + unreachableChunks.size() + " out of reach)";
             case Ground -> "picking up " + groundLabel + " from the ground" + (positions ? " at " + (groundCell == null ? "?" : fmt(groundCell)) : "");
         } + " (" + moved + " moved)" + unrecognisedNote();
@@ -9352,6 +9692,8 @@ public class StashSorter extends AbstractFieldModule {
     /** A shulker taken from the stash to be emptied of what the order needs, and where it came from: it goes back there. */
     private static final class SourceShulker {
         final BlockPos origin;
+        /** A kit that could not be completed: every stack comes out (not only what a bin needs), and the shulker goes to a container with room. */
+        boolean emptyAll;
         boolean opened;
         int tries;
 
@@ -9369,6 +9711,156 @@ public class StashSorter extends AbstractFieldModule {
     private boolean orderLeftoverTried;
 
     /** For the Stash Manager (bot tick): the order in hand and everything the protocol needs to know about it. */
+    // Kit restock (1.16.0, KIT-CONTRACT v2 revision 4 "Restock"). An idle job: the sorter offers the order flow a restock order (never reported to the
+    // server, never saved), so the kit is planned, built, named and carried by the code kit orders use; the finished kit is filed by the sorter.
+    // Compiles and is unit tested in its parts; it has not been run in the game.
+
+    private static final String RESTOCK_ID = "restock-";
+    private volatile boolean restockHeard;
+    private int restockSeq;
+    private long restockNextAt;
+    private @Nullable String restockTemplate;
+    private boolean restockTopUp;
+    private volatile boolean restockOrdersWaiting;
+    private volatile com.porter.qwertestash.orders.KitRestock.Decision restockDecision = new com.porter.qwertestash.orders.KitRestock.Decision(com.porter.qwertestash.orders.KitRestock.State.OFF, null, null, false);
+
+    /** Whether an order waits for the bot (the last heartbeat reply said so): restock gives way. Tick thread. */
+    public void restockHint(boolean ordersWaiting, boolean heard) {
+        restockOrdersWaiting = ordersWaiting;
+        restockHeard = heard;
+    }
+
+    /** The restock state for the kit report. Any thread. */
+    public com.porter.qwertestash.orders.KitRestock.Decision restockState() {
+        OrderFlow f = orders.flow;
+        if (f.isRestock() && f.running()) {
+            return new com.porter.qwertestash.orders.KitRestock.Decision(com.porter.qwertestash.orders.KitRestock.State.BUILDING, restockTemplate,
+                restockTopUp ? com.porter.qwertestash.orders.KitRestock.TOPPING_UP : null, restockTopUp);
+        }
+        if (!CONFIG.kitSorting || !CONFIG.kitOrders || !CONFIG.kitRestock) return new com.porter.qwertestash.orders.KitRestock.Decision(com.porter.qwertestash.orders.KitRestock.State.OFF, null, null, false);
+        return restockDecision;
+    }
+
+    /** A restock job in hand gives way at once to a waiting order, a player, the queue or a switch-off: it is cancelled, and what it carries is put back. Tick thread. */
+    public void restockYieldCheck() {
+        OrderFlow f = orders.flow;
+        if (!f.isRestock() || !f.running()) return;
+        if (com.porter.qwertestash.orders.KitRestock.mustStop(restockOrdersWaiting, CONFIG.kitRestock && CONFIG.kitSorting, CONFIG.kitOrders, CONFIG.acceptOrders, orders.pauseReason() != null)) {
+            String id = f.orderId();
+            if (id != null && f.cancel(id)) debug("Kit restock stops: an order, a player or a switch-off.");
+        }
+    }
+
+    private boolean startRestock() {
+        com.porter.qwertestash.orders.KitRestock.State off = com.porter.qwertestash.orders.KitRestock.State.OFF;
+        if (!CONFIG.kitSorting || !CONFIG.kitOrders || !CONFIG.kitRestock) {
+            restockDecision = new com.porter.qwertestash.orders.KitRestock.Decision(off, null, null, false);
+            return false;
+        }
+        OrderFlow flow = orders.flow;
+        Stash st = stash;
+        // Not while an order is held or saved to be resumed, nor before the server has said whether orders wait (after connecting), nor with orders off
+        if (st == null || !com.porter.qwertestash.orders.KitRestock.mayStart(flow.holdsOrder(), flow.resumeId() != null, restockHeard, CONFIG.acceptOrders, orders.pauseReason() != null)) return false;
+        long now = System.currentTimeMillis();
+        if (now < restockNextAt) return false;
+        restockNextAt = now + 30_000;
+        KitSettings settings = KitStore.shared().get(ManagerIndex.clamp(st.server, 256), ManagerIndex.clamp(st.name, 256));
+        KitRouting.View view = kitView();
+        com.porter.qwertestash.orders.KitRestock.Decision idle = new com.porter.qwertestash.orders.KitRestock.Decision(com.porter.qwertestash.orders.KitRestock.State.IDLE, null, null, false);
+        if (settings == null || settings.types() == null || settings.types().templates().isEmpty() || view == null) {
+            restockDecision = idle;
+            return false;
+        }
+        long bottles = com.porter.qwertestash.orders.KitRestock.bottlesUsable(orders.bottlesInStash());
+        int empties = orders.emptiesTotal();
+        // At most MAX_RESTOCK_CANDIDATES templates with a keep count (by id) are looked at, with one scan of the stash between them
+        List<com.porter.qwertestash.stash.KitTemplate> keepers = com.porter.qwertestash.orders.KitRestock.candidates(settings.types().templates());
+        List<com.porter.qwertestash.orders.KitRestock.Candidate> cands = new ArrayList<>();
+        if (!keepers.isEmpty()) {
+            List<com.porter.qwertestash.orders.KitOrder.Line> unionLines = new ArrayList<>();
+            for (com.porter.qwertestash.stash.KitTemplate t : keepers) unionLines.add(new com.porter.qwertestash.orders.KitOrder.Line(t, 1, 0, 1));
+            OrderGlue.RestockStock stock = orders.restockStock(new com.porter.qwertestash.orders.KitOrder.Snapshot(1, unionLines, List.of(), false));
+            if (stock != null) for (com.porter.qwertestash.stash.KitTemplate t : keepers) cands.add(restockCandidate(t, settings, view, bottles, empties, stock));
+        }
+        com.porter.qwertestash.orders.KitRestockStamps stamps = com.porter.qwertestash.orders.KitRestockStamps.shared();
+        boolean naming = anvilWay() != AnvilFinder.Way.NONE;
+        com.porter.qwertestash.orders.KitRestock.Decision d = com.porter.qwertestash.orders.KitRestock.decide(new com.porter.qwertestash.orders.KitRestock.Inputs(true,
+            restockOrdersWaiting, stamps.lastHour(now), CONFIG.kitRestockPerHour, empties - 1, CONFIG.kitRestockMinEmpty, naming, cands));
+        restockDecision = d;
+        if (d.state() != com.porter.qwertestash.orders.KitRestock.State.BUILDING || d.template() == null) return false;
+        com.porter.qwertestash.stash.KitTemplate t = settings.types().template(d.template());
+        if (t == null) return false;
+        Order o = new Order(RESTOCK_ID + (++restockSeq), List.of(new Order.Line(Order.KIT, t.id(), 1)), null, false, null, restockSnapshot(t, bottles));
+        o.restock = true;
+        o.restockTopUp = d.topUp();
+        String why = flow.offer(o);
+        if (why != null) {
+            restockNextAt = now + 10 * 60_000L;
+            info("Kit restock for {} did not start: {}.", t.id(), why);
+            return false;
+        }
+        stamps.add(now);
+        restockTemplate = t.id();
+        restockTopUp = d.topUp();
+        info("Kit restock: {} for template {}.", d.topUp() ? "topping up a copy" : "building a copy", t.id());
+        return true;
+    }
+
+    private static com.porter.qwertestash.orders.KitOrder.Snapshot restockSnapshot(com.porter.qwertestash.stash.KitTemplate t, long bottles) {
+        return new com.porter.qwertestash.orders.KitOrder.Snapshot(1, List.of(new com.porter.qwertestash.orders.KitOrder.Line(t, 1, 0, 1)),
+            com.porter.qwertestash.orders.KitRestock.takeFor(t, bottles), false);
+    }
+
+    /** What restock needs to know about a template: its copies in the chain target and whether the stash can fill a new copy or top one up. */
+    private com.porter.qwertestash.orders.KitRestock.Candidate restockCandidate(com.porter.qwertestash.stash.KitTemplate t, KitSettings settings, KitRouting.View view, long bottles, int empties,
+                                                                                OrderGlue.RestockStock stock) {
+        String target = KitRouting.templateTarget(t, settings);
+        Box box = target == null ? null : view.box(target);
+        boolean pick = KitRouting.pickable(box) && box != null && !box.stale;
+        int complete = 0, incomplete = 0;
+        if (box != null && box.contents != null) {
+            for (Item it : box.contents) {
+                if (it == null || !it.isShulker() || it.contents.isEmpty()) continue;
+                String name = it.customName ? com.porter.qwertestash.stash.KitNames.normalize(it.customText) : null;
+                com.porter.qwertestash.stash.KitTemplates.State state = com.porter.qwertestash.stash.KitTemplates.match(t, com.porter.qwertestash.orders.KitPlanner.stacksOf(it), name).state();
+                if (state == com.porter.qwertestash.stash.KitTemplates.State.COMPLETE) complete++;
+                else if (state == com.porter.qwertestash.stash.KitTemplates.State.INCOMPLETE) incomplete++;
+            }
+        }
+        com.porter.qwertestash.orders.KitOrder.Snapshot snap = restockSnapshot(t, bottles);
+        com.porter.qwertestash.orders.KitPlanner.Plan fresh = orders.planWith(stock, snap, empties, true);
+        boolean build = false, partial = false;
+        if (fresh != null && !fresh.units().isEmpty()) {
+            Unit u = fresh.units().get(0);
+            build = !u.kitShort;
+            partial = true;
+        }
+        boolean topUp = false;
+        if (incomplete > 0) {
+            com.porter.qwertestash.orders.KitPlanner.Plan top = orders.planWith(stock, snap, empties, false);
+            if (top != null) for (Unit u : top.units()) topUp |= u.kitBase != null && u.kitGathered > 0;
+        }
+        boolean bottleSlot = false;
+        for (com.porter.qwertestash.stash.KitTemplate.Slot s : t.slots()) bottleSlot |= s != null && s.base().equals(com.porter.qwertestash.orders.KitRestock.BOTTLE);
+        boolean bottleBlocked = bottleSlot && !build && !partial && bottles <= 0;
+        return new com.porter.qwertestash.orders.KitRestock.Candidate(t, target, pick, box != null && box.free() > 0, complete, incomplete, topUp, build, partial, bottleBlocked);
+    }
+
+    // The wait for the area's dimension (1.16.1): since when, and the last time it was said
+    private volatile long areaWaitSince;
+    private long areaWaitLogAt;
+
+    /** Why the stash area keeps the sorter waiting for 2 minutes or more (it is in another dimension), or null. Any thread. */
+    public @Nullable String areaWait(long now) {
+        Stash s = stash;
+        if (s == null) return null;
+        return com.porter.qwertestash.stash.Dimensions.waitReport(s, areaWaitSince, now, Stash.currentDimension());
+    }
+
+    public long areaWaitSince() {
+        return areaWaitSince;
+    }
+
     public OrderFlow orderFlow() {
         return orders.flow;
     }
@@ -9609,9 +10101,11 @@ public class StashSorter extends AbstractFieldModule {
     /** The carried stacks that could be part of the bin. */
     private List<BinTracker.Held> carriedHeld(Bin bin) {
         List<BinTracker.Held> out = new ArrayList<>();
+        // An order's craft gathers its inputs fresh: the crafted loads and surplus already carried are not what it is gathering
+        Set<Integer> aside = craft != null && craft.oc != null && bin == craft.bin ? orderCraftHeld() : Set.of();
         for (int slot : carriedSlots()) {
             Item it = inventoryItem(slot);
-            if (it == null || it.isShulker()) continue;
+            if (it == null || it.isShulker() || aside.contains(slot)) continue;
             if (BinTracker.owns(bin.lots, it.indexKey(), it.variant, it.count)) out.add(new BinTracker.Held(slot, it.indexKey(), it.variant, it.count));
         }
         return out;
@@ -9705,10 +10199,23 @@ public class StashSorter extends AbstractFieldModule {
     /** Takes the next load out of the open shulker (a source shulker placed in the world), keeping one carry slot free. */
     private boolean takeFromShulker(Container c) {
         SourceShulker s = unpackingNow;
+        if (s != null && s.emptyAll) return takeEverything(c);
         // The bin being built, or the craft being gathered
         Bin bin = activeBin != null ? activeBin : gatheringBin();
         if (s == null || bin == null || freeCarryCount() <= 1) return false;
         return takeLot(c, bin, s.origin, false);
+    }
+
+    /** Takes the next stack out of the open shulker into the inventory, keeping one carry slot free (a kit being emptied back). */
+    private boolean takeEverything(Container c) {
+        if (freeCarryCount() <= 1) return false;
+        for (int i = 0; i < 27; i++) {
+            if (Item.of(c.getItemStack(i)) == null) continue;
+            shiftClick(c, toWindow(i, c));
+            moved++;
+            return true;
+        }
+        return false;
     }
 
     private boolean takeLot(Container c, Bin bin, @Nullable BlockPos origin, boolean counted) {
@@ -9790,6 +10297,8 @@ public class StashSorter extends AbstractFieldModule {
         }
         bin.packed = inside;
         plan.placedSize = inside.size();
+        // What is carried next is new stacks: they are looked at for repair again
+        repairChecked.clear();
 
         // Stacks are waiting and nothing went in: it is not going to, so don't come back for it
         int waiting = BinTracker.ready(bin.lots, inside, carriedHeld(bin)).size();
@@ -9988,8 +10497,8 @@ public class StashSorter extends AbstractFieldModule {
         if (slots.isEmpty()) return null;
         OrderSource first = orderSources.get(slots.get(0));
         Box from = first == null ? null : stash.boxAt(first.pos());
-        if (from != null && from.sortable() && !from.dropOff && !from.delivery && from.free() > 0 && !blocked(from, Job.Dump) && !signPending(from)) return from;
-        return nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b)).toList());
+        if (from != null && from.sortable() && !from.dropOff && !from.delivery && from.free() > 0 && !blocked(from, Job.Dump) && !signPending(from) && originAllowed(from, slots)) return from;
+        return nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b) && !kitReserved(b)).toList());
     }
 
     private boolean canMakeRoom(CompactPlan plan) {
@@ -10016,12 +10525,15 @@ public class StashSorter extends AbstractFieldModule {
      */
     private @Nullable Box spentShulkerHome(SourceShulker s, @Nullable Item shulker) {
         Box home = stash.boxAt(s.origin);
-        boolean usable = home != null && home.sortable() && !home.dropOff && !home.delivery && home.free() > 0 && !blocked(home, Job.Dump);
-        boolean misplacedThere = usable && shulker != null && misplaced(shulker, home);
+        boolean inChain = home != null && kitChain(shulker).contains(home);
+        boolean usable = home != null && home.sortable() && !home.dropOff && !home.delivery && home.free() > 0 && !blocked(home, Job.Dump)
+            && (!kitReserved(home) || inChain);
+        // A kit shulker is not out of place in one of the reserved chests of its chain, whatever the signs would say
+        boolean misplacedThere = usable && shulker != null && !inChain && misplaced(shulker, home);
         if (usable && !misplacedThere) return home;
         Box belongs = shulker == null ? null
             : nearest(destinationsFor(shulker).stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b)).toList());
-        Box other = belongs != null ? null : nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b)
+        Box other = belongs != null ? null : nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b) && !kitReserved(b)
             && (shulker == null || !misplaced(shulker, b))).toList());
         return BinStep.spentHome(home, usable, misplacedThere, belongs, other);
     }
@@ -10051,6 +10563,27 @@ public class StashSorter extends AbstractFieldModule {
         return false;
     }
 
+    // Kits that could not be completed or stored (KIT-CONTRACT v2 revision 4, step 4): the shulker is emptied back, its items put back with the rest
+    private final List<Unit> kitEmptyQueue = new ArrayList<>();
+    private static final BlockPos NOWHERE = new BlockPos(0, -1000, 0);
+
+    private boolean startKitEmpty() {
+        // Putting a shulker down waits while shulker handling is paused
+        if (compact != null || kitEmptyQueue.isEmpty() || shulkerPause() != null) return false;
+        Unit u = kitEmptyQueue.remove(0);
+        // Only an unnamed shulker of that unit: a kit stored as an incomplete copy (named) is never taken apart
+        int slot = com.porter.qwertestash.orders.KitEmpty.pick(u, carriedSlots(), this::inventoryItem, sourceShulkers.keySet());
+        if (slot < 0) return false;
+        SourceShulker src = new SourceShulker(NOWHERE);
+        src.emptyAll = true;
+        sourceShulkers.put(slot, src);
+        unpackingNow = null;
+        startHandling(Job.Clean, slot, null);
+        unpackingNow = src;
+        step("kit: emptying a kit that could not be completed; next: put its items and the shulker back.");
+        return true;
+    }
+
     // The order step of the planner
 
     private boolean nextOrderJob() {
@@ -10073,6 +10606,7 @@ public class StashSorter extends AbstractFieldModule {
                 return held == null || !held.isShulker();
             });
             if (returnSpentShulker()) return true;
+            if (startKitEmpty()) return true;
         }
 
         // The bin being built has the compaction machinery until its plan is over. A cancel stops it at once, but a shulker standing
@@ -10080,6 +10614,11 @@ public class StashSorter extends AbstractFieldModule {
         if (activeBin != null) {
             if (flow.cancelRequested() && compact != null && compact.bin == activeBin && !compact.aborting) abortCompaction("the order was cancelled");
             if (compact != null && compact.bin == activeBin && continueCompaction()) return true;
+            // A repair began (or goes on) inside it: the bin is not over, the repair is gone on with next tick
+            if (repairBegan || repair != null) {
+                repairBegan = false;
+                return false;
+            }
             Bin bin = activeBin;
             activeBin = null;
             if (compact != null && compact.bin == bin) compact = null;
@@ -10108,11 +10647,543 @@ public class StashSorter extends AbstractFieldModule {
         if (intent instanceof OrderFlow.Fetch f) return startFetch(f.unit());
         if (intent instanceof OrderFlow.Name n) return startName(n);
         if (intent instanceof OrderFlow.Craft c) return startOrderCraft(c);
+        if (intent instanceof OrderFlow.CraftLoads cl) return startOrderCraftLoads(cl);
         if (intent instanceof OrderFlow.Deliver d) return startDeliver(d);
         if (intent instanceof OrderFlow.Expand x) return startExpand(x);
         if (intent instanceof OrderFlow.Recheck rc) return startRecheck(rc);
         return false;
     }
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Repairing an order's items with experience bottles (1.13.0, REPAIR-CONTRACT.md). When the carried stacks of a bin are about
+    // to go into the shulker, the ones the order wants repaired (and that are Mending, damaged, single) are repaired first:
+    // bottles are taken from the stash (Job.Gather, the repair's own bin of bottle loads), the steps in the world are
+    // RepairTrip's (Job.Repair: its view of the bot is repairPort), leftover bottles go back (Job.Dump). The decisions are Repair,
+    // RepairRun and RepairTrip's (plain Java, tested); this only runs them on the bot tick thread. A repaired item has another key
+    // (its damage is part of it): its lot in the bin takes the new key (OrderFlow.rekey) so it still matches and is packed.
+    // Repairing never fails or holds up an order: whatever goes wrong, the items go out as they are.
+
+    private enum RepairPhase { Bottles, Trip, Wait, PutBack }
+
+    /** A carried item being repaired: the key and variant its lot in the bin has now, and its window slot. */
+    private static final class RepairCand {
+        String key;
+        @Nullable String variant;
+        int slot;
+
+        RepairCand(String key, @Nullable String variant, int slot) {
+            this.key = key;
+            this.variant = variant;
+            this.slot = slot;
+        }
+    }
+
+    private static final class RepairCtl {
+        final Bin bin;
+        final RepairRun run;
+        final Map<RepairRun.Item, RepairCand> cands = new IdentityHashMap<>();
+        RepairPhase phase = RepairPhase.Bottles;
+        @Nullable Bin bottles;
+        int jobs, putBackTries;
+        long waitSince, quietSince;
+        boolean leaving, undoTried, slotsChecked;
+
+        RepairCtl(Bin bin, RepairRun run) {
+            this.bin = bin;
+            this.run = run;
+        }
+    }
+
+    private static final int REPAIR_INPUT_PRIORITY = 1;
+    /** Ticks to wait for a player to leave before the second go, at most, and quiet needed before it. */
+    private static final long REPAIR_WAIT_TICKS = 20 * 60L, REPAIR_QUIET_TICKS = 20 * 5L;
+
+    private @Nullable RepairCtl repair;
+    // The bottle loads being gathered: gatherOne takes from this one while it is set
+    private @Nullable Bin repairBottles;
+    private @Nullable RepairTrip repairTrip;
+    // The trip in hand only undoes a saved ledger (a restart in the middle of a trip)
+    private boolean repairUndoMode;
+    // A repair began inside continueCompaction: its false is not "the bin is over" (see nextOrderJob)
+    private boolean repairBegan;
+    // Carried stacks already looked at for repair since the last pack (slot and variant), the order they were for, and the throwing
+    // ticks it has used
+    private final Set<String> repairChecked = new HashSet<>();
+    private @Nullable String repairOrderId;
+    // A foreign module took over while the trip ran: it is told to put everything back, and does so even while giving way
+    private boolean repairYieldAbort;
+
+    /** The item id in a player-inventory window slot, or null. */
+    private @Nullable String windowId(int window) {
+        List<ItemStack> inv = CACHE.getPlayerCache().getPlayerInventory();
+        Item it = window >= 0 && window < inv.size() ? Item.of(inv.get(window)) : null;
+        return it == null ? null : it.id;
+    }
+
+    private static int windowOf(int index) {
+        return invSlot(index);
+    }
+
+    private static int indexOf(int window) {
+        return window >= 36 ? window - 36 : window;
+    }
+
+    /** What the order asked for under this key: the one before any repair changed it. */
+    private static String askedKey(Unit unit, String key) {
+        for (String[] r : unit.rekeys) if (r[0].equals(key)) return r[1];
+        return key;
+    }
+
+    private int carriedBottles() {
+        int n = 0;
+        for (int slot : carriedSlots()) {
+            Item it = inventoryItem(slot);
+            if (it != null && it.id.equals("experience_bottle")) n += it.count;
+        }
+        return n;
+    }
+
+    /**
+     * The bin's carried stacks are about to be packed: those wanted for repair are looked at, and a repair is begun for the ones
+     * that can be. @return true when a job was started; false when nothing is to be repaired, or the repair is waiting (then
+     * {@link #repairBegan} is set)
+     */
+    private boolean beginRepair(CompactPlan plan) {
+        OrderFlow flow = orders.flow;
+        Repair.Report report = flow.repairReport();
+        Set<String> wanted = flow.repairKeys();
+        Set<String> explicit = flow.repairExplicitKeys();
+        repairBegan = false;
+        if (plan.bin == null || plan.aborting || report == null || wanted.isEmpty() || repair != null || repairTrip != null) return false;
+        String id = flow.orderId();
+        if (id != null && !id.equals(repairOrderId)) {
+            repairOrderId = id;
+            repairChecked.clear();
+        }
+        Bin bin = plan.bin;
+        List<RepairRun.Item> items = new ArrayList<>();
+        List<RepairCand> cands = new ArrayList<>();
+        boolean noted = false;
+        for (BinTracker.Held h : BinTracker.ready(bin.lots, bin.packed, carriedHeld(bin))) {
+            String asked = askedKey(bin.unit, h.key());
+            if (!wanted.contains(asked)) continue;
+            String sig = h.slot() + "|" + h.variant();
+            if (repairChecked.contains(sig)) continue;
+            Item it = inventoryItem(h.slot());
+            if (it == null) continue;
+            repairChecked.add(sig);
+            // Under "repair all" only damaged lines are wanted (contract v1.2): the rest get no entry at all
+            if (!Repair.wanted(explicit.contains(asked), it.damage)) continue;
+            // Checked live: a shulker box, Mending, damaged and a single item; one entry for each item
+            String why = Repair.skipReason(it.isShulker(), it.hasMending(), it.damage, it.maxStack);
+            if (why != null) {
+                for (int n = Math.max(1, it.count); n > 0; n--) report.skip(asked, why);
+                noted = true;
+                continue;
+            }
+            items.add(new RepairRun.Item(asked, windowOf(h.slot()), it.damage, it.maxDamage));
+            cands.add(new RepairCand(h.key(), h.variant(), windowOf(h.slot())));
+        }
+        if (noted) flow.repairChanged();
+        if (items.isEmpty()) return false;
+        // The order's throwing time is used up: nothing is gathered or moved
+        if (RepairRun.exhausted(report)) {
+            for (RepairRun.Item i : items) report.skip(i.key, Repair.INTERRUPTED);
+            flow.repairChanged();
+            return false;
+        }
+
+        RepairCtl ctl = new RepairCtl(bin, new RepairRun(report, items));
+        for (int i = 0; i < items.size(); i++) ctl.cands.put(items.get(i), cands.get(i));
+        repair = ctl;
+        info("Order: repairing {} items with experience bottles before they are packed.", items.size());
+        step("order: repairing " + items.size() + " item" + (items.size() == 1 ? "" : "s") + " with experience bottles; next: take bottles from the stash.");
+        boolean started = continueRepair();
+        repairBegan = !started;
+        return started;
+    }
+
+    /** The next job of the repair in hand. @return true when one was started; false when it waits or is over ({@link #repair} is null then) */
+    private boolean continueRepair() {
+        RepairCtl r = repair;
+        if (r == null) return false;
+        if (job != null) return true;
+        if (!orders.gate()) return false;
+        OrderFlow flow = orders.flow;
+        // The order ended, was cancelled or is parked: nothing more is thrown; what was gathered goes back with the leftovers
+        if (!r.leaving && (!flow.running() || flow.cancelRequested() || flow.parkRequested())) {
+            // A park is not an end: the run is dropped without a report and the order carries on from its saved state. Any other
+            // end reports what was not done
+            if (flow.parkRequested() || !flow.holdsOrder()) r.run.pending().clear();
+            else r.run.giveUp(Repair.INTERRUPTED);
+            r.leaving = true;
+            r.phase = RepairPhase.PutBack;
+        }
+        switch (r.phase) {
+            case Bottles -> {
+                int need = r.run.bottlesNeeded();
+                int have = carriedBottles();
+                if (have >= need || need == 0) {
+                    r.phase = RepairPhase.Trip;
+                    return continueRepair();
+                }
+                if (++r.jobs > 3 + (need + 63) / 64) {
+                    // As many as could be got
+                    r.phase = RepairPhase.Trip;
+                    return continueRepair();
+                }
+                if (!r.slotsChecked) {
+                    r.slotsChecked = true;
+                    // Room for the gear that is stowed and the bottles, before anything is gathered or moved
+                    int armour = 0;
+                    for (int w = 5; w <= 8; w++) {
+                        RepairTrip.Stack worn = repairPort.at(w);
+                        if (worn != null && worn.mending() && worn.damage() > 0) armour++;
+                    }
+                    int slotsNeeded = Repair.slotsNeeded(armour, repairPort.at(45) != null, need - have);
+                    if (repairPort.freeSlots().size() < slotsNeeded) {
+                        r.run.giveUp(Repair.INTERRUPTED);
+                        step("order: not enough free inventory slots (" + repairPort.freeSlots().size() + " of " + slotsNeeded + ") to put my gear aside for repairing, delivering the items as they are.");
+                        return leaveRepair(r);
+                    }
+                }
+                if (freeCarryCount() < 2) {
+                    if (have > 0) {
+                        r.phase = RepairPhase.Trip;
+                        return continueRepair();
+                    }
+                    r.run.giveUp(Repair.INTERRUPTED);
+                    step("order: no carry room for experience bottles, delivering the items as they are.");
+                    return leaveRepair(r);
+                }
+                Bin bottles = r.bottles;
+                if (bottles == null) {
+                    bottles = new Bin(new Unit(Unit.Kind.Bin, "", new ArrayList<>(Order.expand(Repair.BOTTLE, need - have, 64))));
+                    r.bottles = bottles;
+                }
+                Box source = binSourceFor(bottles);
+                if (source == null) {
+                    if (have > 0) {
+                        r.phase = RepairPhase.Trip;
+                        return continueRepair();
+                    }
+                    r.run.giveUp(Repair.NO_BOTTLES);
+                    step("order: no experience bottles in the stash, delivering the items as they are.");
+                    return leaveRepair(r);
+                }
+                repairBottles = bottles;
+                gatherLeft = bottles.lots.size();
+                step("order: taking " + (need - have) + " experience bottles from the stash to repair " + r.run.pending().size() + " items; next: throw them.");
+                return start(Job.Gather, source);
+            }
+            case Trip -> {
+                repairBottles = null;
+                repairUndoMode = false;
+                // Moves an earlier trip could not undo are put back first, and a new trip never overwrites them
+                Stash st = orders.st();
+                if (st != null && st.repairGear != null && !st.repairGear.isEmpty() && !r.undoTried) {
+                    r.undoTried = true;
+                    if (startGearUndo()) return true;
+                }
+                repairTrip = new RepairTrip(repairPort, r.run.targets(), r.run.budget()).seed(st == null ? List.of() : Repair.parseLedger(st.repairGear));
+                startRepairJob("order: repairing " + r.run.pending().size() + " items with experience bottles; next: put the bottles left back.");
+                return true;
+            }
+            case Wait -> {
+                long now = tickCount;
+                if (repairPlayerNear()) r.quietSince = 0;
+                else if (r.quietSince == 0) r.quietSince = now;
+                if (r.quietSince != 0 && now - r.quietSince >= REPAIR_QUIET_TICKS) {
+                    r.phase = RepairPhase.Bottles;
+                    r.jobs = 0;
+                    r.bottles = null;
+                    r.slotsChecked = false;
+                    return continueRepair();
+                }
+                if (now - r.waitSince > REPAIR_WAIT_TICKS) {
+                    r.run.giveUp(Repair.INTERRUPTED);
+                    return leaveRepair(r);
+                }
+                return false;
+            }
+            case PutBack -> {
+                if (r.putBackTries < 3) {
+                    List<Integer> bottleSlots = new ArrayList<>();
+                    int n = 0;
+                    for (int slot : looseCarried()) {
+                        Item it = inventoryItem(slot);
+                        if (it != null && it.id.equals("experience_bottle")) {
+                            bottleSlots.add(slot);
+                            n += it.count;
+                        }
+                    }
+                    if (!bottleSlots.isEmpty()) {
+                        r.putBackTries++;
+                        if (putBack(bottleSlots, "order: putting " + n + " experience bottles back")) return true;
+                    }
+                }
+                return endRepair(r);
+            }
+        }
+        return false;
+    }
+
+    /** The repair is over for good: the bottles still carried go back before it ends. */
+    private boolean leaveRepair(RepairCtl r) {
+        r.leaving = true;
+        r.phase = RepairPhase.PutBack;
+        return continueRepair();
+    }
+
+    private boolean endRepair(RepairCtl r) {
+        repair = null;
+        repairBottles = null;
+        repairTrip = null;
+        // The time spent repairing is not a bin that makes no headway
+        r.bin.progressAt = System.currentTimeMillis();
+        orders.flow.repairChanged();
+        Repair.Report report = orders.flow.repairReport();
+        if (report != null) info("Order: repairs so far: {} repaired, {} bottles thrown, {} not fully repaired.", report.repaired(), report.bottlesUsed(), report.notRepaired());
+        return false;
+    }
+
+    private void startRepairJob(String line) {
+        markJobStart();
+        job = Job.Repair;
+        target = null;
+        actions = 0;
+        tries = 0;
+        stepTicks = 0;
+        jobRunTicks = 0;
+        step = Step.Working;
+        resetJobState();
+        // The bot throws where it stands: leaving the stash area is no reason to end it
+        jobStartedInside = false;
+        step(line);
+    }
+
+    private void tickRepair() {
+        RepairTrip t = repairTrip;
+        if (t == null) {
+            job = null;
+            step = Step.Walking;
+            return;
+        }
+        t.tick();
+        if (t.done()) endRepairTrip(t);
+    }
+
+    private void endRepairTrip(RepairTrip t) {
+        repairTrip = null;
+        repairYieldAbort = false;
+        job = null;
+        target = null;
+        step = Step.Walking;
+        wait = CONFIG.delayTicks;
+        if (repairUndoMode) {
+            repairUndoMode = false;
+            if (!t.pending().isEmpty()) warn("A repair that was cut short left {} inventory moves undone; they are tried again at the next start.", t.pending().size());
+            return;
+        }
+        RepairCtl r = repair;
+        if (r == null) return;
+        List<RepairRun.Item> before = new ArrayList<>(r.run.pending());
+        boolean again = r.run.tripDone(t);
+        debug(() -> "Repair trip over (" + t.cause() + "): " + t.bottlesUsed() + " bottles used, " + t.ticks() + " ticks.");
+
+        // Each item has another key now: its lot takes it, so the stack is still the bin's; and it is the sorter's again
+        for (int i = 0; i < before.size() && i < t.outcomes().size(); i++) {
+            RepairCand cand = r.cands.get(before.get(i));
+            if (cand == null) continue;
+            RepairTrip.Outcome o = t.outcomes().get(i);
+            Item now = inventoryItem(indexOf(o.slot()));
+            if (now == null || now.isShulker()) continue;
+            cand.slot = o.slot();
+            if (!now.indexKey().equals(cand.key) || !Objects.equals(now.variant, cand.variant)) {
+                if (orders.flow.rekey(r.bin.unit, cand.key, cand.variant, now.indexKey(), now.variant)) {
+                    cand.key = now.indexKey();
+                    cand.variant = now.variant;
+                }
+            }
+            stashHeld.put(indexOf(o.slot()), now.id);
+            repairChecked.add(indexOf(o.slot()) + "|" + now.variant);
+        }
+        orders.flow.repairChanged();
+
+        if (again) {
+            r.phase = RepairPhase.Wait;
+            r.waitSince = tickCount;
+            r.quietSince = 0;
+            step("order: the repair was cut short (" + (t.cause() == RepairTrip.Cause.Player ? "someone came near" : "the orbs went") + "); next: try once more when it is quiet.");
+        }
+        else r.phase = RepairPhase.PutBack;
+    }
+
+    /** Another player (not a friend) is within the radius of where the bot stands. */
+    private boolean repairPlayerNear() {
+        try {
+            return groundItems().playerWithin(CACHE.getPlayerCache().getX(), CACHE.getPlayerCache().getZ(), Repair.PLAYER_RADIUS) != null;
+        } catch (RuntimeException e) {
+            // Not known: treated as someone near, the safe side
+            return true;
+        }
+    }
+
+    /** A saved ledger of moves a stopped repair left is undone first. @return true when the job to do it was started */
+    private boolean startGearUndo() {
+        Stash s = orders.st();
+        if (s == null || s.repairGear == null || s.repairGear.isEmpty() || repairTrip != null) return false;
+        if (!Alerts.online() || openContainerId() != 0 || holdingCursor() || CACHE.getPlayerCache().getPlayerInventory().size() < 46) return false;
+        List<int[]> moves = Repair.parseLedger(s.repairGear);
+        if (moves.isEmpty()) {
+            s.repairGear = null;
+            s.markDirty();
+            s.save();
+            return false;
+        }
+        repairUndoMode = true;
+        repairTrip = RepairTrip.undo(repairPort, moves);
+        info("Putting back the gear and items a repair moved before the bot stopped.");
+        startRepairJob("repair: putting back what a stopped repair moved; next: carry on.");
+        return true;
+    }
+
+    private void resetRepair() {
+        repair = null;
+        repairBottles = null;
+        repairTrip = null;
+        repairUndoMode = false;
+        repairBegan = false;
+        repairChecked.clear();
+        repairOrderId = null;
+        repairYieldAbort = false;
+    }
+
+    /** The trip's view of the bot: the player inventory window, clicks through the inventory queue, the throw through the input queue. */
+    private final RepairTrip.Port repairPort = new RepairTrip.Port() {
+        @Override
+        public boolean busy() {
+            return StashSorter.this.busy() || openContainerId() != 0;
+        }
+
+        @Override
+        public RepairTrip.@Nullable Stack at(int window) {
+            List<ItemStack> inv = CACHE.getPlayerCache().getPlayerInventory();
+            if (window < 0 || window >= inv.size()) return null;
+            Item it = Item.of(inv.get(window));
+            return it == null ? null : new RepairTrip.Stack(it.id, it.count, it.damage, it.maxDamage, it.hasMending());
+        }
+
+        @Override
+        public boolean move(int from, int to) {
+            // Checked again here: a stale move never leaves a stack on the cursor
+            if (holdingCursor() || windowId(from) == null || windowId(to) != null) return false;
+            RequestFuture f = submit(new ClickItem(0, from, ClickItemAction.LEFT_CLICK), new ClickItem(0, to, ClickItemAction.LEFT_CLICK));
+            return f != RequestFuture.rejected;
+        }
+
+        @Override
+        public boolean select(int hotbar) {
+            return submit(new SetHeldItem(hotbar)) != RequestFuture.rejected;
+        }
+
+        @Override
+        public int held() {
+            return CACHE.getPlayerCache().getHeldItemSlot();
+        }
+
+        @Override
+        public boolean throwBottle() {
+            // Looking straight down first: the bottle breaks at the bot's feet and the orbs come to it
+            float pitch = com.aquarius.Globals.BOT.getPitch();
+            float yaw = com.aquarius.Globals.BOT.getYaw();
+            if (Math.abs(pitch - 90f) > 0.5f) {
+                InputRequestFuture look = INPUTS.submit(InputRequest.builder().owner(StashSorter.this).yaw(yaw).pitch(90f).priority(REPAIR_INPUT_PRIORITY).build());
+                activity.noteInput(look, tickCount);
+                return false;
+            }
+            InputRequestFuture f = INPUTS.submit(InputRequest.builder().owner(StashSorter.this)
+                .input(Input.builder().rightClick(true).hand(org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand.OFF_HAND)
+                    .clickTarget(ClickTarget.None.INSTANCE).clickRequiresRotation(true).build())
+                .yaw(yaw).pitch(90f).priority(REPAIR_INPUT_PRIORITY).build());
+            activity.noteInput(f, tickCount);
+            return f != InputRequestFuture.rejected;
+        }
+
+        @Override
+        public boolean playerNear() {
+            return repairPlayerNear();
+        }
+
+        @Override
+        public int orbsNear() {
+            double px = CACHE.getPlayerCache().getX(), py = CACHE.getPlayerCache().getY(), pz = CACHE.getPlayerCache().getZ();
+            int n = 0;
+            for (Entity e : CACHE.getEntityCache().getEntities().values()) {
+                if (e == null || e.isRemoved() || e.getEntityType() != EntityType.EXPERIENCE_ORB) continue;
+                double dx = e.getX() - px, dy = e.getY() - py, dz = e.getZ() - pz;
+                if (dx * dx + dy * dy + dz * dz <= 16.0) n++;
+            }
+            return n;
+        }
+
+        @Override
+        public int bottles() {
+            int n = 0;
+            for (int w = 9; w <= 45; w++) {
+                RepairTrip.Stack s = at(w);
+                if (s != null && s.bottle()) n += s.count();
+            }
+            return n;
+        }
+
+        @Override
+        public List<Integer> freeSlots() {
+            List<Integer> out = new ArrayList<>();
+            Set<Integer> keep = keepSlots();
+            // The main inventory first, the hotbar last
+            for (int w = 9; w <= 44; w++) {
+                if (keep.contains(indexOf(w)) || at(w) != null) continue;
+                out.add(w);
+            }
+            return out;
+        }
+
+        @Override
+        public boolean keep(int window) {
+            return keepSlots().contains(indexOf(window));
+        }
+
+        @Override
+        public boolean abort() {
+            if (repairUndoMode) return false;
+            if (repairYieldAbort) return true;
+            OrderFlow flow = orders.flow;
+            // A closed gate (a player in control, the queue) only holds the tick back: the trip carries on when it opens again
+            return !flow.running() || flow.cancelRequested() || flow.parkRequested();
+        }
+
+        @Override
+        public void ledger(List<int[]> moves) {
+            Stash s = orders.st();
+            if (s == null) return;
+            List<String> now = moves.isEmpty() ? null : Repair.formatLedger(moves);
+            if (Objects.equals(now, s.repairGear)) return;
+            s.repairGear = now;
+            s.markDirty();
+            s.save();
+        }
+
+        @Override
+        public void dropped(int[] move) {
+            warn("Repair: dropped a saved move ({} to {}): the item there does not go in that slot.", move[1], move[0]);
+        }
+
+        @Override
+        public void afterClick() {
+            wait = Math.max(wait, CONFIG.delayTicks);
+        }
+    };
 
     // Naming an order shulker at the anvil (Job.Name). The steps are AnvilNamer's; this is its view of the world. The anvil
     // is not a container of the stash: it is never read, sorted or indexed, and it may be outside the stash area
@@ -10428,8 +11499,16 @@ public class StashSorter extends AbstractFieldModule {
         /** Carry slots the table's shulker boxes were put into on this trip: only these are kept as crafted (1.8.1). */
         final List<Integer> resultSlots = new ArrayList<>();
 
+        /** The chunk of an order's craft load this run makes (1.15.0), or null for the shulker box, chest and table crafts. */
+        @Nullable OrderChunk oc;
+        /** Why a chunk of an order's craft load stopped (a CraftOrder code) when the run itself knows, and whether the grid was left stuck. */
+        @Nullable String code;
+        boolean stuck;
+
         /** A crafting table is being crafted in the inventory's 2x2 grid (1.10.0): not a shulker box, no table needed. */
         boolean forTable;
+        /** The table is for a craft order: its placement counts against the caps. */
+        boolean forOrderCraft;
         /** The carry slot the crafted table went into (only a slot the table's own result went to), or -1. */
         int tableSlot = -1;
 
@@ -10485,7 +11564,7 @@ public class StashSorter extends AbstractFieldModule {
 
     private static @Nullable Recipes recipesOrNull() {
         try {
-            return Recipes.shipped();
+            return Recipes.current();
         } catch (RuntimeException e) {
             return null;
         }
@@ -10561,7 +11640,10 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     /** Free carry slots a craft of {@code count} needs: its loads, a slot per step made, the results, and one spare. */
-    private static int craftRoom(CraftPlanner.Plan plan, int loads) {
+    private static int craftRoom(CraftRun r, int loads) {
+        CraftPlanner.Plan plan = r.plan;
+        // An order's craft load is stacks of an item: its result is a stack or two, not an item a slot
+        if (r.oc != null) return CraftBatch.room(plan, loads, r.oc.key, StashSorter::stackOf);
         return loads + Math.max(0, plan.steps().size() - 1) + plan.count() + 1;
     }
 
@@ -10569,7 +11651,7 @@ public class StashSorter extends AbstractFieldModule {
     private @Nullable CraftRun planCraft(@Nullable Unit unit, String task, int count, String[] why) {
         Recipes recipes = recipesOrNull();
         if (recipes == null) {
-            why[0] = "the recipe table couldn't be read";
+            why[0] = "no recipe table yet (the Stash Manager server sends it; crafting stays off until it has)";
             return null;
         }
         String table = tableProblem(task);
@@ -10592,7 +11674,7 @@ public class StashSorter extends AbstractFieldModule {
     private @Nullable CraftRun planChestCraft(int count, String[] why) {
         Recipes recipes = recipesOrNull();
         if (recipes == null) {
-            why[0] = "the recipe table couldn't be read";
+            why[0] = "no recipe table yet (the Stash Manager server sends it; crafting stays off until it has)";
             return null;
         }
         String table = tableProblem(CHEST_TASK);
@@ -10648,6 +11730,594 @@ public class StashSorter extends AbstractFieldModule {
         }
         orders.flow.craftStarted(u);
         return beginCraft(run, "order: shulker " + (orders.flow.index() + 1) + "/" + orders.flow.units().size() + " has no empty shulker");
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Crafting for orders (1.15.0, CRAFT-CONTRACT.md "Bot execution"). A craft line of an order is a load of its bin that is made at the
+    // crafting table the website set for the stash (not the one `stash craftingtable` knows) before the bin is built. The decisions are
+    // pure and tested: OrderFlow (which load is next, what is short and why, the saved ledger), CraftSub (the sub-plan from the order's
+    // budget), CraftBatch (how much one chunk makes for the free carry slots). This runs a chunk as a CraftRun (gather from the stash,
+    // trip to the table, put back what is left), then makes the result a stack of exactly the load's size and keeps it, and the
+    // crafted surplus, in carry slots that nothing else touches until the bin is built (the surplus until the order ends). All on the
+    // bot tick thread.
+
+    /** The chunk of a craft load a CraftRun is making for an order. */
+    private static final class OrderChunk {
+        final Order.Lot lot;
+        final String key;
+        final int target, stack;
+        long fillsMade;
+        /** Carry slots the table's result went into on the chunk's trips (one slot: a chunk is never more than a stack). */
+        final LinkedHashSet<Integer> resultSlots = new LinkedHashSet<>();
+        boolean settled, splitSent;
+        int splitTries, made, lotSlot = -1, waits;
+        /** What was gathered from the stash for this chunk (by id), recorded when it began: the budget is charged from it, never from a later plan. */
+        Map<String, Long> gathered = Map.of();
+        long splitAt;
+        @Nullable String code;
+
+        OrderChunk(Order.Lot lot, int target, int stack) {
+            this.lot = lot;
+            this.key = Recipes.ns(lot.key());
+            this.target = target;
+            this.stack = stack;
+        }
+
+        String id() {
+            return shortId(key);
+        }
+    }
+
+    private static String shortId(String id) {
+        return id.startsWith("minecraft:") ? id.substring("minecraft:".length()) : id;
+    }
+
+    private static int stackOf(String id) {
+        try {
+            var data = ItemRegistry.REGISTRY.get(shortId(Recipes.ns(CraftSlots.baseOf(id))));
+            return data == null ? 64 : Math.max(1, data.stackSize());
+        } catch (RuntimeException | LinkageError e) {
+            return 64;
+        }
+    }
+
+    // Carry slots holding a crafted load for the bin in hand (until it is built) and the crafted surplus carried between bins (until the
+    // order ends), by slot and the item id in it. Nothing puts them away meanwhile (craftReserved).
+    private final Map<Integer, String> orderCraftLots = new ConcurrentHashMap<>(), orderCraftSurplus = new ConcurrentHashMap<>();
+    // The stacks set aside for an order that ended, until they are put back (the final report waits for that, a little)
+    private final Map<Integer, String> orderReturnWatch = new ConcurrentHashMap<>();
+    // Grid fills made for craft orders in the last hour
+    private final CraftHealth orderFills = new CraftHealth();
+    // The website's table could not be reached or opened (twice in an order it is given up on), and when
+    private CraftingTableSpot.@Nullable Spot tableTrouble;
+    private long tableTroubleAt;
+    // The website table as last seen standing (a crafting table in a loaded chunk)
+    private CraftingTableSpot.@Nullable Spot tableSeen;
+    // Per order: times the table could not be reached or opened, and times a chunk was cut short (each is tried once more)
+    private int orderTableFails, orderInterrupts;
+    private @Nullable String orderCounted;
+    private static final long TABLE_SEEN_TICKS = 20L * 60 * 10;
+
+    private @Nullable CraftSettings craftSettings() {
+        Stash s = orders.st();
+        return s == null ? null : CraftStore.shared().get(ManagerIndex.clamp(s.server, 256), ManagerIndex.clamp(s.name, 256));
+    }
+
+    private static CraftingTableSpot.Spot websiteSpot(CraftSettings.Table t) {
+        return new CraftingTableSpot.Spot(t.dimension(), t.x(), t.y(), t.z());
+    }
+
+    /** Craft orders can be considered: the setting and crafting are on, and a recipe table was fetched. */
+    public boolean craftOrdersBase() {
+        return CONFIG.craftOrders && CONFIG.enableCrafting && Recipes.current() != null;
+    }
+
+    /**
+     * Craft orders can be claimed: the above, and either a website table that works or, with none set, the auto path (the bot finds a table,
+     * places one from the stash, or crafts one).
+     */
+    public boolean craftOrdersCapable() {
+        if (!craftOrdersBase()) return false;
+        CraftSettings cs = craftSettings();
+        return CraftTableState.capable(true, cs != null && cs.table() != null, craftTableState());
+    }
+
+    /** Grid fills made for craft orders in the last hour. */
+    public int craftOrderFillsLastHour() {
+        return orderFills.lastHour(System.currentTimeMillis());
+    }
+
+    /** The dimension the stash is in: as recorded, else the one the bot was in when it read one of its containers this session; else null. */
+    private @Nullable String effectiveDimension(Stash s) {
+        String read = null;
+        for (Box box : s.boxes) if (!box.delivery && box.readIn != null) read = box.readIn;
+        return CraftBounds.dimension(s.dimension, read);
+    }
+
+    /** Where the stash is for judging a table: its perimeter, else its containers. Does not depend on where the bot stands. */
+    private CraftBounds.StashArea stashArea(Stash s) {
+        List<BlockPos> at = new ArrayList<>();
+        for (Box box : s.boxes) if (!box.delivery) at.addAll(box.parts);
+        return new CraftBounds.StashArea(s.bounds(), at, CONFIG.radius, CONFIG.height);
+    }
+
+    private CraftTableState.@Nullable State tableStateCache;
+    private long tableStateAt = Long.MIN_VALUE / 4;
+    private boolean @Nullable [] autoFlags;
+    private long autoFlagsAt = Long.MIN_VALUE / 4;
+    private int autoFlagsVersion = -1;
+
+    /** The state of the crafting table for the heartbeat: the website's, or "auto" with none set. Worked out at most once a second. */
+    public CraftTableState.State craftTableState() {
+        CraftTableState.State s = tableStateCache;
+        if (s != null && tickCount >= tableStateAt && tickCount - tableStateAt < 20) return s;
+        s = computeTableState();
+        tableStateCache = s;
+        tableStateAt = tickCount;
+        return s;
+    }
+
+    private CraftTableState.State computeTableState() {
+        Stash st = orders.st();
+        CraftSettings cs = craftSettings();
+        CraftSettings.Table t = cs == null ? null : cs.table();
+        String dim = st == null ? null : effectiveDimension(st);
+        CraftBounds.StashArea area = st == null ? new CraftBounds.StashArea(null, List.of(), 0, 0) : stashArea(st);
+        if (t != null) return CraftTableState.website(websiteWhy(t, dim, area));
+        if (dim == null || area.empty()) return CraftTableState.auto(dim, !area.empty(), false, false, false, false);
+        boolean[] f = autoFlags;
+        // The survey of the stash (a table item, planks) is made again when the stash changed (at most every 10 s) and at least every minute
+        if (f == null || tickCount < autoFlagsAt || tickCount - autoFlagsAt >= 1200 || (Stashes.version != autoFlagsVersion && tickCount - autoFlagsAt >= 200)) {
+            autoFlagsVersion = Stashes.version;
+            CraftingTableSpot.Spot own = CraftingTableSpot.get();
+            boolean ownOk = false, found = false, stock = false, material = false;
+            try {
+                if (own != null && CraftingTableSpot.here(own) && CraftBounds.areaWhy(dim, area, new CraftSettings.Table(own.x(), own.y(), own.z(), own.dimension()), 64) == null
+                    && (!Containers.isLoaded(own.pos()) || CraftingTableSpot.isTable(own.pos()))) ownOk = true;
+                found = nearestScannedTable() != null;
+                stock = !tableLots().isEmpty();
+                material = tableMaterial() != CraftingTableFinder.Material.NONE;
+            } catch (RuntimeException | LinkageError e) {
+                // Not known now: counted as not there
+            }
+            f = new boolean[] {ownOk, found, stock, material};
+            autoFlags = f;
+            autoFlagsAt = tickCount;
+        }
+        return CraftTableState.auto(dim, true, f[0], f[1], f[2], f[3]);
+    }
+
+    /** Why the website table can't be used, or null when it can. */
+    private @Nullable String websiteWhy(CraftSettings.Table t, @Nullable String dim, CraftBounds.StashArea area) {
+        String w = CraftBounds.areaWhy(dim, area, t, 64);
+        if (w != null) return w;
+        CraftingTableSpot.Spot spot = websiteSpot(t);
+        try {
+            if (!CraftingTableSpot.here(spot)) return CraftBounds.WRONG_DIMENSION;
+            // Once the table was seen standing, leaving its chunk unloaded does not make it unknown again ("not loaded" is only for one never seen)
+            if (!Containers.isLoaded(spot.pos())) return spot.equals(tableSeen) ? null : CraftBounds.NOT_LOADED;
+            if (!CraftingTableSpot.isTable(spot.pos())) {
+                tableSeen = null;
+                return CraftBounds.NOT_TABLE;
+            }
+            tableSeen = spot;
+            if (spot.equals(tableTrouble) && tickCount - tableTroubleAt < 20L * 60 * 10) return CraftBounds.PATH_FAILED;
+            if (!CraftingTableFinder.standBeside(spot.pos(), anvilBlocks)) return CraftBounds.NO_STAND;
+        } catch (RuntimeException | LinkageError e) {
+            return CraftBounds.NOT_LOADED;
+        }
+        return null;
+    }
+
+    /** The state of the crafting table for the heartbeat ({@code unset}, {@code ok}, {@code auto}, ...). Never a position. */
+    public String craftTableStatus() {
+        return craftTableState().status();
+    }
+
+    /** Why the crafting table can't be used (a CraftBounds code), or null. */
+    public @Nullable String craftTableWhy() {
+        return craftTableState().why();
+    }
+
+    /** The bot's own crafting table in use (found, placed, crafted or set by hand), when no website table is set. */
+    public ManagerIndex.@Nullable BotTable botTable() {
+        CraftSettings cs = craftSettings();
+        if (cs != null && cs.table() != null) return null;
+        CraftingTableSpot.Spot spot = CraftingTableSpot.get();
+        if (spot == null || CraftingTableSpot.websiteActive()) return null;
+        Stash st = orders.st();
+        if (st == null || CraftBounds.areaWhy(effectiveDimension(st), stashArea(st), new CraftSettings.Table(spot.x(), spot.y(), spot.z(), spot.dimension()), 64) != null) return null;
+        String source = CraftingTableSpot.source();
+        return new ManagerIndex.BotTable(spot.x() + "," + spot.y() + "," + spot.z(), CraftingTableSpot.SET.equals(source) ? CraftingTableSpot.FOUND : source);
+    }
+
+    /** What `stash craftorders` says about the crafting table. No position. */
+    public String craftOrderTableLine() {
+        CraftSettings cs = craftSettings();
+        CraftTableState.State state = craftTableState();
+        String why = state.why() == null ? "" : ", " + state.why();
+        if (cs == null) return "nothing heard from the server yet; the bot finds, places or crafts one when none is set (" + state.status() + why + ")";
+        if (cs.table() == null) return "none set on the website: the bot finds, places or crafts one (" + state.status() + why + ")";
+        return "set on the website (position hidden): " + state.status() + why;
+    }
+
+    /** Crafting tables standing in the stash area, as the last search found them ("x,y,z", at most 8): the website's quick pick. */
+    public List<String> seenTables() {
+        List<String> out = new ArrayList<>();
+        try {
+            for (BlockPos p : tableScanFound) {
+                if (CraftingTableFinder.isTable(anvilBlocks.name(p.x(), p.y(), p.z()))) out.add(p.x() + "," + p.y() + "," + p.z());
+            }
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+        java.util.Collections.sort(out);
+        return out.size() > ManagerIndex.MAX_SEEN ? new ArrayList<>(out.subList(0, ManagerIndex.MAX_SEEN)) : out;
+    }
+
+    /** The website's table is not in the stash's dimension, or is more than 64 blocks outside the stash area: it is never walked to. */
+    private boolean tableOutOfBounds(CraftSettings.Table t) {
+        Stash s = orders.st();
+        return s == null || CraftBounds.areaWhy(effectiveDimension(s), stashArea(s), t, 64) != null;
+    }
+
+    /**
+     * The table in the settings against the limits, for a craft order with no website table. One set by hand that is outside them is left exactly
+     * as it is, and craft orders use a table of their own meanwhile (CraftingTableSpot's side slot); one the bot found or placed that is outside
+     * them is forgotten.
+     */
+    private void reconcileOwnTable(@Nullable String dim, CraftBounds.StashArea area) {
+        CraftingTableSpot.Spot saved = CraftingTableSpot.persisted();
+        if (saved == null) {
+            CraftingTableSpot.sideMode(false);
+            return;
+        }
+        if (CraftBounds.areaWhy(dim, area, new CraftSettings.Table(saved.x(), saved.y(), saved.z(), saved.dimension()), 64) == null) {
+            CraftingTableSpot.sideMode(false);
+            return;
+        }
+        if (CraftingTableSpot.SET.equals(CraftingTableSpot.persistedSource())) {
+            CraftingTableSpot.sideMode(true);
+            return;
+        }
+        CraftingTableSpot.sideMode(false);
+        CraftingTableSpot.clear();
+        tableChanged();
+    }
+
+    /** The reason the website's table can't be used for this order now (a CraftOrder code), or null. */
+    private @Nullable String orderTableProblem(String task, @Nullable CraftSettings cs) {
+        CraftSettings.Table t = cs == null ? null : cs.table();
+        if (t == null) return CraftOrder.NO_TABLE;
+        if (tableOutOfBounds(t)) return CraftOrder.TABLE_BLOCKED;
+        CraftingTableSpot.Spot spot = websiteSpot(t);
+        if (!CraftingTableSpot.here(spot)) return CraftOrder.TABLE_BLOCKED;
+        if (Containers.isLoaded(spot.pos()) && !CraftingTableSpot.isTable(spot.pos())) return CraftOrder.TABLE_MISSING;
+        if (craftHealth.problem(task, spot) != null) return CraftOrder.TABLE_BLOCKED;
+        return null;
+    }
+
+    /** What is carried of crafted items not used yet (made by the order's chunks), by namespaced id. */
+    private Map<String, Long> orderSurplusCounts() {
+        Map<String, Long> out = new HashMap<>();
+        for (var e : new ArrayList<>(orderCraftSurplus.entrySet())) {
+            Item it = inventoryItem(e.getKey());
+            if (it != null && it.id.equals(e.getValue())) out.merge("minecraft:" + it.id, (long) it.count, Long::sum);
+        }
+        return out;
+    }
+
+    /** The carry slots set aside for an order's crafting: crafted loads waiting for their bin, and the surplus. Cleared when the order is over. */
+    private Set<Integer> orderCraftHeld() {
+        if (orderCraftLots.isEmpty() && orderCraftSurplus.isEmpty()) return Set.of();
+        if (!orders.flow.running()) {
+            orderCraftLots.clear();
+            orderCraftSurplus.clear();
+            return Set.of();
+        }
+        // A crafted load is kept for as long as a bin still to build has it; one whose bin was skipped or given up on is let go
+        List<Order.Lot> wanted = new ArrayList<>();
+        List<Unit> all = orders.flow.units();
+        for (int i = Math.min(orders.flow.index(), all.size()); i < all.size(); i++) {
+            Unit u = all.get(i);
+            if (u.built || u.have) continue;
+            for (Order.Lot lot : u.lots) if (lot.crafted()) wanted.add(lot);
+        }
+        orderCraftLots.entrySet().removeIf(e -> {
+            Item it = inventoryItem(e.getKey());
+            if (it == null || !it.id.equals(e.getValue())) return true;
+            for (int i = 0; i < wanted.size(); i++) {
+                Order.Lot lot = wanted.get(i);
+                if (Recipes.ns(lot.key()).equals("minecraft:" + it.id) && lot.count() == it.count) {
+                    wanted.remove(i);
+                    return false;
+                }
+            }
+            return true;
+        });
+        orderCraftSurplus.entrySet().removeIf(e -> {
+            Item it = inventoryItem(e.getKey());
+            return it == null || !it.id.equals(e.getValue());
+        });
+        Set<Integer> out = new HashSet<>(orderCraftLots.keySet());
+        out.addAll(orderCraftSurplus.keySet());
+        return out;
+    }
+
+    /** The plain stock craft orders may take from: the ids of the order's take, plain stacks only (the server counts plain keys). */
+    private CraftPool.Stock orderStock(CraftLedger ledger) {
+        Stash s = orders.st();
+        if (s == null) return CraftPool.Stock.empty();
+        Set<String> ids = new HashSet<>(ledger.take().keySet());
+        return SourceRules.craftSurvey(s.boxes, ids, orders.reservedShulkerKeys(), CONFIG.useNamedShulkers, neverUse(), sourceLive).plainOnly();
+    }
+
+    /** Starts the next chunk of crafting for a bin (OrderFlow.CraftLoads). @return true when a job was started */
+    private boolean startOrderCraftLoads(OrderFlow.CraftLoads c) {
+        if (compact != null || craft != null || anvilRun != null || chestRun != null || repair != null || repairTrip != null) return false;
+        OrderFlow flow = orders.flow;
+        Unit u = c.unit();
+        CraftLedger ledger = flow.craftLedger();
+        int idx = flow.nextCraftLot(u);
+        if (ledger == null || idx < 0) return false;
+        Order.Lot lot = u.lots.get(idx);
+        String key = Recipes.ns(lot.key());
+        String task = String.valueOf(flow.orderId());
+        String here = "order: shulker " + (flow.index() + 1) + "/" + flow.units().size();
+
+        // The website's table: none set, not a crafting table, or given up on: every craft line still to make is short, the order goes on
+        CraftSettings cs = craftSettings();
+        boolean website = cs != null && cs.table() != null;
+        if (website) {
+            String bad = orderTableProblem(task, cs);
+            if (bad != null) {
+                step(here + ": no crafting from now on (" + CraftOrder.describe(bad) + ").");
+                flow.craftAbandon(bad);
+                return false;
+            }
+        }
+        else {
+            // No website table: a table standing in the stash area is found, else one is taken from the stash and put down, else one is crafted
+            // (ensureTable, as for shulker boxes), and the bot's own table is used from then on; if it goes missing this starts again
+            Stash ownStash = orders.st();
+            if (ownStash == null || tickCount < autoRetryAt) return false;
+            String dimE = effectiveDimension(ownStash);
+            CraftBounds.StashArea areaE = stashArea(ownStash);
+            reconcileOwnTable(dimE, areaE);
+            String[] twhy = new String[1];
+            TableWay way;
+            tableForOrder = task;
+            try {
+                way = ensureTable(task, twhy);
+            } finally {
+                tableForOrder = null;
+            }
+            switch (way) {
+                case Wait -> {
+                    return false;
+                }
+                case Started -> {
+                    if (job != null || anvilRun != null || craft != null) {
+                        autoStartFails = 0;
+                        return true;
+                    }
+                    // Nothing was started: a failure, tried again after a short wait, and given up on after three
+                    if (++autoStartFails >= 3) {
+                        autoStartFails = 0;
+                        step(here + ": no crafting table could be put down.");
+                        flow.craftAbandon(CraftOrder.NO_TABLE);
+                        return false;
+                    }
+                    autoRetryAt = tickCount + 100;
+                    return false;
+                }
+                case Failed -> {
+                    step(here + ": no crafting table to use: " + twhy[0] + ".");
+                    flow.craftAbandon(CraftOrder.NO_TABLE);
+                    return false;
+                }
+                case Ready -> autoStartFails = 0;
+            }
+            CraftingTableSpot.Spot own = CraftingTableSpot.get();
+            if (own == null) return false;
+            String limit = CraftBounds.areaWhy(dimE, areaE, new CraftSettings.Table(own.x(), own.y(), own.z(), own.dimension()), 64);
+            String trouble = limit != null ? limit : tableProblem(task);
+            if (trouble != null) {
+                // A table that turns out unusable is given up on and the search is made once more before the lines are given up
+                if (!task.equals(autoSkipFor)) {
+                    autoSkipFor = task;
+                    autoSkips = 0;
+                }
+                if (autoSkips++ < 1 && !CraftingTableSpot.SET.equals(CraftingTableSpot.source())) {
+                    tableSkip.add(own.pos());
+                    CraftingTableSpot.clear();
+                    tableChanged();
+                    step(here + ": this crafting table can't be used (" + trouble + "), looking for another.");
+                    return false;
+                }
+                step(here + ": the crafting table can't be used (" + trouble + ").");
+                flow.craftAbandon(CraftOrder.TABLE_BLOCKED);
+                return false;
+            }
+        }
+
+        // What a chunk makes: as much of the load as the budget, the caps and the free carry slots allow
+        ledger.setSurplus(orderSurplusCounts());
+        long fillsLeft = Math.min((long) ledger.maxFills() - ledger.fills(), (long) CONFIG.craftOrderMaxPerHour - craftOrderFillsLastHour());
+        CraftPool.Stock stock = orderStock(ledger);
+        List<Unit> others = remainingUnits();
+        CraftBatch.Choice choice = CraftBatch.choose(ledger, key, lot.count(), freeCarryCount(), fillsLeft, StashSorter::stackOf, need -> CraftPool.lots(stock, need, others).size());
+        if (!choice.ok()) {
+            String reason = choice.reason() == null ? CraftOrder.INGREDIENTS_SHORT : choice.reason();
+            step(here + ": " + lot.count() + " " + Recipes.pretty(key) + " can't be crafted: " + CraftOrder.describe(reason) + (choice.detail() == null ? "" : " (" + choice.detail() + ")") + ".");
+            flow.craftLotShort(u, idx, reason);
+            return false;
+        }
+        CraftPlanner.Plan plan = choice.plan();
+        List<Order.Lot> gather = CraftPool.lots(stock, plan.fromStock(), others);
+        // The stash must really give what the plan takes (the budget is the server's count, the stash is what is here now)
+        Map<String, Long> got = new HashMap<>();
+        for (Order.Lot g : gather) got.merge(Recipes.ns(baseIdOf(g.key())), (long) g.count(), Long::sum);
+        for (var need : plan.fromStock().entrySet()) {
+            if (got.getOrDefault(Recipes.ns(need.getKey()), 0L) < need.getValue()) {
+                step(here + ": " + lot.count() + " " + Recipes.pretty(key) + " can't be crafted: the stash has no " + Recipes.pretty(need.getKey()) + " to give.");
+                flow.craftLotShort(u, idx, CraftOrder.INGREDIENTS_SHORT);
+                return false;
+            }
+        }
+
+        CraftRun run = new CraftRun(u, task, plan, gather);
+        run.oc = new OrderChunk(lot, choice.count(), stackOf(key));
+        run.oc.gathered = CraftCharge.gathered(gather);
+        // The surplus carried from earlier chunks is the craft's to use
+        for (int slot : orderCraftSurplus.keySet()) if (inventoryItem(slot) != null) run.owned.add(slot);
+        // The saved ledger no longer lists surplus this chunk may consume: a restart before the chunk is recorded refunds nothing it used
+        ledger.chunkStarted();
+        flow.craftLedgerChanged();
+        if (website) CraftingTableSpot.useWebsite(websiteSpot(cs.table()));
+        try {
+            tableRunDim = Stash.currentDimension();
+            flow.craftLoadsStarted(u);
+            return beginCraft(run, here + " has " + lot.count() + " " + Recipes.pretty(key) + " to craft");
+        } catch (RuntimeException e) {
+            // The website's table is only the craft's for as long as the craft runs
+            craft = null;
+            CraftingTableSpot.useWebsite(null);
+            throw e;
+        }
+    }
+
+    /**
+     * The chunk's trips are over: its result is made a stack of exactly the load's size (the rest, a few items of the last fill, is split
+     * off), and the stacks to keep are set aside. @return true while clicks are going out or awaited (asked again next tick)
+     */
+    private boolean settleOrderChunk(CraftRun r) {
+        OrderChunk oc = r.oc;
+        if (oc == null || oc.settled) return false;
+        if (busy() || holdingCursor() || openContainerId() != 0) {
+            // A window of someone else that stays open: the chunk is given up on after ten seconds (what is carried goes back)
+            if (++oc.waits > 200) {
+                oc.code = CraftOrder.INTERRUPTED;
+                oc.made = 0;
+                oc.settled = true;
+                return false;
+            }
+            return true;
+        }
+        int slot = -1;
+        for (int s : oc.resultSlots) {
+            Item it = inventoryItem(s);
+            if (it == null || !it.id.equals(oc.id())) continue;
+            if (slot < 0 || it.count > inventoryItem(slot).count) slot = s;
+        }
+        Item result = slot < 0 ? null : inventoryItem(slot);
+        int have = result == null ? 0 : result.count;
+        if (result != null && have > oc.target) {
+            // A fill makes a few more than wanted: the stack is split, the extra stays carried as surplus
+            int free = freeCarrySlot();
+            ClickPlanner.Clicks clicks = free == -1 || oc.splitTries >= 3 ? null : ClickPlanner.plan(Math.max(1, result.maxStack), have, 0, have - oc.target);
+            if (clicks == null || clicks.ops().length == 0) {
+                // No room or no way to split it: the load is not made (everything goes back)
+                oc.code = CraftOrder.INVENTORY_FULL;
+                oc.made = 0;
+                oc.lotSlot = -1;
+                oc.settled = true;
+                return false;
+            }
+            if (oc.splitSent && tickCount - oc.splitAt < 3) return true;
+            ClickItem[] actions = new ClickItem[clicks.ops().length];
+            for (int i = 0; i < actions.length; i++) {
+                int op = clicks.ops()[i];
+                actions[i] = new ClickItem(0, op < 2 ? invSlot(slot) : invSlot(free), op % 2 == 1 ? ClickItemAction.RIGHT_CLICK : ClickItemAction.LEFT_CLICK);
+            }
+            if (submit(actions) == RequestFuture.rejected) return true;
+            oc.splitSent = true;
+            oc.splitTries++;
+            oc.splitAt = tickCount;
+            stashHeld.put(free, result.id);
+            r.owned.add(free);
+            wait = CONFIG.delayTicks;
+            return true;
+        }
+        oc.made = have;
+        oc.lotSlot = result == null ? -1 : slot;
+        oc.settled = true;
+        // Kept: the load's stack until its bin is built, and (when anything was crafted) every other stack of the craft as surplus
+        if (oc.lotSlot >= 0) orderCraftLots.put(oc.lotSlot, oc.id());
+        if (oc.fillsMade > 0) {
+            for (int s : new ArrayList<>(r.owned)) {
+                Item it = inventoryItem(s);
+                if (it == null || s == oc.lotSlot || it.isShulker() || sourceShulkers.containsKey(s)) continue;
+                orderCraftSurplus.put(s, it.id);
+            }
+        }
+        // Saved at once: the surplus counts are what is really carried now
+        CraftLedger saving = orders.flow.craftLedger();
+        if (saving != null) {
+            saving.setSurplus(orderSurplusCounts());
+            orders.flow.craftLedgerChanged();
+        }
+        return false;
+    }
+
+    /** The chunk is over (and put back): what it made and used is reported to the order, and the next round or the next bin goes on. */
+    private void finishOrderChunk(CraftRun r) {
+        OrderChunk oc = r.oc;
+        OrderFlow flow = orders.flow;
+        Unit u = r.unit;
+        CraftingTableSpot.useWebsite(null);
+        if (oc == null || u == null) return;
+        long now = System.currentTimeMillis();
+        if (oc.fillsMade > 0) orderFills.crafted(now, (int) Math.min(Integer.MAX_VALUE, oc.fillsMade));
+        int idx = u.lots.indexOf(oc.lot);
+        if (idx < 0 || !u.lots.get(idx).craft()) idx = flow.nextCraftLot(u);
+        CraftLedger ledger = flow.craftLedger();
+        if (ledger != null) ledger.setSurplus(orderSurplusCounts());
+        boolean cancelled = flow.cancelRequested() || !flow.running();
+        String code = oc.code != null ? oc.code : oc.made >= oc.target ? null : r.code != null ? r.code : CraftOrder.reasonOf(r.failure, r.stuck, cancelled);
+        if (code == null && oc.made < oc.target) code = CraftOrder.INTERRUPTED;
+        String orderId = String.valueOf(flow.orderId());
+        if (!orderId.equals(orderCounted)) {
+            orderCounted = orderId;
+            orderTableFails = 0;
+            orderInterrupts = 0;
+        }
+        // Charged from what was gathered, whatever a replan after an interrupted trip says it takes
+        Map<String, Long> charged = CraftCharge.charge(oc.gathered, oc.fillsMade, Map.of());
+        String here = "order: shulker " + (flow.index() + 1) + "/" + flow.units().size();
+        if (idx < 0) return;
+        if (code == null) {
+            orderTableFails = 0;
+            if (tableTrouble != null && CraftingTableSpot.get() == null) tableTrouble = null;
+            step(here + ": crafted " + oc.made + " " + Recipes.pretty(oc.key) + ".");
+            // A chunk smaller than the load leaves the rest of it to craft
+            flow.craftChunk(u, idx, oc.made, oc.fillsMade, charged, null);
+            return;
+        }
+        step(here + ": crafting " + Recipes.pretty(oc.key) + " stopped short (" + CraftOrder.describe(code) + "), " + oc.made + " of " + oc.target + " made.");
+        if (CraftOrder.TABLE_BLOCKED.equals(code) || CraftOrder.TABLE_MISSING.equals(code) || CraftOrder.NO_TABLE.equals(code)) {
+            CraftSettings cs = craftSettings();
+            if (cs != null && cs.table() != null && CraftOrder.TABLE_BLOCKED.equals(code)) {
+                tableTrouble = websiteSpot(cs.table());
+                tableTroubleAt = tickCount;
+            }
+            // Not reached or not opened: one more go, then it is given up on for the rest of the order
+            if (oc.made > 0) flow.craftChunk(u, idx, oc.made, oc.fillsMade, charged, code);
+            if (CraftOrder.TABLE_BLOCKED.equals(code) && ++orderTableFails < 2 && oc.made == 0) {
+                craftHealth.forget();
+                flow.craftChunk(u, idx, 0, oc.fillsMade, charged, null);
+                return;
+            }
+            flow.craftAbandon(code);
+            return;
+        }
+        // Cut short by a player or a closing window: one more go, then it is interrupted
+        if (CraftOrder.INTERRUPTED.equals(code) && oc.made == 0 && !cancelled && orderInterrupts < 1 && flow.running()) {
+            orderInterrupts++;
+            flow.craftChunk(u, idx, 0, oc.fillsMade, charged, null);
+            return;
+        }
+        flow.craftChunk(u, idx, oc.made, oc.fillsMade, charged, code);
     }
 
     /** Compaction found no empty shulker: one is crafted, when crafting is on. @return true when a job was started */
@@ -10732,7 +12402,7 @@ public class StashSorter extends AbstractFieldModule {
                     return startCraftTrip(r);
                 }
                 // Room for the loads still to come, a slot for each step's result, the shulker boxes made, and one spare
-                int room = craftRoom(r.plan, Math.max(0, r.bin.lots.size() - carriedHeld(r.bin).size()));
+                int room = craftRoom(r, Math.max(0, r.bin.lots.size() - carriedHeld(r.bin).size()));
                 if (freeCarryCount() < room) {
                     List<Integer> slots = roomCandidates();
                     slots.removeAll(craftReserved());
@@ -10761,7 +12431,13 @@ public class StashSorter extends AbstractFieldModule {
                     Recipes recipes = recipesOrNull();
                     Map<String, Long> pool = new HashMap<>();
                     for (var e : craftPort.carried().entrySet()) pool.merge(CraftSlots.baseOf(e.getKey()), (long) e.getValue(), Long::sum);
-                    CraftPlanner.Plan again = recipes == null || r.made >= r.wanted ? null
+                    CraftPlanner.Plan again;
+                    CraftLedger ledger = r.oc == null ? null : orders.flow.craftLedger();
+                    if (ledger != null && recipes != null && r.made < r.wanted) {
+                        // An order's chunk is planned again from what is carried, with the order's recipes only
+                        again = new CraftSub.Session(ledger.table(), ledger.allowed(), pool, pool, Map.of()).plan(r.plan.item(), r.wanted - r.made).plan();
+                    }
+                    else again = recipes == null || r.made >= r.wanted ? null
                         : CraftPlanner.plan(recipes, r.plan.item(), r.wanted - r.made, pool, CraftPlanner.Limits.open());
                     if (again == null || !again.ok()) return craftGaveUp(r, r.failure == null ? "what was gathered no longer makes one" : r.failure, true);
                     r.plan = again;
@@ -10771,6 +12447,8 @@ public class StashSorter extends AbstractFieldModule {
             case PutBack -> {
                 // Source shulkers emptied for the craft go back first, then what is left of the inputs and the steps between
                 if (handle == null && returnSpentShulker()) return true;
+                // An order's chunk: the result is made the load's size and set aside with the surplus, before the rest goes back
+                if (r.oc != null && settleOrderChunk(r)) return true;
                 if (r.putBackTries < 3) {
                     List<Integer> left = new ArrayList<>(looseCarried());
                     left.removeIf(slot -> craftKeep.containsKey(slot) || pendingSourceShulker(slot));
@@ -10805,6 +12483,10 @@ public class StashSorter extends AbstractFieldModule {
         craft = null;
         craftCard = null;
         craftCardDetail = null;
+        if (r.oc != null) {
+            finishOrderChunk(r);
+            return;
+        }
         if (r.forTable) {
             finishTableCraft(r);
             return;
@@ -10872,8 +12554,8 @@ public class StashSorter extends AbstractFieldModule {
         OrderSource first = orderSources.get(slots.get(0));
         BlockPos src = first == null ? null : first.pos();
         Box from = src == null ? null : stash.boxAt(src);
-        Box home = from != null && from.sortable() && !from.dropOff && !from.delivery && from.free() > 0 && !blocked(from, Job.Dump) ? from : null;
-        if (home == null) home = nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b)).toList());
+        Box home = from != null && from.sortable() && !from.dropOff && !from.delivery && from.free() > 0 && !blocked(from, Job.Dump) && originAllowed(from, slots) ? from : null;
+        if (home == null) home = nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b) && !kitReserved(b)).toList());
         if (home == null) return false;
         step(line + ".");
         putBackTrip = true;
@@ -10883,6 +12565,11 @@ public class StashSorter extends AbstractFieldModule {
     private boolean startCraftTrip(CraftRun r) {
         boolean inv = r.forTable;
         CraftingTableSpot.Spot spot = CraftingTableSpot.get();
+        if (!inv && r.oc != null && spot != null && CraftingTableSpot.here(spot) && Containers.isLoaded(spot.pos()) && !CraftingTableSpot.isTable(spot.pos())) {
+            // The website's table is not ours to forget: the lines are short, the order goes on
+            r.code = CraftOrder.TABLE_MISSING;
+            return craftGaveUp(r, "the block at the website's crafting table isn't one", false);
+        }
         if (!inv && spot != null && CraftingTableSpot.here(spot) && Containers.isLoaded(spot.pos()) && !CraftingTableSpot.isTable(spot.pos())) {
             // Gone since it was looked for: forgotten the same way, and the trip is not made to a block that isn't there
             tableSkip.add(spot.pos());
@@ -10929,6 +12616,7 @@ public class StashSorter extends AbstractFieldModule {
         if (r.unit != null && (!orders.flow.running() || orders.flow.cancelRequested() || orders.flow.parkRequested())) t.abort("the order ended");
         if (r.forTable && tableRunBroken()) t.abort("respawn or change of dimension");
         t.tick();
+        if (r.oc != null) orders.flow.setPhase(orders.flow.craftPhase(r.oc.key, r.oc.fillsMade + t.fillsTaken()));
         if (t.step() != CraftTrip.Step.Walk && t.step() != CraftTrip.Step.Open) step = Step.Working;
         if (t.step() == CraftTrip.Step.Done) endCraftTrip(t.outcome());
     }
@@ -10936,6 +12624,7 @@ public class StashSorter extends AbstractFieldModule {
     /** The trip to the table is over: what was made is kept for its use, and what is left goes back next. */
     private void endCraftTrip(CraftTrip.@Nullable Outcome outcome) {
         CraftRun r = craft;
+        CraftTrip finished = crafter;
         crafter = null;
         tableGoal = null;
         activity.releaseOurPathing();
@@ -10972,6 +12661,10 @@ public class StashSorter extends AbstractFieldModule {
         if (!tableStuckInv) inventoryTrip = false;
         r.made += outcome.made();
         r.trips++;
+        if (r.oc != null) {
+            if (finished != null) r.oc.fillsMade += finished.fillsTaken();
+            if (outcome.stuck()) r.stuck = true;
+        }
         // Chests for the delivery storage are kept from being put away until they are put up
         if (r.forChests()) {
             long keepUntil = tickCount + CRAFT_KEEP_TICKS;
@@ -11015,8 +12708,10 @@ public class StashSorter extends AbstractFieldModule {
     /** What the craft in hand holds now (gathered and made), not to be put away until it is over. */
     private Set<Integer> craftReserved() {
         CraftRun r = craft;
-        if (r == null && craftKeep.isEmpty()) return Set.of();
+        Set<Integer> held = orderCraftHeld();
+        if (r == null && craftKeep.isEmpty() && held.isEmpty()) return Set.of();
         Set<Integer> out = new HashSet<>(craftKept());
+        out.addAll(held);
         if (r == null || r.phase == CraftPhase.PutBack) return out;
         out.addAll(craftHeldSlots(r));
         for (int slot : r.owned) if (inventoryItem(slot) != null) out.add(slot);
@@ -11176,6 +12871,8 @@ public class StashSorter extends AbstractFieldModule {
      * -1 when none.
      */
     private int fitSlot(Item what, int count) {
+        CraftRun order = craft;
+        if (order != null && order.oc != null) return fitOrderSlot(order, what, count);
         int free = freeCarrySlot();
         if (free != -1) return free;
         CraftRun r = craft;
@@ -11187,6 +12884,26 @@ public class StashSorter extends AbstractFieldModule {
         }
         // No free carry slot is no room: nothing goes into a slot the bot keeps for itself
         return -1;
+    }
+
+    /**
+     * Where a crafted stack of an order's craft goes (1.15.0): into a stack of the same kind the craft owns that has room for all of it
+     * (the chunk's own result stack for the item itself, so it ends up one stack of the load's size; any the craft owns for a step's
+     * product, so 16 fills of planks are not 16 slots), else a free carry slot. -1 when there is none.
+     */
+    private int fitOrderSlot(CraftRun r, Item what, int count) {
+        OrderChunk oc = r.oc;
+        boolean result = oc != null && what.id.equals(oc.id());
+        int best = -1, bestCount = -1;
+        for (int slot : result ? oc.resultSlots : r.owned) {
+            Item there = inventoryItem(slot);
+            if (there == null || !there.id.equals(what.id) || !there.sameAs(what) || there.count + count > there.maxStack) continue;
+            if (there.count > bestCount) {
+                best = slot;
+                bestCount = there.count;
+            }
+        }
+        return best != -1 ? best : freeCarrySlot();
     }
 
     /** Any free inventory slot (0-35) that is not kept, or -1. */
@@ -11430,6 +13147,11 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         @Override
+        public int maxStack(String kind) {
+            return stackOf(kind);
+        }
+
+        @Override
         public boolean holdingCursor() {
             return StashSorter.this.holdingCursor();
         }
@@ -11479,6 +13201,7 @@ public class StashSorter extends AbstractFieldModule {
             if (r != null) {
                 r.owned.add(into);
                 if (tableSlot == CraftGrid.RESULT && what.id.equals("shulker_box")) r.resultSlots.add(into);
+                if (tableSlot == CraftGrid.RESULT && r.oc != null && what.id.equals(r.oc.id())) r.oc.resultSlots.add(into);
                 if (tableSlot == CraftGrid.RESULT && r.forTable && what.id.equals("crafting_table")) r.tableSlot = into;
             }
             actions++;
@@ -11534,6 +13257,8 @@ public class StashSorter extends AbstractFieldModule {
         @Nullable String failure;
         boolean done;
         PlaceKind kind = PlaceKind.Anvil;
+        /** The table is for a craft order: its placement counts against the caps. */
+        boolean forOrderCraft;
         // A table: crafted by the bot (not taken from the stash), and when the run began (it gives up after 90 s)
         boolean crafted;
         long startTick;
@@ -11921,6 +13646,7 @@ public class StashSorter extends AbstractFieldModule {
                     String dimension = Stash.currentDimension();
                     if (r.kind == PlaceKind.Table) {
                         if (dimension != null) CraftingTableSpot.remember(dimension, at.x(), at.y(), at.z(), r.crafted ? CraftingTableSpot.CRAFTED : CraftingTableSpot.PLACED);
+                        if (r.forOrderCraft) recordTablePlacement(r.task);
                         tableChanged();
                         r.done = true;
                         step("crafting table: put one down " + String.format("%.0f", Math.sqrt(distSq(playerFeet(), at))) + " blocks away and remembered it; next: craft there.");
@@ -11976,6 +13702,50 @@ public class StashSorter extends AbstractFieldModule {
 
     private enum TableWay { Ready, Wait, Started, Failed }
 
+    // Tables put down for craft orders are counted (one for an order, three in an hour), in the settings file
+    private @Nullable String tableForOrder;
+    private long autoRetryAt;
+    private int autoStartFails, autoSkips;
+    private @Nullable String autoSkipFor;
+
+    private CraftTableCap.State tableCapState() {
+        List<Long> times = CONFIG.craftTablePlacedAt == null ? List.of() : new ArrayList<>(CONFIG.craftTablePlacedAt);
+        return new CraftTableCap.State(times, CONFIG.craftTableOrder == null || CONFIG.craftTableOrder.isEmpty() ? null : CONFIG.craftTableOrder, CONFIG.craftTableOrderCount);
+    }
+
+    /** What `stash craftorders` shows about tables put down for craft orders. */
+    public String craftTablePlacementsLine() {
+        CraftTableCap.State st = tableCapState();
+        String id = orders.flow.orderId();
+        return CraftTableCap.lastHour(st, System.currentTimeMillis()) + " of " + CraftTableCap.PER_HOUR + " this hour, "
+            + (id == null ? 0 : CraftTableCap.forOrder(st, id)) + " of " + CraftTableCap.PER_ORDER + " for the order in hand";
+    }
+
+    /** A craft order is about to put a table down (taken from the stash or crafted): refused past the caps. Counted only when one is really put down. */
+    private boolean tablePlacementRefused(String[] why) {
+        String order = tableForOrder;
+        if (order == null) return false;
+        if (!CraftTableCap.allowed(tableCapState(), order, System.currentTimeMillis())) {
+            why[0] = "no more crafting tables to put down (" + craftTablePlacementsLine() + ")";
+            return true;
+        }
+        return false;
+    }
+
+    /** A table for a craft order was put down: counted (one for the order, three in the hour) and saved. */
+    private void recordTablePlacement(String order) {
+        long now = System.currentTimeMillis();
+        CraftTableCap.State next = CraftTableCap.record(tableCapState(), order, now);
+        CONFIG.craftTablePlacedAt = new ArrayList<>(next.times());
+        CONFIG.craftTableOrder = next.orderId() == null ? "" : next.orderId();
+        CONFIG.craftTableOrderCount = next.orderCount();
+        try {
+            com.aquarius.Globals.saveConfigAsync();
+        } catch (RuntimeException | LinkageError e) {
+            // Kept in memory at least
+        }
+    }
+
     private AnvilFinder.@Nullable Scan tableScanNow;
     private List<BlockPos> tableScanFound = List.of();
     private long tableScanDoneAt = Long.MIN_VALUE / 4;
@@ -12020,13 +13790,13 @@ public class StashSorter extends AbstractFieldModule {
     private boolean tableRunBroken() {
         if (!CACHE.getPlayerCache().isAlive()) return true;
         String now = Stash.currentDimension();
-        return tableRunDim != null && now != null && !tableRunDim.equals(now);
+        return tableRunDim != null && now != null && !com.porter.qwertestash.stash.Dimensions.same(tableRunDim, now);
     }
 
     /** A found, placed or crafted table that can't be reached or opened is forgotten (a hand-set one never is). */
     private void forgetTable() {
         CraftingTableSpot.Spot spot = CraftingTableSpot.get();
-        if (spot == null || CraftingTableSpot.SET.equals(CraftingTableSpot.source())) return;
+        if (spot == null || CraftingTableSpot.websiteActive() || CraftingTableSpot.SET.equals(CraftingTableSpot.source())) return;
         tableSkip.add(spot.pos());
         CraftingTableSpot.clear();
         tableChanged();
@@ -12065,22 +13835,36 @@ public class StashSorter extends AbstractFieldModule {
         if (s == null) return null;
         List<BlockPos> standing = new ArrayList<>();
         for (BlockPos p : tableScanFound) if (CraftingTableFinder.isTable(anvilBlocks.name(p.x(), p.y(), p.z()))) standing.add(p);
-        return CraftingTableFinder.nearest(standing, playerFeet(), p -> !tableSkip.contains(p) && s.inArea(p, 0) && CraftingTableFinder.standBeside(p, anvilBlocks));
+        CraftBounds.StashArea area = stashArea(s);
+        return CraftingTableFinder.nearest(standing, playerFeet(), p -> !tableSkip.contains(p) && CraftBounds.contains(area, p, 0) && CraftingTableFinder.standBeside(p, anvilBlocks));
+    }
+
+    /**
+     * What crafting may take for a table (found, placed or crafted for itself): the pool less what the other units take and less what is left of
+     * the order's craft budget, so a table never eats ingredients a craft line of the order is counting on.
+     */
+    private Map<String, Long> residualNet(CraftPool.Stock stock, List<Unit> others) {
+        Map<String, Long> out = new HashMap<>(CraftPool.residual(stock, others));
+        CraftLedger ledger = orders.flow.craftLedger();
+        if (ledger != null && orders.flow.running()) {
+            for (var e : ledger.budget().entrySet()) out.computeIfPresent(e.getKey(), (k, v) -> Math.max(0, v - e.getValue()));
+        }
+        return out;
     }
 
     /** The stash's crafting table items no line of the order needs, as loads to gather; empty when there is none. */
     private List<Order.Lot> tableLots() {
         Stash s = orders.st();
         if (s == null) return List.of();
-        CraftPool.Stock stock = SourceRules.craftSurvey(s.boxes, new HashSet<>(List.of(CraftingTableFinder.TABLE_ID)), orders.reservedShulkerKeys(), CONFIG.useNamedShulkers, neverUse(), sourceLive);
+        CraftPool.Stock stock = SourceRules.craftSurvey(s.boxes, new HashSet<>(List.of(CraftingTableFinder.TABLE_ID)), orders.reservedShulkerKeys(), CONFIG.useNamedShulkers, neverUse(), sourceLive).plainOnly();
         List<Unit> others = orders.flow.holdsOrder() ? remainingUnits() : List.of();
-        if (CraftPool.residual(stock, others).getOrDefault(CraftingTableFinder.TABLE_ID, 0L) <= 0) return List.of();
+        if (residualNet(stock, others).getOrDefault(CraftingTableFinder.TABLE_ID, 0L) <= 0) return List.of();
         return CraftPool.lots(stock, Map.of(CraftingTableFinder.TABLE_ID, 1L), others);
     }
 
     /** What a table could be crafted from out of the stash's planks or logs (not what the bot carries). */
     private CraftingTableFinder.Material tableMaterial() {
-        return CraftingTableFinder.material(recipesOrNull(), CraftPool.residual(craftStock(), orders.flow.holdsOrder() ? remainingUnits() : List.of()), neverUse());
+        return CraftingTableFinder.material(recipesOrNull(), residualNet(craftStock().plainOnly(), orders.flow.holdsOrder() ? remainingUnits() : List.of()), neverUse());
     }
 
     /**
@@ -12164,6 +13948,7 @@ public class StashSorter extends AbstractFieldModule {
                 return TableWay.Ready;
             }
             case PLACE_FROM_STOCK -> {
+                if (tablePlacementRefused(why)) return TableWay.Failed;
                 List<Order.Lot> lots = tableLots();
                 if (lots.isEmpty()) {
                     why[0] = CraftingTableFinder.NONE;
@@ -12171,6 +13956,7 @@ public class StashSorter extends AbstractFieldModule {
                 }
                 AnvilRun r = new AnvilRun(task, lots);
                 r.kind = PlaceKind.Table;
+                r.forOrderCraft = tableForOrder != null;
                 r.startTick = tickCount;
                 anvilRun = r;
                 tableRunDim = dimension;
@@ -12179,16 +13965,18 @@ public class StashSorter extends AbstractFieldModule {
                 return TableWay.Started;
             }
             case CRAFT -> {
+                if (tablePlacementRefused(why)) return TableWay.Failed;
                 Recipes recipes = recipesOrNull();
-                CraftPool.Stock stock = craftStock();
+                CraftPool.Stock stock = craftStock().plainOnly();
                 List<Unit> others = orders.flow.holdsOrder() ? remainingUnits() : List.of();
-                CraftPlanner.Plan plan = recipes == null ? null : CraftPlanner.plan(recipes, CraftingTableFinder.TABLE_ID, 1, CraftPool.residual(stock, others), CraftingTableFinder.limits(neverUse()));
+                CraftPlanner.Plan plan = recipes == null ? null : CraftPlanner.plan(recipes, CraftingTableFinder.TABLE_ID, 1, residualNet(stock, others), CraftingTableFinder.limits(neverUse()));
                 if (plan == null || !plan.ok() || !CraftingTableFinder.fitsInventoryGrid(plan)) {
                     why[0] = CraftingTableFinder.NONE + (plan == null || plan.ok() ? "" : ": " + plan.refusal());
                     return TableWay.Failed;
                 }
                 CraftRun run = new CraftRun(null, task, plan, CraftPool.lots(stock, plan.fromStock(), others));
                 run.forTable = true;
+                run.forOrderCraft = tableForOrder != null;
                 tableRunDim = dimension;
                 info("No crafting table in the area or the stash, crafting one from {} in the inventory grid.", d.material() == CraftingTableFinder.Material.LOGS ? "logs" : "planks");
                 beginCraft(run, "crafting table: none in the area or the stash");
@@ -12206,6 +13994,7 @@ public class StashSorter extends AbstractFieldModule {
         if (r.made >= 1 && r.tableSlot >= 0 && tableItem(inventoryItem(r.tableSlot)) && !tableRunBroken()) {
             AnvilRun p = new AnvilRun(r.task, List.of());
             p.kind = PlaceKind.Table;
+            p.forOrderCraft = r.forOrderCraft;
             p.crafted = true;
             p.heldSlot = r.tableSlot;
             p.phase = AnvilPhase.Place;
@@ -12391,7 +14180,7 @@ public class StashSorter extends AbstractFieldModule {
         if (!chestLots(need - have).isEmpty()) return null;
         if (!craftingOn()) return "no chests left in the stash (crafting is off)";
         Recipes recipes = recipesOrNull();
-        if (recipes == null) return "no chests left in the stash and the recipe table couldn't be read";
+        if (recipes == null) return "no chests left in the stash and no recipe table yet (the Stash Manager server sends it; crafting stays off until it has)";
         String table = tableProblem(CHEST_TASK);
         if (table != null) return "no chests left in the stash, and " + table;
         CraftPool.Stock stock = craftStock();
@@ -13238,9 +15027,9 @@ public class StashSorter extends AbstractFieldModule {
         OrderSource first = orderSources.get(mine.get(0));
         BlockPos src = first == null ? null : first.pos();
         Box from = src == null ? null : stash.boxAt(src);
-        Box home = from != null && from.sortable() && !from.dropOff && !from.delivery && from.free() > 0 && !blocked(from, Job.Dump) ? from : null;
+        Box home = from != null && from.sortable() && !from.dropOff && !from.delivery && from.free() > 0 && !blocked(from, Job.Dump) && originAllowed(from, mine) ? from : null;
         if (home == null) {
-            home = nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b)).toList());
+            home = nearest(stash.boxes.stream().filter(b -> b.sortable() && !b.dropOff && !b.delivery && b.free() > 0 && !blocked(b, Job.Dump) && !signPending(b) && !kitReserved(b)).toList());
         }
         if (home == null) {
             orderLeftoverTried = true;
@@ -13284,7 +15073,12 @@ public class StashSorter extends AbstractFieldModule {
 
         /** Something for the order step to do: an order in hand, a bin being built, or leftovers to put back. */
         boolean engaged() {
-            return flow.holdsOrder() || activeBin != null || orderLeftovers();
+            return flow.holdsOrder() || activeBin != null || orderLeftovers() || !kitEmptyQueue.isEmpty();
+        }
+
+        @Override
+        public void kitEmptyBack(Unit unit) {
+            if (!kitEmptyQueue.contains(unit)) kitEmptyQueue.add(unit);
         }
 
         @Override
@@ -13431,6 +15225,14 @@ public class StashSorter extends AbstractFieldModule {
         public Map<String, Integer> contentOf(Unit u, int slot) {
             Map<String, Integer> out = new HashMap<>();
             Item it = inventoryItem(slot);
+            if (u.kitTemplate != null) {
+                // A kit counts as one of its template, however it is filled. A shulker of another colour than the template asks for is noted
+                if (it != null && !u.kitReady && u.kitColor != null && !it.id.equals(colourShulkerId(u.kitColor)) && flow.kitResult() != null) {
+                    flow.kitResult().note(com.porter.qwertestash.orders.KitResult.COLOUR_SUBSTITUTED);
+                }
+                out.put(u.kitTemplate, 1);
+                return out;
+            }
             if (u.kind != Unit.Kind.Bin || it == null) {
                 out.put(u.key, 1);
                 return out;
@@ -13510,6 +15312,17 @@ public class StashSorter extends AbstractFieldModule {
         Set<String> reservedShulkerKeys() {
             Set<String> keys = new HashSet<>();
             for (Unit u : flow.units()) if (u.kind == Unit.Kind.Shulker) keys.add(u.key);
+            // Routed kits (incomplete copies included) are never unpacked as sources (KIT-CONTRACT v2, kit orders)
+            Stash s = st();
+            if (s != null && CONFIG.kitSorting) {
+                for (Box box : s.boxes) {
+                    if (box.contents == null || !kitReserved(box)) continue;
+                    for (Item it : box.contents) {
+                        String k = it == null ? null : ManagerIndex.shulkerKey(it);
+                        if (k != null) keys.add(k);
+                    }
+                }
+            }
             return keys;
         }
 
@@ -13524,14 +15337,158 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         @Override
+        public @Nullable Recipes craftTable() {
+            return craftOrdersBase() ? Recipes.current() : null;
+        }
+
+        @Override
+        public int craftMaxFills() {
+            return Math.max(1, CONFIG.craftOrderMaxFills);
+        }
+
+        @Override
+        public int maxStack(String id) {
+            return stackOf(id);
+        }
+
+        @Override
+        public Map<String, Long> craftCarried() {
+            return orderSurplusCounts();
+        }
+
+        @Override
+        public Map<String, Long> craftResumed(List<Unit> units, Map<String, Long> surplus) {
+            // After a restart what the order carries is set aside again: the crafted loads waiting for their bin, and the surplus the ledger
+            // saved, matched to carried stacks slot by slot (CraftResume). Surplus that is not carried any more is refunded to the budget
+            List<CraftResume.Load> loads = new ArrayList<>();
+            List<Order.Lot> lots = new ArrayList<>();
+            for (Unit u : units) {
+                if (u.built || u.have) continue;
+                for (Order.Lot lot : u.lots) {
+                    if (!lot.crafted()) continue;
+                    loads.add(new CraftResume.Load(lot.key(), lot.count()));
+                    lots.add(lot);
+                }
+            }
+            List<CraftResume.Stack> carried = new ArrayList<>();
+            for (int slot : carriedSlots()) {
+                Item it = inventoryItem(slot);
+                if (it != null && it.indexKey().equals("minecraft:" + it.id)) carried.add(new CraftResume.Stack(slot, "minecraft:" + it.id, it.count));
+            }
+            CraftResume.Result result = CraftResume.remark(loads, surplus, carried);
+            for (int i = 0; i < result.lotSlots().size(); i++) {
+                int slot = result.lotSlots().get(i);
+                if (slot >= 0) orderCraftLots.put(slot, shortId(Recipes.ns(lots.get(i).key())));
+            }
+            for (var e : result.surplusSlots().entrySet()) orderCraftSurplus.put(e.getKey(), shortId(e.getValue()));
+            return result.refund();
+        }
+
+        @Override
+        public void craftWatch(Map<String, Long> ignored) {
+            // The stacks the order set aside leave the order's hands now; they are watched until they are put back
+            orderReturnWatch.clear();
+            orderReturnWatch.putAll(orderCraftLots);
+            orderReturnWatch.putAll(orderCraftSurplus);
+        }
+
+        @Override
+        public boolean craftReturning() {
+            return !craftStillCarried().isEmpty();
+        }
+
+        @Override
+        public Map<String, Long> craftStillCarried() {
+            Map<String, Long> out = new HashMap<>();
+            for (var e : new ArrayList<>(orderReturnWatch.entrySet())) {
+                Item it = inventoryItem(e.getKey());
+                if (it == null || !it.id.equals(e.getValue())) orderReturnWatch.remove(e.getKey());
+                else out.merge("minecraft:" + it.id, (long) it.count, Long::sum);
+            }
+            return out;
+        }
+
+        /**
+         * The units for the order's kit lines from what the stash holds now (tick thread, like every plan): complete copies to fetch from pickable
+         * containers, kits to build from an incomplete copy in the template chest or an empty shulker, their loads gathered by match key within take.
+         */
+        @Override
+        public com.porter.qwertestash.orders.KitPlanner.@Nullable Plan planKit(Order order, int emptiesTaken) {
+            Stash s = st();
+            com.porter.qwertestash.orders.KitOrder.Snapshot snap = order.kit;
+            if (s == null || snap == null || !CONFIG.kitSorting || !CONFIG.kitOrders) return null;
+            KitSettings settings = KitStore.shared().get(ManagerIndex.clamp(s.server, 256), ManagerIndex.clamp(s.name, 256));
+            java.util.function.Function<com.porter.qwertestash.stash.KitTemplate, @Nullable String> target = t -> settings == null ? null : KitRouting.templateTarget(t, settings);
+            java.util.function.Predicate<Box> pickable = b -> KitRouting.pickable(b) && !b.stale && !blocked(b, Job.Fetch);
+            com.porter.qwertestash.orders.KitPlanner.Scan scan = com.porter.qwertestash.orders.KitPlanner.scan(snap, s.boxes, pickable, target);
+            // A restock job that builds a new copy never starts from an incomplete one
+            if (order.restock && !order.restockTopUp) scan = scan.withoutBases();
+            StockPlanner.Survey survey = survey(s, scan.wanted());
+            int empties = -Math.max(0, emptiesTaken);
+            for (int n : empties(s).values()) empties += n;
+            return com.porter.qwertestash.orders.KitPlanner.plan(snap, scan, survey, StashSorter::stackOf, Math.max(0, empties), Set.of(), order.restock);
+        }
+
+        /** One scan of the stash and one survey, made once for every template a restock decision looks at (the plans only read them). */
+        record RestockStock(com.porter.qwertestash.orders.KitPlanner.Scan scan, StockPlanner.Survey survey) {
+        }
+
+        @Nullable RestockStock restockStock(com.porter.qwertestash.orders.KitOrder.Snapshot union) {
+            Stash s = st();
+            if (s == null) return null;
+            KitSettings settings = KitStore.shared().get(ManagerIndex.clamp(s.server, 256), ManagerIndex.clamp(s.name, 256));
+            java.util.function.Function<com.porter.qwertestash.stash.KitTemplate, @Nullable String> target = t -> settings == null ? null : KitRouting.templateTarget(t, settings);
+            java.util.function.Predicate<Box> pickable = b -> KitRouting.pickable(b) && !b.stale && !blocked(b, Job.Fetch);
+            com.porter.qwertestash.orders.KitPlanner.Scan scan = com.porter.qwertestash.orders.KitPlanner.scan(union, s.boxes, pickable, target);
+            return new RestockStock(scan, survey(s, scan.wanted()));
+        }
+
+        com.porter.qwertestash.orders.KitPlanner.Plan planWith(RestockStock rs, com.porter.qwertestash.orders.KitOrder.Snapshot snap, int emptiesAvailable, boolean noBases) {
+            return com.porter.qwertestash.orders.KitPlanner.plan(snap, noBases ? rs.scan().withoutBases() : rs.scan(), rs.survey(), StashSorter::stackOf, Math.max(0, emptiesAvailable), Set.of(), true);
+        }
+
+        /** Kit plan for a snapshot against the stash now (tick thread). {@code noBases}: incomplete copies are not used as a base. */
+        com.porter.qwertestash.orders.KitPlanner.@Nullable Plan planFor(com.porter.qwertestash.orders.KitOrder.Snapshot snap, int emptiesAvailable, boolean noBases) {
+            Stash s = st();
+            if (s == null) return null;
+            KitSettings settings = KitStore.shared().get(ManagerIndex.clamp(s.server, 256), ManagerIndex.clamp(s.name, 256));
+            java.util.function.Function<com.porter.qwertestash.stash.KitTemplate, @Nullable String> target = t -> settings == null ? null : KitRouting.templateTarget(t, settings);
+            java.util.function.Predicate<Box> pickable = b -> KitRouting.pickable(b) && !b.stale && !blocked(b, Job.Fetch);
+            com.porter.qwertestash.orders.KitPlanner.Scan scan = com.porter.qwertestash.orders.KitPlanner.scan(snap, s.boxes, pickable, target);
+            if (noBases) scan = new com.porter.qwertestash.orders.KitPlanner.Scan(scan.wanted(), scan.matchOf(), scan.damage(), scan.ready(), Map.of());
+            StockPlanner.Survey survey = survey(s, scan.wanted());
+            return com.porter.qwertestash.orders.KitPlanner.plan(snap, scan, survey, StashSorter::stackOf, Math.max(0, emptiesAvailable), Set.of());
+        }
+
+        /** The loose experience bottles the stash holds. */
+        long bottlesInStash() {
+            Stash s = st();
+            if (s == null) return 0;
+            StockPlanner.Survey sv = survey(s, Set.of(com.porter.qwertestash.orders.KitRestock.BOTTLE));
+            return sv.available().getOrDefault(com.porter.qwertestash.orders.KitRestock.BOTTLE, 0L);
+        }
+
+        int emptiesTotal() {
+            Stash s = st();
+            int n = 0;
+            if (s != null) for (int c : empties(s).values()) n += c;
+            return n;
+        }
+
+        @Override
         public StockPlanner.Plan plan(Order order) {
+            return plan(order, List.of());
+        }
+
+        @Override
+        public StockPlanner.Plan plan(Order order, List<Order.Lot> craftLots) {
             Stash s = st();
             if (s == null) return new StockPlanner.Plan(List.of(), List.of(), "no stash is loaded");
             Set<String> wanted = new HashSet<>();
             for (Order.Line l : order.lines) if (l.type().equals(Order.ITEM) && !StockPlanner.isShulkerKey(l.key())) wanted.add(l.key());
             StockPlanner.Survey survey = survey(s, wanted);
             Map<String, Integer> empties = empties(s);
-            StockPlanner.Plan plan = StockPlanner.plan(order, survey, empties, this::nameOf);
+            StockPlanner.Plan plan = StockPlanner.plan(order, survey, empties, this::nameOf, craftLots);
             if (!craftingOn()) return plan;
             // Crafting is on: empty plain shulker boxes the stash lacks for the lines are counted as craftable, after what the
             // bins will need (craftPool: the same pool the check and the run use)
@@ -13555,7 +15512,7 @@ public class StashSorter extends AbstractFieldModule {
             if (forLines <= 0) return plan;
             Map<String, Integer> more = new HashMap<>(empties);
             more.merge(OrderFlow.PLAIN_SHULKER, forLines, Integer::sum);
-            StockPlanner.Plan again = StockPlanner.plan(order, survey, more, this::nameOf);
+            StockPlanner.Plan again = StockPlanner.plan(order, survey, more, this::nameOf, craftLots);
             List<String> notes = new ArrayList<>(again.notes());
             notes.add("Shulker Box: " + forLines + " to be crafted");
             return new StockPlanner.Plan(again.units(), notes, again.failure());
@@ -13594,7 +15551,7 @@ public class StashSorter extends AbstractFieldModule {
         @Override
         public @Nullable String craftProblem(Unit u) {
             Recipes r = recipesOrNull();
-            if (r == null) return "the recipe table couldn't be read";
+            if (r == null) return "no recipe table yet (the Stash Manager server sends it; crafting stays off until it has)";
             String table = tableProblem(String.valueOf(flow.orderId()));
             if (table != null) return table;
             CraftPlanner.Plan plan = CraftPlanner.plan(r, OrderFlow.PLAIN_SHULKER, 1, craftPool(remainingUnits()), craftLimits(true));
@@ -13697,7 +15654,8 @@ public class StashSorter extends AbstractFieldModule {
         @Override
         public void save(OrderFlow.Saved saved) {
             Stash s = st();
-            if (s == null) return;
+            // A restock job is not kept over a restart: its items are put back, nothing resumes
+            if (s == null || saved.id.startsWith(RESTOCK_ID)) return;
             s.activeOrder = saved;
             s.markDirty();
             s.save();

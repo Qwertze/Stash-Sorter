@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 /** The crafting table window: which slot each cell is, and what goes where. */
 class CraftGridTest {
-    private final Recipes r = Recipes.shipped();
+    private final Recipes r = TestRecipes.table();
 
     @Test
     void theTableWindowPutsTheInventoryAfterTheGrid() {

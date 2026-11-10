@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * What crafting may take from the stash for one unit of an order (or for compaction): the stock crafting may use (see
  * {@code SourceRules.craftSurvey}) less what every other remaining unit of the order is planned to take, so a craft never
- * eats what another line needs. Named and enchanted stacks count under their base item id; the stock is kept by index key
+ * eats what another line needs. Shulker-box crafting counts named and enchanted stacks under their base item id (craft orders take plain stacks only: see Stock.plainOnly); the stock is kept by index key
  * so the gather can take them by the same rules as an order's loads. Pure; the plan, the replan and the run all go through
  * it (via the sorter's {@code craftPool}), so they agree.
  */
@@ -24,6 +24,21 @@ public final class CraftPool {
         public static Stock empty() {
             return new Stock(Map.of(), Map.of(), Map.of(), Map.of());
         }
+
+        /**
+         * Only plain stacks (an index key equal to the item id, no component patch): what a craft order may take, because the server
+         * counts plain keys (CRAFT-CONTRACT.md "Bot execution" point 4).
+         */
+        public Stock plainOnly() {
+            Map<String, Long> l = new HashMap<>(), i = new HashMap<>();
+            Map<String, String> b = new HashMap<>();
+            Map<String, Integer> m = new HashMap<>();
+            for (var e : loose.entrySet()) if (e.getKey().indexOf('#') < 0) l.put(e.getKey(), e.getValue());
+            for (var e : inShulkers.entrySet()) if (e.getKey().indexOf('#') < 0) i.put(e.getKey(), e.getValue());
+            for (var e : baseOf.entrySet()) if (e.getKey().indexOf('#') < 0) b.put(e.getKey(), e.getValue());
+            for (var e : maxStack.entrySet()) if (e.getKey().indexOf('#') < 0) m.put(e.getKey(), e.getValue());
+            return new Stock(l, i, b, m);
+        }
     }
 
     /** What the other units are planned to take, by index key. */
@@ -31,7 +46,8 @@ public final class CraftPool {
         Map<String, Long> out = new HashMap<>();
         for (Unit u : others) {
             if (u.kind != Unit.Kind.Bin) continue;
-            for (Order.Lot lot : u.lots) out.merge(lot.key(), (long) lot.count(), Long::sum);
+            // Loads that are crafted (to be, or already) are not in the stash: they reserve nothing of it
+            for (Order.Lot lot : u.lots) if (lot.craftState() == Order.Lot.NONE) out.merge(lot.key(), (long) lot.count(), Long::sum);
         }
         return out;
     }

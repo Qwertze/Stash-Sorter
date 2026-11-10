@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * happens, the window is never closed by the bot with something in its grid.
  */
 class CraftTripTest {
-    private static final Recipes R = Recipes.shipped();
+    private static final Recipes R = TestRecipes.table();
 
     /** A crafting table next to the bot, and what the bot carries (by item id). */
     static class FakeTable implements CraftTrip.Port {

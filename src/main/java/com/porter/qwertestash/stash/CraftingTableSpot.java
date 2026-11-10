@@ -28,8 +28,50 @@ public final class CraftingTableSpot {
     // One immutable value that every thread reads whole (the four config fields are written one by one)
     private static volatile @Nullable Spot current;
     private static volatile boolean loaded;
+    // The table the website set for the stash, while a craft order is crafting at it (1.15.0): it is used instead of ours, whichever is set,
+    // and is never remembered, forgotten or shown as ours
+    private static volatile @Nullable Spot website;
+
+    /** Craft orders craft at this table until it is called again with null; it overrides the table of `stash craftingtable` meanwhile. */
+    public static void useWebsite(@Nullable Spot spot) {
+        website = spot;
+    }
+
+    /** The table in use is the website's, for a craft order. */
+    public static boolean websiteActive() {
+        return website != null;
+    }
+
+    // While a craft order cannot use the table set by hand (it is outside the limits), the table the bot finds, places or crafts for it is kept
+    // in this slot, in memory, and the table in the settings is left exactly as it is
+    private static volatile @Nullable Spot side;
+    private static volatile String sideSource = NONE;
+    private static volatile boolean sideOn;
+
+    /** Craft orders use a slot of their own instead of the table in the settings (on), or the settings' table again (off). */
+    public static void sideMode(boolean on) {
+        sideOn = on;
+    }
+
+    public static boolean sideModeOn() {
+        return sideOn;
+    }
+
+    /** Forgets the table of the side slot (the world keeps it; a search finds it again). */
+    public static void sideClear() {
+        side = null;
+        sideSource = NONE;
+    }
 
     public static @Nullable Spot get() {
+        Spot w = website;
+        if (w != null) return w;
+        if (sideOn) return side;
+        return persisted();
+    }
+
+    /** The table in the settings, whatever slot is in use now. */
+    public static @Nullable Spot persisted() {
         if (!loaded) {
             synchronized (CraftingTableSpot.class) {
                 if (!loaded) {
@@ -48,7 +90,14 @@ public final class CraftingTableSpot {
 
     /** "set", "found", "placed", "crafted", or "none" when there is no table (settings from before 1.10.0 read as "set"). */
     public static String source() {
-        if (get() == null) return NONE;
+        if (website != null) return SET;
+        if (sideOn) return side == null ? NONE : sideSource;
+        return persistedSource();
+    }
+
+    /** The settings' table: how it came to be (as {@link #source}), or "none". */
+    public static String persistedSource() {
+        if (persisted() == null) return NONE;
         String s = CONFIG.craftingTableSource;
         return FOUND.equals(s) || PLACED.equals(s) || CRAFTED.equals(s) ? s : SET;
     }
@@ -60,6 +109,11 @@ public final class CraftingTableSpot {
 
     /** Remembered as set, found, placed or crafted. */
     public static synchronized void remember(String dimension, int x, int y, int z, String source) {
+        if (sideOn) {
+            side = new Spot(dimension, x, y, z);
+            sideSource = source;
+            return;
+        }
         CONFIG.craftingTableSource = source;
         CONFIG.craftingTableX = x;
         CONFIG.craftingTableY = y;
@@ -70,6 +124,10 @@ public final class CraftingTableSpot {
     }
 
     public static synchronized void clear() {
+        if (sideOn) {
+            sideClear();
+            return;
+        }
         CONFIG.craftingTableDimension = "";
         CONFIG.craftingTableSource = "";
         CONFIG.craftingTableX = CONFIG.craftingTableY = CONFIG.craftingTableZ = 0;

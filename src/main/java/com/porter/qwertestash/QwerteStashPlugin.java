@@ -27,6 +27,8 @@ public class QwerteStashPlugin implements AquariusProxyPlugin {
     public void onLoad(PluginAPI pluginAPI) {
         LOG = pluginAPI.getLogger();
         CONFIG = pluginAPI.registerConfig(BuildConstants.PLUGIN_ID, StashConfig.class);
+        // The shared kit-items table is read now, so a broken copy is said once at load and not on the first sort
+        com.porter.qwertestash.stash.KitItems.shared();
         pluginAPI.registerModule(new StashTracker());
         pluginAPI.registerModule(new StashSorter());
         pluginAPI.registerModule(new AutoDrop());

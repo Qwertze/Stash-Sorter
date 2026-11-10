@@ -21,6 +21,8 @@ public final class ShulkerMatch {
      */
     public static boolean matches(Unit u, @Nullable Item it, boolean useNamedShulkers) {
         if (it == null || !it.isShulker()) return false;
+        // Kits are named by their template: a named copy is the unit's
+        if (u.kitTemplate != null) useNamedShulkers = true;
         // Carries the very name the order asked for: renamed for it at the anvil
         boolean renamed = it.customName && u.name != null && u.name.equals(it.customText);
         switch (u.kind) {

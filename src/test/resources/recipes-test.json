@@ -1,0 +1,697 @@
+{
+ "version": "1.21.4",
+ "format": 1,
+ "recipes": [
+  {
+   "id": "minecraft:bamboo_block",
+   "type": "shaped",
+   "w": 3,
+   "h": 3,
+   "cells": [
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ]
+   ],
+   "result": "minecraft:bamboo_block",
+   "count": 1
+  },
+  {
+   "id": "minecraft:bamboo_planks",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:bamboo_block",
+     "minecraft:stripped_bamboo_block"
+    ]
+   ],
+   "result": "minecraft:bamboo_planks",
+   "count": 2
+  },
+  {
+   "id": "minecraft:birch_planks",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:birch_log",
+     "minecraft:birch_wood",
+     "minecraft:stripped_birch_log",
+     "minecraft:stripped_birch_wood"
+    ]
+   ],
+   "result": "minecraft:birch_planks",
+   "count": 4
+  },
+  {
+   "id": "minecraft:chest",
+   "type": "shaped",
+   "w": 3,
+   "h": 3,
+   "cells": [
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    null,
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ]
+   ],
+   "result": "minecraft:chest",
+   "count": 1
+  },
+  {
+   "id": "minecraft:crafting_table",
+   "type": "shaped",
+   "w": 2,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ]
+   ],
+   "result": "minecraft:crafting_table",
+   "count": 1
+  },
+  {
+   "id": "minecraft:crimson_planks",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:crimson_hyphae",
+     "minecraft:crimson_stem",
+     "minecraft:stripped_crimson_hyphae",
+     "minecraft:stripped_crimson_stem"
+    ]
+   ],
+   "result": "minecraft:crimson_planks",
+   "count": 4
+  },
+  {
+   "id": "minecraft:dye_white_bed",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:red_bed",
+     "minecraft:white_bed"
+    ],
+    [
+     "minecraft:white_dye"
+    ]
+   ],
+   "result": "minecraft:white_bed",
+   "count": 1
+  },
+  {
+   "id": "minecraft:iron_bars",
+   "type": "shaped",
+   "w": 3,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ]
+   ],
+   "result": "minecraft:iron_bars",
+   "count": 16
+  },
+  {
+   "id": "minecraft:iron_block",
+   "type": "shaped",
+   "w": 3,
+   "h": 3,
+   "cells": [
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ],
+    [
+     "minecraft:iron_ingot"
+    ]
+   ],
+   "result": "minecraft:iron_block",
+   "count": 1
+  },
+  {
+   "id": "minecraft:iron_ingot_from_iron_block",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:iron_block"
+    ]
+   ],
+   "result": "minecraft:iron_ingot",
+   "count": 9
+  },
+  {
+   "id": "minecraft:iron_ingot_from_nuggets",
+   "type": "shaped",
+   "w": 3,
+   "h": 3,
+   "cells": [
+    [
+     "minecraft:iron_nugget"
+    ],
+    [
+     "minecraft:iron_nugget"
+    ],
+    [
+     "minecraft:iron_nugget"
+    ],
+    [
+     "minecraft:iron_nugget"
+    ],
+    [
+     "minecraft:iron_nugget"
+    ],
+    [
+     "minecraft:iron_nugget"
+    ],
+    [
+     "minecraft:iron_nugget"
+    ],
+    [
+     "minecraft:iron_nugget"
+    ],
+    [
+     "minecraft:iron_nugget"
+    ]
+   ],
+   "result": "minecraft:iron_ingot",
+   "count": 1
+  },
+  {
+   "id": "minecraft:iron_nugget",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:iron_ingot"
+    ]
+   ],
+   "result": "minecraft:iron_nugget",
+   "count": 9
+  },
+  {
+   "id": "minecraft:ladder",
+   "type": "shaped",
+   "w": 3,
+   "h": 3,
+   "cells": [
+    [
+     "minecraft:stick"
+    ],
+    null,
+    [
+     "minecraft:stick"
+    ],
+    [
+     "minecraft:stick"
+    ],
+    [
+     "minecraft:stick"
+    ],
+    [
+     "minecraft:stick"
+    ],
+    [
+     "minecraft:stick"
+    ],
+    null,
+    [
+     "minecraft:stick"
+    ]
+   ],
+   "result": "minecraft:ladder",
+   "count": 3
+  },
+  {
+   "id": "minecraft:oak_planks",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:oak_log",
+     "minecraft:oak_wood",
+     "minecraft:stripped_oak_log",
+     "minecraft:stripped_oak_wood"
+    ]
+   ],
+   "result": "minecraft:oak_planks",
+   "count": 4
+  },
+  {
+   "id": "minecraft:pale_oak_planks",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:pale_oak_log",
+     "minecraft:pale_oak_wood",
+     "minecraft:stripped_pale_oak_log",
+     "minecraft:stripped_pale_oak_wood"
+    ]
+   ],
+   "result": "minecraft:pale_oak_planks",
+   "count": 4
+  },
+  {
+   "id": "minecraft:red_bed",
+   "type": "shaped",
+   "w": 3,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:red_wool"
+    ],
+    [
+     "minecraft:red_wool"
+    ],
+    [
+     "minecraft:red_wool"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ]
+   ],
+   "result": "minecraft:red_bed",
+   "count": 1
+  },
+  {
+   "id": "minecraft:shulker_box",
+   "type": "shaped",
+   "w": 1,
+   "h": 3,
+   "cells": [
+    [
+     "minecraft:shulker_shell"
+    ],
+    [
+     "minecraft:chest"
+    ],
+    [
+     "minecraft:shulker_shell"
+    ]
+   ],
+   "result": "minecraft:shulker_box",
+   "count": 1
+  },
+  {
+   "id": "minecraft:spruce_fence",
+   "type": "shaped",
+   "w": 3,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:stick"
+    ],
+    [
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:stick"
+    ],
+    [
+     "minecraft:spruce_planks"
+    ]
+   ],
+   "result": "minecraft:spruce_fence",
+   "count": 3
+  },
+  {
+   "id": "minecraft:spruce_planks",
+   "type": "shapeless",
+   "ingredients": [
+    [
+     "minecraft:spruce_log",
+     "minecraft:spruce_wood",
+     "minecraft:stripped_spruce_log",
+     "minecraft:stripped_spruce_wood"
+    ]
+   ],
+   "result": "minecraft:spruce_planks",
+   "count": 4
+  },
+  {
+   "id": "minecraft:spruce_slab",
+   "type": "shaped",
+   "w": 3,
+   "h": 1,
+   "cells": [
+    [
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:spruce_planks"
+    ]
+   ],
+   "result": "minecraft:spruce_slab",
+   "count": 6
+  },
+  {
+   "id": "minecraft:spruce_stairs",
+   "type": "shaped",
+   "w": 3,
+   "h": 3,
+   "cells": [
+    [
+     "minecraft:spruce_planks"
+    ],
+    null,
+    null,
+    [
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:spruce_planks"
+    ],
+    null,
+    [
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:spruce_planks"
+    ]
+   ],
+   "result": "minecraft:spruce_stairs",
+   "count": 4
+  },
+  {
+   "id": "minecraft:stick",
+   "type": "shaped",
+   "w": 1,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ]
+   ],
+   "result": "minecraft:stick",
+   "count": 4
+  },
+  {
+   "id": "minecraft:stick_from_bamboo_item",
+   "type": "shaped",
+   "w": 1,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:bamboo"
+    ],
+    [
+     "minecraft:bamboo"
+    ]
+   ],
+   "result": "minecraft:stick",
+   "count": 1
+  },
+  {
+   "id": "minecraft:torch",
+   "type": "shaped",
+   "w": 1,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:charcoal",
+     "minecraft:coal"
+    ],
+    [
+     "minecraft:stick"
+    ]
+   ],
+   "result": "minecraft:torch",
+   "count": 4
+  },
+  {
+   "id": "minecraft:white_bed",
+   "type": "shaped",
+   "w": 3,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:white_wool"
+    ],
+    [
+     "minecraft:white_wool"
+    ],
+    [
+     "minecraft:white_wool"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ],
+    [
+     "minecraft:bamboo_planks",
+     "minecraft:birch_planks",
+     "minecraft:crimson_planks",
+     "minecraft:oak_planks",
+     "minecraft:pale_oak_planks",
+     "minecraft:spruce_planks"
+    ]
+   ],
+   "result": "minecraft:white_bed",
+   "count": 1
+  },
+  {
+   "id": "minecraft:white_wool",
+   "type": "shaped",
+   "w": 2,
+   "h": 2,
+   "cells": [
+    [
+     "minecraft:string"
+    ],
+    [
+     "minecraft:string"
+    ],
+    [
+     "minecraft:string"
+    ],
+    [
+     "minecraft:string"
+    ]
+   ],
+   "result": "minecraft:white_wool",
+   "count": 1
+  }
+ ],
+ "otherStations": {
+  "minecraft:white_shulker_box": "transmute",
+  "minecraft:orange_shulker_box": "transmute",
+  "minecraft:magenta_shulker_box": "transmute",
+  "minecraft:light_blue_shulker_box": "transmute",
+  "minecraft:yellow_shulker_box": "transmute",
+  "minecraft:lime_shulker_box": "transmute",
+  "minecraft:pink_shulker_box": "transmute",
+  "minecraft:gray_shulker_box": "transmute",
+  "minecraft:light_gray_shulker_box": "transmute",
+  "minecraft:cyan_shulker_box": "transmute",
+  "minecraft:purple_shulker_box": "transmute",
+  "minecraft:blue_shulker_box": "transmute",
+  "minecraft:brown_shulker_box": "transmute",
+  "minecraft:green_shulker_box": "transmute",
+  "minecraft:red_shulker_box": "transmute",
+  "minecraft:black_shulker_box": "transmute",
+  "minecraft:glass": "smelting"
+ }
+}

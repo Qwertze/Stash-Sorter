@@ -120,6 +120,11 @@ public final class SettingsSpec {
         String signs = "Signs and labels";
         add("autoLabel", "Auto label", signs, "Signs mode: put up a sign for a new category on an empty container.").cmd("autoLabel {v}");
         add("unsignedOverflow", "Unsigned overflow", signs, "Signs mode: stacks with no room may go into an unsigned container with space.").cmd("unsignedOverflow {v}");
+        add("kitSorting", "Kit sorting", signs, "Send shulkers that score as a kit (name, item mix, full, OP items; set on the website Kits tab) to the chest picked for them on the website. Off: kits are sorted like any shulker, and nothing about kits is reported.").cmd("kitSorting {v}");
+        add("kitOrders", "Kit orders", signs, "Take orders for kits of the website Kit Builder: complete copies are fetched, the others built from the stash and named. Needs kit sorting on.");
+        add("kitRestock", "Kit restock", signs, "While idle, build copies of the Kit Builder templates, from unreserved stock (never crafted; experience bottles stay above the repair reserve), up to the keep count in the template chest. Restock only acts on kits whose keep is above 0 on the website, and keep defaults to 0, so nothing happens until you set a keep count on a kit there. Only the first 16 kits with a keep count (by id) are restocked. Needs kit orders on.");
+        add("kitRestockPerHour", "Kit restock per hour", signs, "The most kits restock may start in an hour.").range(0, 60).whole();
+        add("kitRestockMinEmpty", "Kit restock keeps empty shulkers", signs, "Restock leaves at least this many empty shulkers in the stash.").range(0, 54).whole();
         add("labelGapSeconds", "Label gap (s)", signs, "Seconds between two signs put up.").range(0, 3600).whole();
 
         String recheck = "Stay-on rechecks";
@@ -179,6 +184,9 @@ public final class SettingsSpec {
         add("craftMaxPerOrder", "Most per order", crafting, "Shulker boxes one order may have crafted.").range(0, 54).whole();
         add("craftMaxOpsPerTask", "Most grid fills per task", crafting, "Grid fills one craft task may make.").range(1, 512).whole();
         add("craftMaxPerHour", "Most per hour", crafting, "Shulker boxes crafted in any one hour.").range(0, 540).whole();
+        add("craftOrders", "Craft orders", crafting, "Take orders with craft lines: items the stash can make from what it holds, crafted at the crafting table set for this stash on the website. Needs crafting on and a recipe table fetched from the server.").cmd("craftorders {v}");
+        add("craftOrderMaxFills", "Most grid fills per craft order", crafting, "Grid fills one craft order may make. Sent to the server, which refuses bigger orders for this bot.").range(1, 100000).whole().cmd("craftorders maxfills {v}");
+        add("craftOrderMaxPerHour", "Most craft order fills per hour", crafting, "Grid fills made for craft orders in any one hour.").range(0, 100000).whole().cmd("craftorders maxperhour {v}");
         add("craftNeverUse", "Never craft with", crafting, "Item ids never taken from the stash to craft with, like diamond_block.").pattern("[a-z0-9_]{1,64}").length(64);
         // The crafting table is set with `stash craftingtable` and its position is not shown on the website
         add("craftingTableDimension", "Crafting table dimension", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;

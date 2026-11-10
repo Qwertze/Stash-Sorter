@@ -66,6 +66,20 @@ public class StashConfig {
      * the ones signed misc/other/overflow.
      */
     public boolean unsignedOverflow = true;
+    /**
+     * Kit sorting (1.14.0): a shulker box that scores as a kit (points for the word kit in its name, an item mix, all 27 slots used and an
+     * OP item; the points and the threshold are set per stash on the Stash Manager website) goes to the chest picked for it there.
+     * Off turns the whole feature off here: no kit routing, no reserved containers, no kit shulkers kept whole, nothing sent about kits.
+     */
+    public boolean kitSorting = true;
+    /** Kit orders (1.16.0): take orders with kit lines (needs kit sorting on). */
+    public boolean kitOrders = true;
+    /** Kit restock (1.16.0): while idle, build copies of templates with a keep count (needs kit orders on), up to {@code kitRestockPerHour} an hour. */
+    public boolean kitRestock = true;
+    public int kitRestockPerHour = 12;
+    /** Restock leaves at least this many empty shulkers in the stash. */
+    public int kitRestockMinEmpty = 2;
+
     /** Seconds between two signs put up, so it never looks like a build bot. */
     public int labelGapSeconds = 10;
 
@@ -239,4 +253,18 @@ public class StashConfig {
     public int craftingTableX, craftingTableY, craftingTableZ;
     /** How the crafting table came to be (1.10.0): "set" (blank reads as set), "found", "placed" or "crafted". */
     public String craftingTableSource = "";
+
+    // Crafting from the stash (1.15.0, CRAFT-CONTRACT.md): craft lines of orders, crafted at the crafting table the website sets for the
+    // stash. It needs crafting on (enableCrafting) and a recipe table fetched from the server.
+
+    /** Take orders with craft lines. Needs crafting on; the heartbeat only claims it with a recipe table and this on. */
+    public boolean craftOrders = true;
+    /** Grid fills one order may make (the most the bot tells the server it crafts for one order). */
+    public int craftOrderMaxFills = 2048;
+    /** Grid fills made for craft orders in any one hour. */
+    public int craftOrderMaxPerHour = 4096;
+    /** Crafting tables the bot put down for craft orders (when, milliseconds), and for which order and how many (CraftTableCap). */
+    public List<Long> craftTablePlacedAt = new ArrayList<>();
+    public String craftTableOrder = "";
+    public int craftTableOrderCount;
 }

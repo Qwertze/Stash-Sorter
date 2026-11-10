@@ -8,14 +8,38 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The recipe table shipped in the plugin (1.21.4): read from the jar's resources, the recipes phase 1 uses are in it. */
+/** The recipe table (a small test table in the shape the server sends, 1.21.4): the recipes phase 1 uses are in it, and its tableHash. */
 class RecipesTest {
-    private final Recipes r = Recipes.shipped();
+    private final Recipes r = TestRecipes.table();
 
     @Test
-    void theShippedTableLoads() {
+    void theTestTableLoads() {
         assertEquals("1.21.4", r.version());
-        assertTrue(r.size() > 800, "recipes: " + r.size());
+        assertTrue(r.size() > 20, "recipes: " + r.size());
+        assertEquals(40, r.hash().length());
+    }
+
+    private static final String SYNTHETIC = "{\"version\":\"9.9\",\"format\":1,\"recipes\":["
+        + "{\"id\":\"minecraft:b_stairs\",\"type\":\"shaped\",\"w\":2,\"h\":2,\"cells\":[[\"minecraft:p\"],null,[\"minecraft:p\",\"minecraft:q\"],[\"minecraft:p\"]],\"result\":\"minecraft:b_stairs\",\"count\":4},"
+        + "{\"id\":\"minecraft:a_planks\",\"type\":\"shapeless\",\"ingredients\":[[\"minecraft:z_log\",\"minecraft:y_log\"],[\"minecraft:a\"]],\"result\":\"minecraft:a_planks\",\"count\":4}],"
+        + "\"otherStations\":{\"minecraft:stone\":\"smelting\"}}";
+
+    @Test
+    void theTableHashIsTheContractsOnASmallSyntheticTable() {
+        // Lines sorted by id, tab separated, "-" for an empty cell, a shapeless body sorted by ingredient: SHA-1 of
+        //   minecraft:a_planks TAB shapeless TAB 0 TAB 0 TAB minecraft:a_planks TAB 4 TAB minecraft:a|minecraft:z_log,minecraft:y_log NL
+        //   minecraft:b_stairs TAB shaped TAB 2 TAB 2 TAB minecraft:b_stairs TAB 4 TAB minecraft:p|-|minecraft:p,minecraft:q|minecraft:p NL
+        Recipes t = Recipes.parse(new java.io.StringReader(SYNTHETIC));
+        assertEquals("1ebfe58776a2663ed3a6d59f7f031b828d0cdcc6", t.hash());
+        // otherStations and the order of the recipes in the file do not matter
+        assertEquals(t.hash(), Recipes.tableHash(com.google.gson.JsonParser.parseString(SYNTHETIC.replace("\"minecraft:stone\":\"smelting\"", "")).getAsJsonObject()));
+    }
+
+    @Test
+    void aChangedCellOrCountChangesTheHash() {
+        String h = Recipes.parse(new java.io.StringReader(SYNTHETIC)).hash();
+        assertFalse(h.equals(Recipes.parse(new java.io.StringReader(SYNTHETIC.replace("\"count\":4}],", "\"count\":3}],"))).hash()));
+        assertFalse(h.equals(Recipes.parse(new java.io.StringReader(SYNTHETIC.replace("null,[\"minecraft:p\",\"minecraft:q\"]", "[\"minecraft:p\"],[\"minecraft:p\",\"minecraft:q\"]"))).hash()));
     }
 
     @Test

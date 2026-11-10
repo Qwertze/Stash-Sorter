@@ -86,6 +86,22 @@ final class OrderSim implements OrderFlow.Host {
     /** Times the host was told an order is being planned. */
     int plannings;
 
+    /** Kit units the flow asked to have emptied back. */
+    final List<Unit> emptied = new ArrayList<>();
+
+    @Override
+    public void kitEmptyBack(Unit unit) {
+        emptied.add(unit);
+    }
+
+    /** The kit plan the sim hands the flow for an order with kit lines (kit orders and restock tests). */
+    KitPlanner.@Nullable Plan kitPlan;
+
+    @Override
+    public KitPlanner.@Nullable Plan planKit(Order order, int emptiesTaken) {
+        return kitPlan;
+    }
+
     @Override
     public void planning() {
         plannings++;
@@ -130,12 +146,12 @@ final class OrderSim implements OrderFlow.Host {
     int craftable(List<Unit> units, int upTo) {
         if (!craftOn) return 0;
         CraftPool.Stock stock = new CraftPool.Stock(new HashMap<>(craftStock), Map.of(), Map.of(), Map.of());
-        return CraftPlanner.maxCraftable(Recipes.shipped(), OrderFlow.PLAIN_SHULKER, upTo, CraftPool.residual(stock, units), limits());
+        return CraftPlanner.maxCraftable(TestRecipes.table(), OrderFlow.PLAIN_SHULKER, upTo, CraftPool.residual(stock, units), limits());
     }
 
     @Override
     public @Nullable String craftProblem(Unit unit) {
-        CraftPlanner.Plan p = CraftPlanner.plan(Recipes.shipped(), OrderFlow.PLAIN_SHULKER, 1, craftPool(), limits());
+        CraftPlanner.Plan p = CraftPlanner.plan(TestRecipes.table(), OrderFlow.PLAIN_SHULKER, 1, craftPool(), limits());
         return p.ok() ? null : p.refusal();
     }
 
@@ -238,8 +254,120 @@ final class OrderSim implements OrderFlow.Host {
         return unit.kind == Unit.Kind.Shulker ? packed.getOrDefault(unit.key, 0) > 0 : empties.getOrDefault(unit.key, 0) > 0;
     }
 
+    // Crafting for orders (1.15.0): the recipe table the bot has (null: none), the cap, the plain stock craft orders may take, what is carried of
+    // crafted items (the loads for bins to come and the surplus), and the free carry slots a chunk may use
+    @Nullable Recipes craftTable;
+    int craftMaxFills = 2048, freeSlots = 27, craftChunks;
+    final Map<String, Long> craftStash = new HashMap<>(), craftCarry = new HashMap<>();
+    /** How a chunk goes: "ok", or a failure reason the sim reports with whatever was made ("short" makes half). */
+    String chunkTrip = "ok";
+    /** Per item: the stack size (64 if not listed). */
+    final Map<String, Integer> craftStack = new HashMap<>();
+
+    OrderSim craftOrders(Recipes table) {
+        this.craftTable = table;
+        return this;
+    }
+
+    @Override
+    public @Nullable Recipes craftTable() {
+        return craftTable;
+    }
+
+    @Override
+    public int craftMaxFills() {
+        return craftMaxFills;
+    }
+
+    @Override
+    public int maxStack(String id) {
+        return craftStack.getOrDefault(id, 64);
+    }
+
+    /** What is carried of crafted items beyond the loads still waiting for their bin. */
+    Map<String, Long> craftSurplus() {
+        Map<String, Long> out = new HashMap<>(craftCarry);
+        for (Unit u : flow.units()) {
+            if (u.built || u.have) continue;
+            for (Order.Lot lot : u.lots) if (lot.crafted()) out.merge(lot.key(), (long) -lot.count(), Long::sum);
+        }
+        out.values().removeIf(v -> v <= 0);
+        return out;
+    }
+
+    @Override
+    public Map<String, Long> craftCarried() {
+        return craftSurplus();
+    }
+
+    /** What of the ended order's crafted leftovers is still carried (the put-back is not over while it is not empty). */
+    final Map<String, Long> stillCarried = new HashMap<>();
+
+    @Override
+    public boolean craftReturning() {
+        return !stillCarried.isEmpty();
+    }
+
+    @Override
+    public Map<String, Long> craftStillCarried() {
+        return stillCarried;
+    }
+
+    /** One chunk of crafting the way the sorter does it: the same chooser, then the stash and the carry change as the plan says. */
+    private void craftChunk(Unit u) {
+        last = "craftloads";
+        int idx = flow.nextCraftLot(u);
+        CraftLedger ledger = flow.craftLedger();
+        Order.Lot lot = u.lots.get(idx);
+        String key = Recipes.ns(lot.key());
+        flow.craftLoadsStarted(u);
+        ledger.setSurplus(craftSurplus());
+        CraftBatch.Choice c = CraftBatch.choose(ledger, key, lot.count(), freeSlots, ledger.maxFills() - ledger.fills(), this::stackOfId, need -> need.size());
+        craftChunks++;
+        if (!c.ok()) {
+            flow.craftLotShort(u, idx, c.reason());
+            return;
+        }
+        for (var e : c.plan().fromStock().entrySet()) {
+            if (craftStash.getOrDefault(e.getKey(), 0L) < e.getValue()) {
+                flow.craftLotShort(u, idx, CraftOrder.INGREDIENTS_SHORT);
+                return;
+            }
+        }
+        if (!chunkTrip.equals("ok")) {
+            if (chunkTrip.equals("table")) {
+                flow.craftAbandon(CraftOrder.TABLE_BLOCKED);
+                return;
+            }
+            flow.craftChunk(u, idx, 0, 0, Map.of(), chunkTrip);
+            return;
+        }
+        Map<String, Long> have = new HashMap<>(craftCarry);
+        for (var e : c.plan().fromStock().entrySet()) {
+            craftStash.merge(e.getKey(), -e.getValue(), Long::sum);
+            have.merge(e.getKey(), e.getValue(), Long::sum);
+        }
+        for (CraftPlanner.Step s : c.plan().steps()) {
+            for (var use : s.uses().entrySet()) have.merge(use.getKey(), -use.getValue(), Long::sum);
+            have.merge(s.recipe().result(), s.made(), Long::sum);
+        }
+        have.values().removeIf(v -> v <= 0);
+        craftCarry.clear();
+        craftCarry.putAll(have);
+        flow.craftChunk(u, idx, c.count(), c.plan().fills(), c.plan().fromStock(), null);
+    }
+
+    private int stackOfId(String id) {
+        return craftStack.getOrDefault(id, 64);
+    }
+
     @Override
     public StockPlanner.Plan plan(Order order) {
+        return plan(order, List.of());
+    }
+
+    @Override
+    public StockPlanner.Plan plan(Order order, List<Order.Lot> craftLots) {
         Map<String, Long> available = new HashMap<>();
         Map<String, List<StockPlanner.Var>> variants = new HashMap<>();
         for (var e : loose.entrySet()) {
@@ -267,7 +395,7 @@ final class OrderSim implements OrderFlow.Host {
             shulkerVariants.put(e.getKey(), list);
         }
         StockPlanner.Survey survey = new StockPlanner.Survey(available, maxStack, Set.of(), Set.of(), variants, Map.of(), shulkerAvailable, shulkerVariants);
-        StockPlanner.Plan first = StockPlanner.plan(order, survey, empties, k -> k);
+        StockPlanner.Plan first = StockPlanner.plan(order, survey, empties, k -> k, craftLots);
         if (!craftOn) return first;
         // As the sorter does: plain empty lines the stash can't give are counted as craftable, after the bins' own needs
         List<Unit> bins = first.units().stream().filter(u -> u.kind == Unit.Kind.Bin).toList();
@@ -283,7 +411,7 @@ final class OrderSim implements OrderFlow.Host {
         Map<String, Integer> more = new HashMap<>(empties);
         more.merge(OrderFlow.PLAIN_SHULKER, forLines, Integer::sum);
         planCrafted = forLines;
-        return StockPlanner.plan(order, survey, more, k -> k);
+        return StockPlanner.plan(order, survey, more, k -> k, craftLots);
     }
 
     /** Plain empty shulkers the last plan counted as craftable. */
@@ -401,12 +529,16 @@ final class OrderSim implements OrderFlow.Host {
             flow.built(u);
             return true;
         }
+        if (intent instanceof OrderFlow.CraftLoads cl) {
+            craftChunk(cl.unit());
+            return true;
+        }
         if (intent instanceof OrderFlow.Craft c) {
             Unit u = c.unit();
             last = "craft";
             craftTrips++;
             flow.craftStarted(u);
-            CraftPlanner.Plan p = CraftPlanner.plan(Recipes.shipped(), OrderFlow.PLAIN_SHULKER, 1, craftPool(), limits());
+            CraftPlanner.Plan p = CraftPlanner.plan(TestRecipes.table(), OrderFlow.PLAIN_SHULKER, 1, craftPool(), limits());
             if (!p.ok()) {
                 flow.craftFailed(u, p.refusal(), false);
                 return true;
@@ -513,6 +645,25 @@ final class OrderSim implements OrderFlow.Host {
     }
 
     private boolean consume(List<Order.Lot> lots) {
+        // Crafted loads are stacks in hand: they leave the carry, not the stash
+        Map<String, Long> carry = new HashMap<>(craftCarry);
+        List<Order.Lot> fromStash = new ArrayList<>();
+        for (Order.Lot lot : lots) {
+            if (!lot.crafted()) {
+                fromStash.add(lot);
+                continue;
+            }
+            if (carry.getOrDefault(lot.key(), 0L) < lot.count()) return false;
+            carry.merge(lot.key(), (long) -lot.count(), Long::sum);
+        }
+        lots = fromStash;
+        craftCarry.clear();
+        carry.values().removeIf(v -> v <= 0);
+        craftCarry.putAll(carry);
+        return consumeStash(lots);
+    }
+
+    private boolean consumeStash(List<Order.Lot> lots) {
         Map<String, Map<String, Integer>> copy = new HashMap<>();
         for (var e : loose.entrySet()) copy.put(e.getKey(), new LinkedHashMap<>(e.getValue()));
         Map<String, Map<String, Integer>> inside = new HashMap<>();

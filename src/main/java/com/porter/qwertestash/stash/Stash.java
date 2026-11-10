@@ -63,6 +63,9 @@ public class Stash {
             this.parts = parts;
         }
 
+        /** The dimension the bot was in when it read this container this session (not saved). */
+        public transient @Nullable String readIn;
+
         public boolean known() {
             return contents != null;
         }
@@ -170,6 +173,13 @@ public class Stash {
     /** The stash order being worked on: its plan and progress, so a restart carries on the same plan. Null when none. */
     public com.porter.qwertestash.orders.OrderFlow.@Nullable Saved activeOrder;
 
+    /**
+     * Inventory moves of a repair trip (armour and off hand stored away, an item and bottles taken in hand) not yet undone, as
+     * "from>to" window slots (see Repair.formatLedger): after a restart in the middle of a trip they are undone first. Null or
+     * empty when none (1.13.0).
+     */
+    public @Nullable List<String> repairGear;
+
     /** The carry slots holding things the sorter took from the stash: slot index to item id. */
     public Map<Integer, String> held = new HashMap<>();
     public @Nullable InFlight inFlight;
@@ -222,8 +232,14 @@ public class Stash {
     public boolean hasArea() {
         Area a = area;
         if (a == null) return false;
-        String now = currentDimension();
-        return a.dimension == null || now == null || a.dimension.equals(now);
+        return hasAreaIn(currentDimension());
+    }
+
+    /** As {@link #hasArea()} for a given dimension of the bot (null: not known, so the area applies); "minecraft:overworld" is "overworld". */
+    public boolean hasAreaIn(@Nullable String now) {
+        Area a = area;
+        if (a == null) return false;
+        return a.dimension == null || now == null || Dimensions.same(a.dimension, now);
     }
     /** The largest perimeter: width, height, depth. */
     public static final int MAX_WIDTH = 256, MAX_HEIGHT = 128, MAX_DEPTH = 256;

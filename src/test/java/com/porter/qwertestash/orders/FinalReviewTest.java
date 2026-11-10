@@ -27,7 +27,7 @@ class FinalReviewTest {
 
     @Test
     void onlyTheCraftsOwnInputsAreLetGoOf() {
-        Set<String> craftIds = Recipes.shipped().inputsOf("minecraft:shulker_box", CraftPlanner.MAX_DEPTH);
+        Set<String> craftIds = TestRecipes.table().inputsOf("minecraft:shulker_box", CraftPlanner.MAX_DEPTH);
         assertTrue(CraftSlots.ownInputsOnly(List.of("minecraft:oak_planks", "minecraft:chest", "minecraft:shulker_shell"), craftIds));
         assertTrue(CraftSlots.ownInputsOnly(List.of("minecraft:oak_log|abcd"), craftIds), "a named log too");
         assertFalse(CraftSlots.ownInputsOnly(List.of("minecraft:oak_planks", "minecraft:diamond"), craftIds));

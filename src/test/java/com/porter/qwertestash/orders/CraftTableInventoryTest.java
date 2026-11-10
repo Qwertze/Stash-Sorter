@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * nothing ever left in the grid or on the cursor, whatever ends the trip.
  */
 class CraftTableInventoryTest {
-    private static final Recipes R = Recipes.shipped();
+    private static final Recipes R = TestRecipes.table();
 
     /** The inventory's grid: always "open" unless another module's window is up (foreignFrom..foreignTo ticks). */
     static final class Inventory extends CraftTripTest.FakeTable {
