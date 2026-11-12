@@ -375,7 +375,25 @@ public final class ManagerIndex {
     public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
                                    @Nullable Naming naming, @Nullable Crafting crafting, @Nullable DeliveryStorage storage, @Nullable String deliveryHash,
                                    @Nullable Kits kits, @Nullable Craft craft, @Nullable AreaReport area, @Nullable RepairHb repair) {
+        return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, naming, crafting, storage, deliveryHash, kits, craft, area, repair, null);
+    }
+
+    /**
+     * What the heartbeat says about pearl travel (PEARL-CONTRACT v1.0): {@code body} is the {@code pearlTravel} object; null with {@code clear} sends an explicit
+     * null (the bot stopped being a traveller), null without it leaves the key out (a bot that never travelled, or an older server's heartbeat unchanged).
+     */
+    public record PearlHb(@Nullable JsonObject body, boolean clear) {
+    }
+
+    /** @param pearl the {@code pearlTravel} key (needs a player); null leaves it out */
+    public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
+                                   @Nullable Naming naming, @Nullable Crafting crafting, @Nullable DeliveryStorage storage, @Nullable String deliveryHash,
+                                   @Nullable Kits kits, @Nullable Craft craft, @Nullable AreaReport area, @Nullable RepairHb repair, @Nullable PearlHb pearl) {
         JsonObject o = new JsonObject();
+        if (pearl != null && b.player() != null && !b.player().isBlank()) {
+            if (pearl.body() != null) o.add("pearlTravel", pearl.body());
+            else if (pearl.clear()) o.add("pearlTravel", JsonNull.INSTANCE);
+        }
         if (area != null && b.player() != null && !b.player().isBlank()) {
             JsonObject a = new JsonObject();
             a.addProperty("v", 1);

@@ -20,6 +20,8 @@ import com.porter.qwertestash.manager.ManagerIndex;
 import com.porter.qwertestash.manager.ViewerFeed;
 import com.porter.qwertestash.manager.ViewerGame;
 import com.porter.qwertestash.orders.OrderBlocker;
+import com.porter.qwertestash.pearl.AwayGuard;
+import com.porter.qwertestash.pearl.PearlTripDriver;
 import com.porter.qwertestash.orders.OrderDriver;
 import com.porter.qwertestash.orders.OrderFlow;
 import com.porter.qwertestash.stash.AnvilSpot;
@@ -77,6 +79,8 @@ import static com.porter.qwertestash.QwerteStashPlugin.LOG;
  */
 public class StashManager extends Module {
     private static final long HEARTBEAT_MS = 15_000;
+    /** The heartbeat while a pearl trip is on: the server needs T's steps and T needs the server's go. */
+    private static final long PEARL_BEAT_MS = 3_000;
     private static final long REBUILD_MS = 60_000;
     private static final long MIN_PUSH_GAP_MS = 5_000;
     private static final long BACKOFF_MIN_MS = 5_000, BACKOFF_MAX_MS = 60_000;
@@ -163,6 +167,19 @@ public class StashManager extends Module {
     private long lastOrderDrive;
     private boolean heartbeatSeen;
 
+    // Pearl travel (1.18.0, PEARL-CONTRACT v1.0): the traveller's trip driver. Tick thread (commands only leave requests). The journal is read now so the away mark
+    // protects the stash from the first tick after a restart.
+    private final PearlTripDriver pearlDriver = new PearlTripDriver(new PearlWorld(), java.nio.file.Path.of("plugins", "qwerte-stash", "pearl-trip.json"),
+        () -> new PearlTripDriver.Config(CONFIG.pearlTravel, CONFIG.pearlGraceSeconds));
+    private long joinedAt;
+    private boolean rescanAfterReturn;
+    private volatile int deaths;
+
+    /** The traveller's trip driver (for `stash pearl`). */
+    public PearlTripDriver pearl() {
+        return pearlDriver;
+    }
+
     // Crafting from the stash (1.15.0, CRAFT-CONTRACT.md): the recipe table is fetched from the server, not shipped; the website's crafting
     // table arrives in the heartbeat reply. Tick thread, except the fetch itself (a worker).
     private final RecipeSync recipeSync = new RecipeSync();
@@ -204,10 +221,18 @@ public class StashManager extends Module {
             disconnected();
         }));
         // Events for the dashboard's Activity tab. Each is hooked on its own: one the proxy doesn't have just isn't listened to
-        hook(list, () -> list.add(of(com.aquarius.event.client.ClientConnectEvent.class, e -> ActivityFeed.INSTANCE.event("Proxy", "info", "Connecting to the server"))));
+        hook(list, () -> list.add(of(com.aquarius.event.client.ClientConnectEvent.class, e -> {
+            // A new login (also a server switch, which may not pass through a disconnect): the trip driver forgets where the bot was
+            pearlDriver.onDisconnect();
+            joinedAt = 0;
+            ActivityFeed.INSTANCE.event("Proxy", "info", "Connecting to the server");
+        })));
         hook(list, () -> list.add(of(com.aquarius.event.client.ClientOnlineEvent.class, e -> ActivityFeed.INSTANCE.event("Proxy", "info", "Online"
             + e.queueWait().map(d -> " after " + d.toMinutes() + " min in the queue").orElse("")))));
-        hook(list, () -> list.add(of(com.aquarius.event.client.ClientDeathEvent.class, e -> ActivityFeed.INSTANCE.event("Proxy", "error", "The bot died"))));
+        hook(list, () -> list.add(of(com.aquarius.event.client.ClientDeathEvent.class, e -> {
+            deaths++;
+            ActivityFeed.INSTANCE.event("Proxy", "error", "The bot died");
+        })));
         hook(list, () -> list.add(of(com.aquarius.event.queue.QueueStartEvent.class, e -> ActivityFeed.INSTANCE.event("Queue", "info", "Entered the queue"))));
         hook(list, () -> list.add(of(com.aquarius.event.queue.QueueCompleteEvent.class, e -> ActivityFeed.INSTANCE.event("Queue", "info", "Queue finished after " + e.queueDuration().toMinutes() + " min"))));
         hook(list, () -> list.add(of(com.aquarius.event.queue.QueueSkipEvent.class, e -> ActivityFeed.INSTANCE.event("Queue", "info", "Queue skipped"))));
@@ -332,6 +357,8 @@ public class StashManager extends Module {
 
     @Override
     public void onDisable() {
+        // A trip that was about to leave does not hold the sorter once the manager is off
+        AwayGuard.quiesce(false);
         ActivityFeed.INSTANCE.setOwn(null);
         ActivityFeed.INSTANCE.setOrders(null);
         // Nobody is left to see the read through: the sorter lets go of everything it holds
@@ -507,6 +534,8 @@ public class StashManager extends Module {
     }
 
     private void disconnected() {
+        pearlDriver.onDisconnect();
+        joinedAt = 0;
         ViewerFeed v = viewerFeed();
         if (v != null) v.resync();
         stopDriving();
@@ -632,10 +661,27 @@ public class StashManager extends Module {
                 LOG.warn("{}couldn't handle a reply: {}", PREFIX, e.toString());
             }
         }
+        // Pearl travel runs before everything that needs the bot in the game: it is the part that notices a disconnect
+        boolean inGame = Alerts.online() && !inQueueNow();
+        if (inGame && joinedAt == 0) joinedAt = System.currentTimeMillis();
+        else if (!inGame) joinedAt = 0;
+        try {
+            pearlDriver.tick();
+        } catch (RuntimeException e) {
+            LOG.warn("{}pearl travel: {}", PREFIX, e.toString());
+        }
         if (!Alerts.online()) return;
         Alerts.pump(this);
 
         Stash stash = Stashes.current();
+        if (rescanBlocked != null && rescanBlocked.equals(AwayGuard.REASON) && !AwayGuard.away()) {
+            rescanBlocked = null;
+            lastHeartbeat = 0;
+        }
+        if (rescanAfterReturn && !AwayGuard.away() && stash != null) {
+            rescanAfterReturn = false;
+            beginRescan(stash, "back at the stash");
+        }
         driveSorter(stash);
         tickOrders(stash);
 
@@ -695,7 +741,8 @@ public class StashManager extends Module {
         }
 
         String id = built.server() + "|" + built.stash() + "|" + built.hash() + "|" + built.known() + "/" + built.total() + "/" + built.stale();
-        if (needIndex || !id.equals(lastPushedId)) {
+        // Away on a pearl trip the index is not pushed (the stash is not being kept up to date), only the heartbeat goes
+        if (!AwayGuard.away() && (needIndex || !id.equals(lastPushedId))) {
             // Containers read during a rescan change the counts: those pushes are spaced out
             if (!needIndex && lastPushedId != null && now - lastPushAt < MIN_PUSH_GAP_MS) return;
             lastHeartbeat = now;
@@ -709,7 +756,7 @@ public class StashManager extends Module {
                 return true;
             });
         }
-        else if (now - lastHeartbeat >= HEARTBEAT_MS || !sig().equals(sentSig)) beat(base, key, built, now);
+        else if (now - lastHeartbeat >= (pearlDriver.active() ? PEARL_BEAT_MS : HEARTBEAT_MS) || !sig().equals(sentSig)) beat(base, key, built, now);
         else if (!orderStep(base, key, built, now) && !inFlight) {
             // Last in line: the index, the heartbeat and the order's requests all go first
             if (deliveryReport != null && deliverySchedule.due(scheduleKey(deliveryReport), now)) sendDelivery(base, key, deliveryReport, now);
@@ -818,7 +865,7 @@ public class StashManager extends Module {
     }
 
     private String sig() {
-        return rescanDone + "|" + rescanBlocked + "|" + blockerSig;
+        return rescanDone + "|" + rescanBlocked + "|" + blockerSig + "|" + pearlDriver.signature();
     }
 
     private void beat(URI base, String key, ManagerIndex.Built built, long now) {
@@ -836,7 +883,9 @@ public class StashManager extends Module {
         String sentAreaHash = areaNow == null ? null : areaNow.hash();
         craftSentOrders = craftNow.orders() != null;
         ManagerIndex.RepairHb repairNow = repairBody(built);
-        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash(), kitsBody(built), craftNow, areaNow, repairNow), key, (code, body) -> {
+        PearlTripDriver.ManagerBody pearlBody = pearlDriver.body();
+        ManagerIndex.PearlHb pearlNow = new ManagerIndex.PearlHb(pearlBody.object(), pearlBody.clear());
+        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash(), kitsBody(built), craftNow, areaNow, repairNow, pearlNow), key, (code, body) -> {
             if (ManagerIndex.craftShapeRefused(code, body, craftSentOrders, craftLegacy)) {
                 // Not a failure of the server: it does not know the newer fields. Sent again at once in the 1.15.0 shape, and from now on
                 craftLegacy = true;
@@ -849,6 +898,7 @@ public class StashManager extends Module {
             if (code != 200) return false;
             heartbeatSeen = true;
             driver().onHeartbeat(body);
+            pearlReplied(body);
             sentSig = sig;
             if (done >= 0 && rescanDone == done) {
                 rescanDone = -1;
@@ -1383,7 +1433,7 @@ public class StashManager extends Module {
         }
         return new OrderBlocker.Snapshot(CONFIG.acceptOrders, spot != null, inGame, inQueue, controlled && !inQueue, stash != null,
             spot == null ? null : spot.dimension(), inGame ? Stash.currentDimension() : null, distance,
-            inGame ? s.orderBusy() : null, inGame ? s.freeOrderSlots() : 1, inGame ? s.shulkersKnown() : true, inGame && s.stashReadOnce());
+            inGame ? s.orderBusy() : null, inGame ? s.freeOrderSlots() : 1, inGame ? s.shulkersKnown() : true, inGame && s.stashReadOnce(), AwayGuard.away() || AwayGuard.quiesced());
     }
 
     /**
@@ -1490,12 +1540,22 @@ public class StashManager extends Module {
             rescanBlocked = "no stash";
             return;
         }
+        if (AwayGuard.away()) {
+            // Away on a pearl trip: the stash can't be read from here (the bot is not at it)
+            rescanBlocked = AwayGuard.REASON;
+            return;
+        }
+        beginRescan(stash, "asked for from the website");
+    }
+
+    /** Marks every container to be read again and lets the sorter's read loop take it up. Tick thread. */
+    private void beginRescan(Stash stash, String why) {
         rescanBlocked = null;
         for (Box box : stash.boxes) if (!box.excluded) box.stale = true;
         Stashes.version++;
         Stashes.exploreVersion++;
         rescanning = true;
-        LOG.info("{}rescan asked for from the website: reading {} containers again.", PREFIX, stash.boxes.stream().filter(b -> !b.excluded).count());
+        LOG.info("{}rescan {}: reading {} containers again.", PREFIX, why, stash.boxes.stream().filter(b -> !b.excluded).count());
     }
 
     /**
@@ -1679,6 +1739,241 @@ public class StashManager extends Module {
             conflictAlerted = text;
             LOG.warn("{}{}", PREFIX, text);
             Alerts.raise(this, PREFIX + text);
+        }
+    }
+
+    // Pearl travel: the world as the trip driver sees it (1.18.0). All of it runs on the bot tick thread.
+
+    private static boolean inQueueNow() {
+        try {
+            return com.aquarius.Proxy.getInstance().isInQueue();
+        } catch (RuntimeException | LinkageError e) {
+            return false;
+        }
+    }
+
+    /** What a heartbeat reply says about pearl travel: the trip it offers or updates, an away clear. Tick thread. */
+    private void pearlReplied(String body) {
+        try {
+            pearlDriver.onReply(body);
+        } catch (RuntimeException e) {
+            LOG.warn("{}pearl travel: couldn't handle the reply: {}", PREFIX, e.toString());
+        }
+    }
+
+    private final class PearlWorld implements PearlTripDriver.World {
+        @Override
+        public long now() {
+            return System.currentTimeMillis();
+        }
+
+        @Override
+        public boolean connected() {
+            return Alerts.online();
+        }
+
+        @Override
+        public boolean inQueue() {
+            return inQueueNow();
+        }
+
+        @Override
+        public boolean selfInTabList() {
+            try {
+                var profile = CACHE.getProfileCache().getProfile();
+                return profile != null && CACHE.getTabListCache().get(profile.getId()).isPresent();
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }
+
+        @Override
+        public boolean whisperReady() {
+            return Alerts.ready();
+        }
+
+        @Override
+        public long joinedAt() {
+            return joinedAt;
+        }
+
+        @Override
+        public double x() {
+            return CACHE.getPlayerCache().getX();
+        }
+
+        @Override
+        public double y() {
+            return CACHE.getPlayerCache().getY();
+        }
+
+        @Override
+        public double z() {
+            return CACHE.getPlayerCache().getZ();
+        }
+
+        @Override
+        public @Nullable String dimension() {
+            String d = Stash.currentDimension();
+            String n = d == null ? "" : ManagerIndex.namespaced(d);
+            return n.isEmpty() ? null : n;
+        }
+
+        @Override
+        public int pearlsCarried() {
+            int total = 0;
+            try {
+                var inv = CACHE.getPlayerCache().getPlayerInventory();
+                // Slots 9 to 44 are the inventory and the hotbar, 45 the offhand
+                for (int i = 9; i < Math.min(46, inv.size()); i++) {
+                    com.porter.qwertestash.stash.Item item = com.porter.qwertestash.stash.Item.of(inv.get(i));
+                    if (item != null && item.id.equals("ender_pearl")) total += item.count;
+                }
+            } catch (RuntimeException e) {
+                return 0;
+            }
+            return total;
+        }
+
+        @Override
+        public double health() {
+            try {
+                Float h = CACHE.getPlayerCache().getThePlayer().getHealth();
+                return h == null ? 20 : h;
+            } catch (RuntimeException e) {
+                return 20;
+            }
+        }
+
+        @Override
+        public int food() {
+            try {
+                return CACHE.getPlayerCache().getThePlayer().getFood();
+            } catch (RuntimeException e) {
+                return 20;
+            }
+        }
+
+        @Override
+        public boolean nonFriendWithin(double radius) {
+            try {
+                return com.aquarius.Globals.MODULE.get(com.porter.qwertestash.module.GroundItems.class).playerWithin(x(), z(), radius) != null;
+            } catch (RuntimeException e) {
+                return true;
+            }
+        }
+
+        @Override
+        public @Nullable String sorterHold() {
+            return sorter().travelHold();
+        }
+
+        @Override
+        public boolean whisper(String player, String text) {
+            try {
+                sendClientPacketAsync(com.aquarius.util.ChatUtil.getWhisperChatPacket(player, text));
+                return true;
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }
+
+        private com.aquarius.module.impl.PearlDrop drop() {
+            return com.aquarius.Globals.MODULE.get(com.aquarius.module.impl.PearlDrop.class);
+        }
+
+        @Override
+        public boolean startRearm(boolean strict) {
+            try {
+                var pd = drop();
+                int fx = (int) Math.floor(x()), fy = (int) Math.floor(y()), fz = (int) Math.floor(z());
+                if (pd.beginDepositNear(fx, fy, fz, 1)) return true;
+                // The home throw is strict: only PearlDrop's own tolerance, never a guess at another chamber
+                if (strict) return false;
+                // The bot landed more than PearlDrop's tolerance from the column: the nearest free chamber within 4 blocks is used
+                if (!"NO_CHAMBER".equals(String.valueOf(pd.lastResult()))) return false;
+                com.aquarius.module.impl.PearlDrop.StasisChamber best = null;
+                double bestD = 4.0;
+                for (var c : pd.scan(6)) {
+                    double d = Math.hypot(c.columnX() + 0.5 - x(), c.columnZ() + 0.5 - z());
+                    if (d <= bestD && !pd.isOccupied(c) && pd.hasRim(c)) {
+                        bestD = d;
+                        best = c;
+                    }
+                }
+                return best != null && pd.beginDeposit(best, 1);
+            } catch (RuntimeException | LinkageError e) {
+                return false;
+            }
+        }
+
+        @Override
+        public boolean rearmRunning() {
+            try {
+                return !drop().isDepositDone();
+            } catch (RuntimeException | LinkageError e) {
+                return false;
+            }
+        }
+
+        @Override
+        public @Nullable String rearmResult() {
+            try {
+                return String.valueOf(drop().lastResult());
+            } catch (RuntimeException | LinkageError e) {
+                return null;
+            }
+        }
+
+        @Override
+        public void stopRearm() {
+            try {
+                drop().stopAll();
+            } catch (RuntimeException | LinkageError e) {
+                // Nothing to stop
+            }
+        }
+
+        @Override
+        public void requestRescan() {
+            rescanAfterReturn = true;
+        }
+
+        @Override
+        public void alert(String text) {
+            Alerts.raise(StashManager.this, text);
+        }
+
+        @Override
+        public void info(String text) {
+            LOG.info("{}{}", PREFIX, text);
+        }
+
+        @Override
+        public int deaths() {
+            return deaths;
+        }
+
+        @Override
+        public boolean tabListHas(String name) {
+            try {
+                for (PlayerListEntry e : CACHE.getTabListCache().getEntries()) {
+                    if (e != null && e.getName() != null && e.getName().equalsIgnoreCase(name)) return true;
+                }
+                return false;
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }
+
+        @Override
+        public @Nullable String uuid() {
+            try {
+                var profile = CACHE.getProfileCache().getProfile();
+                return profile == null || profile.getId() == null ? null : profile.getId().toString();
+            } catch (RuntimeException e) {
+                return null;
+            }
         }
     }
 

@@ -116,6 +116,26 @@ public final class DashboardLink {
     private volatile String status = "starting";
     private volatile @Nullable String lastError;
 
+    /**
+     * The loader role (1.18.0): looks at PearlPlus and posts {@code bot/pearls} (PEARL-CONTRACT v1.0). Run by the state thread, so it is not held up by the
+     * game tick, and only once the hello was accepted (the server needs the botId).
+     */
+    private final com.porter.qwertestash.pearl.PearlReporter pearls = new com.porter.qwertestash.pearl.PearlReporter(new com.porter.qwertestash.pearl.PearlSource(),
+        new com.porter.qwertestash.pearl.PearlReporter.Transport() {
+            @Override
+            public com.porter.qwertestash.pearl.PearlReporter.@Nullable Result send(JsonObject body) {
+                JsonObject o = body.deepCopy();
+                o.addProperty("botId", host.botId());
+                ManagerHttp.Response r = post("bot/pearls", o, 15_000);
+                return r == null ? null : new com.porter.qwertestash.pearl.PearlReporter.Result(r.code(), r.body());
+            }
+
+            @Override
+            public void refused(int code) {
+                LOG.warn("Stash Manager dashboard: the server refused this bot's pearl loader report ({}): approve this bot as the loader of its station on the website's Pearl travel panel.", code);
+            }
+        });
+
     // State thread only
     private final Map<String, String[]> sent = new HashMap<>();
     private final Set<String> bigWarned = new HashSet<>();
@@ -591,6 +611,7 @@ public final class DashboardLink {
                 if (!helloOk) continue;
                 long now = System.currentTimeMillis();
                 pushActivity(now);
+                tickPearls();
                 long every = watching ? WATCHED_MS : IDLE_MS;
                 if (!pushSoon && needSchema.isEmpty() && needValues.isEmpty() && now - lastCheck < every) continue;
                 lastCheck = now;
@@ -608,6 +629,18 @@ public final class DashboardLink {
             } catch (Throwable e) {
                 lastError = e.toString();
             }
+        }
+    }
+
+    private void tickPearls() {
+        try {
+            var config = com.porter.qwertestash.QwerteStashPlugin.CONFIG;
+            if (config != null) pearls.graceMs = Math.max(15, config.pearlGraceSeconds) * 1000L;
+            pearls.tick();
+            if (lastError != null && lastError.startsWith("pearl loader")) lastError = null;
+        } catch (Throwable e) {
+            // The loader role never takes the link's thread down
+            lastError = "pearl loader: " + e.getClass().getSimpleName();
         }
     }
 

@@ -190,7 +190,7 @@ public final class ProxySources {
     // the interact-with process aiming at a block that is one of the stored pearls. There is no queue: a new request replaces
     // the one before. The proxy sends no event, so requested / loaded / not loaded are worked out from what the snapshots see.
 
-    private record PearlTarget(String pearlId, String owner, int x, int y, int z, Object stored) {
+    private record PearlTarget(String pearlId, String owner, int x, int y, int z, Object stored, java.util.UUID uuid) {
     }
 
     private static final class PearlSeen {
@@ -235,7 +235,7 @@ public final class ProxySources {
         if (was != null && (now == null || !same(was.target, now))) {
             // That request is over: the pearl is gone from its place when it was loaded
             Boolean present = pearlStillThere(was.target.stored());
-            String what = "pearl \"" + was.target.pearlId() + "\" of " + was.target.owner();
+            String what = label(was.target);
             if (present == null) ActivityFeed.INSTANCE.event("Pearl Loader", "info", "Stopped loading " + what);
             else if (!present) ActivityFeed.INSTANCE.event("Pearl Loader", "info", "Loaded " + what);
             else ActivityFeed.INSTANCE.event("Pearl Loader", "warn", "Could not load " + what + " (the pearl is still in place after " + was.tries + " tries)");
@@ -245,16 +245,24 @@ public final class ProxySources {
             if (was == null) {
                 was = new PearlSeen(now, time);
                 pearlSeen = was;
-                ActivityFeed.INSTANCE.event("Pearl Loader", "info", "Loading pearl \"" + now.pearlId() + "\" for " + now.owner());
+                ActivityFeed.INSTANCE.event("Pearl Loader", "info", "Loading " + label(now));
             }
             was.tries = Math.max(was.tries, tries);
             boolean near = distance <= 5.5;
             was.near = near;
             String phase = near ? "interacting with the pearl" : "walking there (" + Math.round(distance) + " blocks away)";
             if (tries > 0) phase += ", retrying (path try " + tries + ")";
-            items.add(new ActivityFeed.Item("Pearl Loader", "process", "Loading pearl \"" + now.pearlId() + "\" for " + now.owner(),
-                phase + "; at " + now.x() + " " + now.y() + " " + now.z() + "; no other request is waiting", null, tries >= 3 ? "warn" : "info"));
+            items.add(new ActivityFeed.Item("Pearl Loader", "process", "Loading " + label(now),
+                phase + "; no other request is waiting", null, tries >= 3 ? "warn" : "info"));
         }
+    }
+
+    /** The pearl and its owner are named only when the owner approved that traveller (the server's list, checked with the uuid); else "a pearl". */
+    private static String label(PearlTarget t) {
+        if (com.porter.qwertestash.pearl.LoadAuth.permits(com.porter.qwertestash.pearl.PearlReporter.sharedAllow(), t.owner(), t.uuid())) {
+            return "pearl \"" + t.pearlId() + "\" of " + t.owner();
+        }
+        return "a pearl";
     }
 
     private static boolean same(PearlTarget a, PearlTarget b) {
@@ -263,9 +271,10 @@ public final class ProxySources {
 
     private static @Nullable PearlTarget storedPearlAt(int x, int y, int z) {
         var plus = CONFIG.client.extra.pearlPlus;
-        for (var player : new ArrayList<>(plus.players.values())) {
+        for (var entry : new ArrayList<>(plus.players.entrySet())) {
+            var player = entry.getValue();
             for (var pearl : new ArrayList<>(player.pearls.values())) {
-                if (pearl.x == x && pearl.y == y && pearl.z == z) return new PearlTarget(pearl.pearlId, player.playerName, x, y, z, pearl);
+                if (pearl.x == x && pearl.y == y && pearl.z == z) return new PearlTarget(pearl.pearlId, player.playerName, x, y, z, pearl, entry.getKey());
             }
         }
         return null;

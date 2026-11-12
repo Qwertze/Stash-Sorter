@@ -5,6 +5,79 @@ All notable changes to Stash Sorter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-11-11
+
+### Added
+- **Pearl travel** (PEARL-CONTRACT v1.0 rev 7, needs Stash Manager server 1.3.0; not tried in the game yet). A traveller bot goes from its stash to a pearl station and back by
+  whispering `load <pearl id>` to the station's loader bot (PearlPlus), and re-arms the pearl it came through. Off by default (`pearlTravel`, `stash pearl travel on`). New package
+  `pearl/`: `PearlTrip` (a pure state machine in the style of `OrderFlow`, run by the shared test vectors), `PearlTripDriver` (the world, the journal and the heartbeat),
+  `AwayGuard`, `PearlJournal` (`plugins/qwerte-stash/pearl-trip.json`), `PearlReply`.
+  - **Away guard.** From the whisper until the bot is home again the sorter, the index push, a website rescan and the repair passes do nothing, and the order blocker says
+    `travelling/away`, so no order is claimed. A way back (`back`) clears it when it ends and asks for one rescan. A failed pull turns it off only when the bot is still where it
+    whispered (the guard of a failed `back` stays on: the bot is still away); anything else is `hold` and the owner clears it on the website or with `stash pearl home`.
+  - **Trip rules.** Local precheck (in the game for at least the grace period, with its chat ready (online for 15 s), out of the queue, in the tab list, sorter at a checkpoint, no order or repair pass, nobody
+    within 16 blocks, health and food, at least 2 pearls; `busy_order`, `busy_repair`, `sorter_busy` wait without using up tries, the others are retried 3 times 30 s apart), one
+    whisper and one retry, the pull deadline from the server (150 s by default), arrival as a jump of 8 blocks in one tick or any dimension change (the new dimension is reported),
+    the late-pull watch for 5 minutes, the pickup (5 s) and settle (2 s) before the throw, and the throw through PearlDrop (`beginDepositNear`, the nearest free chamber within 4 blocks
+    as a fallback). A trip is resumed from the journal after a disconnect or a restart.
+  - **Loader, home chamber, PearlDrop.** A trip starts only when the loader reports within 60 s and is in its station's tab list (otherwise `loader_stale`; at `go` the bot waits up to 90 s before it fails). The way back needs a return pearl at home: the throw takes a free chamber within 2 blocks of where the bot stands first, and only when there is none the nearest free one within 4 blocks, so stand next to the home chamber when the server asks for `arm_home`. If the throw fails the trip does not start. PearlDrop switches itself on the first time a throw starts, so nothing needs enabling.
+  - **Heartbeat and reply.** `pearlTravel` in the heartbeat (every 3 s and at once while a trip is on, 15 s otherwise; an explicit `null` once when travel is turned off) and the
+    reply's `pearlTrip` and `pearlAwayClear`. The loader name and the pearl id are taken only from the reply, and only when they have the shape of a player name and a pearl id.
+    A pull that comes before the server has heard of the whisper is reported as `awaiting_pull` with its teleport time (the server takes the whisper only from that step).
+  - **Away clear.** The server repeats `pearlAwayClear` in every reply until the bot's heartbeat says `away: null` (the acknowledgement), for at most 10 minutes (rev 7). The bot turns its away guard off on it, and a repeat changes nothing.
+  - **Commands.** `stash pearl travel on/off`, `loader on/off`, `grace <seconds>`, `go <station id>`, `back`, `home`, `home force`, `stop`, `status`. `travel` and `grace` are refused from the dashboard console (set them in game or in the proxy terminal); `home force` is terminal only. `home` asks the server to clear the away mark
+    (it does so only for a bot it sees away with no trip and no alert).
+- **Pearl loader report** (with PearlPlus auto load on; `pearlLoader`, on by default). Reads PearlPlus the way the activity feed does and sends `POST /api/v1/bot/pearls`
+  (signed, with the bot id) every 30 s and at once when a load changes, `pearlGoneAt` / `requesterNearAt` are seen or a chamber's presence changes. `PearlReporter`, `PearlSource`,
+  `PearlReport`, `LoadTracker`, `LoadAuth`.
+  - **Only what the owner approved.** The server's `allow` answer (the travellers the owner approved, each with the uuid the owner pinned) is the only authority: before the first
+    answer the report has no chambers; a pearl whose owner is not listed, or whose uuid (the one PearlPlus keyed it by, from the game server) is not the pinned one, is not reported and
+    no load for it is reported; a listed name with no pin is shown as an unknown owner. The list is forgotten 10 minutes after the last answer and after a 409. The server's binding and
+    the owner's approval of this bot as the loader (on the website) are needed before any list arrives.
+  - **Presence.** `armed` only for a pearl entity that is seen. Not seen is `empty` only after the grace period (the bot, and the owner in the tab list, have been in the world for
+    `pearlGraceSeconds`, 45 s) and in range (PearlPlus's `autoDetect.temporaryRemovalRange`, 32 blocks by default), in the dimension the chamber was last seen armed in; the owner not in the tab list is `owner_offline`; everything else is `unknown`.
+  - **Loads.** PearlPlus sends no event, so a load is seen from the pathfinder's interact process: `loading`, then `loaded` when the pearl entity is gone after the walk ended, else
+    `aborted` after 5 s (`path_failed` after three path tries, `disconnected`, else `timeout`). The loader never says `loaded` for a pearl that is still there.
+- New settings `pearlTravel` (off), `pearlLoader` (on), `pearlGraceSeconds` (45, 15 to 300).
+
+### Review fixes (1.18.0)
+- Loader: `loaded` is now reported (the pearl asked about is the one of the load in progress when none was watched before); not seen must last 5 s before `empty`; PearlPlus's own range rule is
+  used; the copy of PearlPlus's players is guarded; a load whose requester is no longer approved is dropped and a null load sent; the Pearl Loader activity text names a requester only when
+  the owner approved that traveller (else "a pearl"); a link error from the loader role clears on success.
+- Traveller: a queue position, a death or a respawn is never read as a pull (a death after the whisper is held for the owner); the sorter starts no new job from the checkpoint to the whisper, and the go
+  re-checks the sorter, bystanders and the loader in the tab list (a wait, 90 s, then `loader_stale` / `player_near` / `stopped`); the whisper (and the retry) is written ahead to the journal and is
+  not sent if that fails; offers that do not fit (a way back from home, a trip while away) are ignored; an away clear during an open trip is ignored; pull deadlines are clamped to the next
+  10 minutes; `home` works with travel off and the bot keeps reporting while away; `stash pearl home force` (terminal only); `stash pearl travel` / `grace` are refused from the dashboard and
+  `pearlTravel` is read only on the website; a new way back is let through during the watch of a failed one; at least 5 minutes between `go` trips; the journal is validated (word lists,
+  clamped counts, dimension, finite numbers) and written owner-only where the OS allows it (on Windows it keeps the folder's permissions); a failed `armHome` says to stand next to the home chamber.
+- Last round: the sorter hold of a trip that does not go (travel off, or no go within the wait and the server's 2 minutes, or the manager off) is released; `joinedAt` is reset on a disconnect; the
+  loader looks at the pearl of a new load in progress; a pearl first seen in range during a load that started out of range can still be reported gone; journal times are clamped to the clock; the loader
+  tab-list match ignores case; a whisper that could not be sent revokes the trip (no `load_sent`); the first OCCUPIED after a reconnect mid-throw is a success; the end of the watch is journaled; the
+  journal is written for an away clear only when something changed; `pearlGraceSeconds` is read only on the website.
+- Round 3: a global limit on whispers of any kind (at least 30 s apart, at most 10 in a rolling hour; both kept in the journal, so a restart does not reset them): the go (and a way back) waits locally,
+  then fails with `stopped`; a retry is skipped until the limit passes. The 5-minute spacing stays for `go` only. A reply with a missing or unknown `state` is refused whole. A server `hold` on a trip that
+  never whispered is only a failed trip (the guard is not turned on). A new login without a disconnect (a server switch; `ClientConnectEvent`, or a changed join time) resets the movement baseline and the
+  join time. The `arm_home` throw is strict (PearlDrop's 2-block tolerance only, no fallback); the re-arm on arrival keeps its 4-block fallback. A local `stash pearl go` / `back` / `home` that gets no answer in
+  four heartbeats now says so (an alert and a status note: "needs Stash Manager 1.3.0, or the server refused it").
+
+### Fixed
+- The Pearl Loader activity item no longer shows the pearl's position ("at x y z"): coordinates are not sent in the activity text.
+
+### Notes
+- Whispers are never read for trip logic and no sender is believed from chat text: the traveller only sends the `load` whisper, and the loader reports for the uuid PearlPlus keyed the
+  pearl by (taken from the game server), checked against the owner-pinned uuid.
+- No coordinates leave the bot in pearl travel: stations, trips, reports, whispers and logs carry ids only. The journal holds the place the bot whispered from, locally only.
+- Not changed: `ProxySources` still reports the bot's own block position in the connection state of the activity feed (existing behaviour, not part of pearl travel).
+- Compatibility: plugin 1.18.0 needs Stash Manager server 1.3.0 for pearl travel; an older server just means no trips.
+- Older servers: without `pearlTrip` in the reply the bot never starts a website trip, and a local `go` or `back` that gets no answer in four heartbeats raises an alert and a status note ("needs Stash Manager 1.3.0, or the server refused it"). A loader of a server older than 1.3.0 gets no
+  `allow` and reports no chambers.
+
+### Not tested in game
+- Nothing in pearl travel or the loader has been run in game. The in-game spike (`PEARL-SPIKE.md`) was skipped, so these are unverified: pearls after a rejoin and in the queue (the plugin treats a pearl that is not seen as `unknown` until the grace period has passed, and a trip never starts from the queue), the whisper's sender identity, a pull across dimensions, the arrival and the re-arm, and which chamber PearlDrop picks.
+- The loader can't see PearlPlus's own queue, so it reports `loading` and `loaded` only.
+- Automated tests cover the state machine, the report rules and the shared vectors. They do not run the game.
+- The Qwerte addon's pearl support is not part of this release.
+
 ## [1.17.0] - 2026-11-10
 
 ### Added

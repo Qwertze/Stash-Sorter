@@ -13,3 +13,6 @@
 /*.json*
 *.tmp
 /.vscode
+
+# Proxy logs written next to the project when run from here
+/log/

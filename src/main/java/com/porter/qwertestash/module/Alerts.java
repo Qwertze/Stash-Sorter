@@ -38,7 +38,7 @@ final class Alerts {
      * Online for at least 15 seconds and the server's command tree has arrived: a whisper sent before that makes the proxy
      * parse an empty command tree and log an error.
      */
-    private static boolean ready() {
+    static boolean ready() {
         if (!online()) {
             onlineSince = 0;
             return false;

@@ -1,0 +1,2748 @@
+{
+ "version": 3,
+ "note": "PEARL-CONTRACT v1.0 rev 3 test vectors. machine: the traveller state machine (every codebase runs these cases step by step; an event gives the expected step, state, whispers, away flag, watch flag and actions; tries/code/warning where given). reports: what the server derives (chamber state, arrival agreement with clock skew, pearl counts, report bodies, identity). Times are milliseconds; skew = receivedAt - at, normalised = time + skew.",
+ "machine": {
+  "events": {
+   "offer": "the heartbeat reply carries a trip for this bot: {action}",
+   "precheck": "the local precheck result: {ok} or {ok:false, code}; codes busy_order, busy_repair and sorter_busy don't use up tries",
+   "retryTick": "30 s passed while paused (a counted pause is retried at most 3 times)",
+   "reply": "a later heartbeat reply: any of {go, armHome, retry, rearm, hold, cancel, state, code, pearlId, loader, pullDeadlineAt, stillHere}",
+   "armHomeDone": "the home chamber was armed",
+   "teleport": "T saw a teleport: {jump} (>= 8 blocks in a tick) or {dimChange} (any dimension change)",
+   "pullDeadline": "the pull deadline passed: {stillHere} (T is at the position and dimension where it whispered; default true)",
+   "watchEnd": "five minutes passed after a failure",
+   "pickupDone": "the dropped pearl was picked up, or 5 s passed",
+   "rearmResult": "the re-arm finished: {result}",
+   "disconnect": "T lost its connection (nothing can happen)",
+   "reconnect": "T is back: {teleported} (its journal saw a teleport)"
+  },
+  "cases": [
+   {
+    "name": "go, the whole way (pickup before the re-arm)",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "teleport",
+       "jump": true
+      },
+      "expect": {
+       "step": "arrived",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "report:arrived"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "rearm": true
+      },
+      "expect": {
+       "step": "pickup",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "pickup"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "pickupDone"
+      },
+      "expect": {
+       "step": "rearm",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "rearm"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "rearmResult",
+       "result": "SUCCESS"
+      },
+      "expect": {
+       "step": "done",
+       "state": "completed",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "report:done"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "name": "back clears the away guard when it ends",
+    "action": "back",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "back"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-9",
+       "loader": "HomeLoader"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "whisper:load pearl-9",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "teleport",
+       "dimChange": true
+      },
+      "expect": {
+       "step": "arrived",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "report:arrived"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "rearm": true
+      },
+      "expect": {
+       "step": "pickup",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "pickup"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "pickupDone"
+      },
+      "expect": {
+       "step": "rearm",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "rearm"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "rearmResult",
+       "result": "PARTIAL"
+      },
+      "expect": {
+       "step": "done",
+       "state": "completed",
+       "whispers": 1,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "awayOff",
+        "requestRescan",
+        "report:done"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "name": "a counted pause is retried three times, then waits for the owner",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": false,
+       "code": "player_near"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "paused",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:pause:player_near"
+       ],
+       "tries": 1
+      }
+     },
+     {
+      "event": {
+       "e": "retryTick"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ],
+       "tries": 1
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": false,
+       "code": "player_near"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "paused",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:pause:player_near"
+       ],
+       "tries": 2
+      }
+     },
+     {
+      "event": {
+       "e": "retryTick"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ],
+       "tries": 2
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": false,
+       "code": "player_near"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "paused",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:pause:player_near"
+       ],
+       "tries": 3
+      }
+     },
+     {
+      "event": {
+       "e": "retryTick"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "paused",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [],
+       "tries": 3
+      }
+     }
+    ]
+   },
+   {
+    "name": "busy_order waits without using up tries",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": false,
+       "code": "busy_order"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "paused",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:pause:busy_order"
+       ],
+       "tries": 0
+      }
+     },
+     {
+      "event": {
+       "e": "retryTick"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ],
+       "tries": 0
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": false,
+       "code": "busy_order"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "paused",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:pause:busy_order"
+       ],
+       "tries": 0
+      }
+     },
+     {
+      "event": {
+       "e": "retryTick"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ],
+       "tries": 0
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": false,
+       "code": "sorter_busy"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "paused",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:pause:sorter_busy"
+       ],
+       "tries": 0
+      }
+     },
+     {
+      "event": {
+       "e": "retryTick"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ],
+       "tries": 0
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ],
+       "tries": 0
+      }
+     }
+    ]
+   },
+   {
+    "name": "a server pause through the reply, then it goes",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "state": "paused",
+       "code": "loader_busy"
+      },
+      "expect": {
+       "step": "ready",
+       "state": "paused",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [],
+       "code": "loader_busy"
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "state": "running",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "name": "the home chamber is armed first when the server asks",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "armHome": true
+      },
+      "expect": {
+       "step": "arm_home",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "armHome"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "armHomeDone"
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "name": "one retry whisper, never a third",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "retry": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 2,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "retry": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 2,
+       "away": true,
+       "watch": false,
+       "actions": []
+      }
+     }
+    ]
+   },
+   {
+    "name": "the server extends the pull deadline once the loader is loading",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "pullDeadlineAt": 1767225750000
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "setDeadline"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "name": "no pull by the deadline and T is still where it whispered: pull_timeout, guard off, watch on",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "pullDeadline",
+       "stillHere": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": false,
+       "watch": true,
+       "actions": [
+        "awayOff",
+        "watch",
+        "report:error:pull_timeout"
+       ],
+       "code": "pull_timeout"
+      }
+     }
+    ]
+   },
+   {
+    "name": "a late pull while watching becomes unexpected_location with hold",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "pullDeadline",
+       "stillHere": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": false,
+       "watch": true,
+       "actions": [
+        "awayOff",
+        "watch",
+        "report:error:pull_timeout"
+       ],
+       "code": "pull_timeout"
+      }
+     },
+     {
+      "event": {
+       "e": "teleport",
+       "jump": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "hold",
+        "report:error:unexpected_location"
+       ],
+       "code": "unexpected_location"
+      }
+     }
+    ]
+   },
+   {
+    "name": "the watch ends after five minutes",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "pullDeadline",
+       "stillHere": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": false,
+       "watch": true,
+       "actions": [
+        "awayOff",
+        "watch",
+        "report:error:pull_timeout"
+       ],
+       "code": "pull_timeout"
+      }
+     },
+     {
+      "event": {
+       "e": "watchEnd"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": false,
+       "watch": false,
+       "actions": [],
+       "code": "pull_timeout"
+      }
+     },
+     {
+      "event": {
+       "e": "teleport",
+       "jump": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": false,
+       "watch": false,
+       "actions": [],
+       "code": "pull_timeout"
+      }
+     }
+    ]
+   },
+   {
+    "name": "at the deadline T is no longer where it whispered: the pull already happened",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "pullDeadline",
+       "stillHere": false
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "hold",
+        "report:error:unexpected_location"
+       ],
+       "code": "unexpected_location"
+      }
+     }
+    ]
+   },
+   {
+    "name": "loader_no_answer from the server: guard off, watch on, no report needed",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "state": "failed",
+       "code": "loader_no_answer",
+       "stillHere": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": false,
+       "watch": true,
+       "actions": [
+        "awayOff",
+        "watch"
+       ],
+       "code": "loader_no_answer"
+      }
+     }
+    ]
+   },
+   {
+    "name": "a short rubber-band is not an arrival",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "teleport",
+       "jump": false,
+       "dimChange": false
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": []
+      }
+     }
+    ]
+   },
+   {
+    "name": "a change to the wrong dimension is reported and the server holds",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "teleport",
+       "dimChange": true,
+       "dimOk": false
+      },
+      "expect": {
+       "step": "arrived",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "report:arrived"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "hold": true,
+       "state": "failed",
+       "code": "unexpected_location"
+      },
+      "expect": {
+       "step": "arrived",
+       "state": "failed",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "hold"
+       ],
+       "code": "unexpected_location"
+      }
+     }
+    ]
+   },
+   {
+    "name": "cancel works before the whisper",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "cancel": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "cancelled",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:cancelled"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "name": "a cancel after the whisper is ignored",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "cancel": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": []
+      }
+     }
+    ]
+   },
+   {
+    "name": "T disconnects after the whisper and resumes from its journal: the teleport was seen",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "disconnect"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": []
+      }
+     },
+     {
+      "event": {
+       "e": "reconnect",
+       "teleported": true
+      },
+      "expect": {
+       "step": "arrived",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "report:arrived"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "name": "T disconnects after the whisper and resumes: nothing yet, keep waiting",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "disconnect"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": []
+      }
+     },
+     {
+      "event": {
+       "e": "reconnect",
+       "teleported": false
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": []
+      }
+     }
+    ]
+   },
+   {
+    "name": "the server restarted past load_sent and T never left: same as pull_timeout (guard off, watch on)",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "state": "failed",
+       "code": "arrival_unconfirmed",
+       "stillHere": true
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": false,
+       "watch": true,
+       "actions": [
+        "awayOff",
+        "watch"
+       ],
+       "code": "arrival_unconfirmed"
+      }
+     }
+    ]
+   },
+   {
+    "name": "the server restarted past load_sent and T is no longer there: it stays away",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "state": "failed",
+       "code": "arrival_unconfirmed",
+       "stillHere": false
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "failed",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "hold",
+        "report:error:unexpected_location"
+       ],
+       "code": "unexpected_location"
+      }
+     }
+    ]
+   },
+   {
+    "name": "a failed re-arm still completes the trip with a warning",
+    "action": "go",
+    "steps": [
+     {
+      "event": {
+       "e": "offer",
+       "action": "go"
+      },
+      "expect": {
+       "step": "precheck",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "runPrecheck"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "precheck",
+       "ok": true
+      },
+      "expect": {
+       "step": "ready",
+       "state": "running",
+       "whispers": 0,
+       "away": false,
+       "watch": false,
+       "actions": [
+        "report:ready"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "go": true,
+       "pearlId": "pearl-1",
+       "loader": "LoaderBot"
+      },
+      "expect": {
+       "step": "awaiting_pull",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "awayOn",
+        "whisper:load pearl-1",
+        "report:load_sent"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "teleport",
+       "dimChange": true
+      },
+      "expect": {
+       "step": "arrived",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "report:arrived"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "reply",
+       "rearm": true
+      },
+      "expect": {
+       "step": "pickup",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "pickup"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "pickupDone"
+      },
+      "expect": {
+       "step": "rearm",
+       "state": "running",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "rearm"
+       ]
+      }
+     },
+     {
+      "event": {
+       "e": "rearmResult",
+       "result": "OCCUPIED"
+      },
+      "expect": {
+       "step": "done",
+       "state": "completed",
+       "whispers": 1,
+       "away": true,
+       "watch": false,
+       "actions": [
+        "report:done",
+        "alert:rearm_failed"
+       ],
+       "warning": "rearm_failed"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "reports": {
+  "chamberState": {
+   "note": "state = broken if broken; unknown if the report is older than 60000 ms; owner_offline if the presence is empty and the owner's game is not 'in'; else the presence.",
+   "cases": [
+    {
+     "presence": "armed",
+     "ageMs": 1000,
+     "broken": false,
+     "ownerGame": "in",
+     "state": "armed"
+    },
+    {
+     "presence": "empty",
+     "ageMs": 1000,
+     "broken": false,
+     "ownerGame": "in",
+     "state": "empty"
+    },
+    {
+     "presence": "empty",
+     "ageMs": 1000,
+     "broken": false,
+     "ownerGame": "queue",
+     "state": "owner_offline"
+    },
+    {
+     "presence": "empty",
+     "ageMs": 1000,
+     "broken": false,
+     "ownerGame": "out",
+     "state": "owner_offline"
+    },
+    {
+     "presence": "owner_offline",
+     "ageMs": 5000,
+     "broken": false,
+     "ownerGame": "in",
+     "state": "owner_offline"
+    },
+    {
+     "presence": "unknown",
+     "ageMs": 5000,
+     "broken": false,
+     "ownerGame": "in",
+     "state": "unknown"
+    },
+    {
+     "presence": "armed",
+     "ageMs": 60000,
+     "broken": false,
+     "ownerGame": "in",
+     "state": "armed"
+    },
+    {
+     "presence": "armed",
+     "ageMs": 60001,
+     "broken": false,
+     "ownerGame": "in",
+     "state": "unknown"
+    },
+    {
+     "presence": "empty",
+     "ageMs": 90000,
+     "broken": false,
+     "ownerGame": "in",
+     "state": "unknown"
+    },
+    {
+     "presence": "armed",
+     "ageMs": 1000,
+     "broken": true,
+     "ownerGame": "in",
+     "state": "broken"
+    }
+   ]
+  },
+  "arrival": {
+   "note": "confirmed when pearlGoneAt and requesterNearAt are both set, and after normalising (time + skew of the sender) both are >= loadSentAt and within 10000 ms of teleportAt, and teleportAt is no later than the pull deadline: max(loadSentAt + 150000, loadingAt + 150000) with loadingAt (L's load.at when it reported loading) normalised too.",
+   "cases": [
+    {
+     "name": "plain agreement",
+     "loadSentAt": 1000000,
+     "teleportAt": 1004000,
+     "pearlGoneAt": 1003500,
+     "requesterNearAt": 1005000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": true,
+     "loadingAt": null
+    },
+    {
+     "name": "10 s apart is still agreement",
+     "loadSentAt": 1000000,
+     "teleportAt": 1004000,
+     "pearlGoneAt": 1014000,
+     "requesterNearAt": 1005000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": true,
+     "loadingAt": null
+    },
+    {
+     "name": "10.001 s apart is not",
+     "loadSentAt": 1000000,
+     "teleportAt": 1004000,
+     "pearlGoneAt": 1014001,
+     "requesterNearAt": 1005000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false,
+     "loadingAt": null
+    },
+    {
+     "name": "the pearl was never seen gone",
+     "loadSentAt": 1000000,
+     "teleportAt": 1004000,
+     "pearlGoneAt": null,
+     "requesterNearAt": 1005000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false,
+     "loadingAt": null
+    },
+    {
+     "name": "T was never seen near the chamber",
+     "loadSentAt": 1000000,
+     "teleportAt": 1004000,
+     "pearlGoneAt": 1003500,
+     "requesterNearAt": null,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false,
+     "loadingAt": null
+    },
+    {
+     "name": "everything before the whisper does not count",
+     "loadSentAt": 1000000,
+     "teleportAt": 999000,
+     "pearlGoneAt": 999500,
+     "requesterNearAt": 999800,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false,
+     "loadingAt": null
+    },
+    {
+     "name": "pearlGoneAt earlier than loadSentAt does not confirm",
+     "loadSentAt": 1000000,
+     "teleportAt": 1004000,
+     "pearlGoneAt": 999000,
+     "requesterNearAt": 1005000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false,
+     "loadingAt": null
+    },
+    {
+     "name": "requesterNearAt earlier than loadSentAt does not confirm",
+     "loadSentAt": 1000000,
+     "teleportAt": 1004000,
+     "pearlGoneAt": 1003500,
+     "requesterNearAt": 998000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false,
+     "loadingAt": null
+    },
+    {
+     "name": "the last second of the 150 s window",
+     "loadSentAt": 1000000,
+     "teleportAt": 1150000,
+     "pearlGoneAt": 1150000,
+     "requesterNearAt": 1150000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": true,
+     "loadingAt": null
+    },
+    {
+     "name": "one millisecond after it",
+     "loadSentAt": 1000000,
+     "teleportAt": 1150001,
+     "pearlGoneAt": 1150000,
+     "requesterNearAt": 1150000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false,
+     "loadingAt": null
+    },
+    {
+     "name": "T's clock is 30 s ahead (skew -30000): normalised, it agrees",
+     "loadSentAt": 1030000,
+     "teleportAt": 1034000,
+     "pearlGoneAt": 1003500,
+     "requesterNearAt": 1005000,
+     "tSkewMs": -30000,
+     "lSkewMs": 0,
+     "confirmed": true,
+     "loadingAt": null
+    },
+    {
+     "name": "the same times with no skew correction would not",
+     "loadSentAt": 1030000,
+     "teleportAt": 1034000,
+     "pearlGoneAt": 1003500,
+     "requesterNearAt": 1005000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false,
+     "loadingAt": null
+    },
+    {
+     "name": "L's clock is 30 s behind (skew +30000): normalised, it agrees",
+     "loadSentAt": 1000000,
+     "teleportAt": 1004000,
+     "pearlGoneAt": 973500,
+     "requesterNearAt": 975000,
+     "tSkewMs": 0,
+     "lSkewMs": 30000,
+     "confirmed": true,
+     "loadingAt": null
+    },
+    {
+     "name": "L reports loading 60 s after the whisper: the deadline moves to loading + 150 s, a teleport at +190 s is confirmed",
+     "loadSentAt": 1000000,
+     "loadingAt": 1060000,
+     "teleportAt": 1190000,
+     "pearlGoneAt": 1189500,
+     "requesterNearAt": 1190500,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": true
+    },
+    {
+     "name": "the same teleport without a loading report is past the 150 s deadline",
+     "loadSentAt": 1000000,
+     "loadingAt": null,
+     "teleportAt": 1190000,
+     "pearlGoneAt": 1189500,
+     "requesterNearAt": 1190500,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false
+    },
+    {
+     "name": "one millisecond past the extended deadline",
+     "loadSentAt": 1000000,
+     "loadingAt": 1060000,
+     "teleportAt": 1210001,
+     "pearlGoneAt": 1210000,
+     "requesterNearAt": 1210000,
+     "tSkewMs": 0,
+     "lSkewMs": 0,
+     "confirmed": false
+    },
+    {
+     "name": "the loading time is on L's clock (30 s behind)",
+     "loadSentAt": 1000000,
+     "loadingAt": 1030000,
+     "teleportAt": 1190000,
+     "pearlGoneAt": 1159500,
+     "requesterNearAt": 1160500,
+     "tSkewMs": 0,
+     "lSkewMs": 30000,
+     "confirmed": true
+    }
+   ]
+  },
+  "pearlCount": {
+   "note": "exp = before - (armedHome ? 1 : 0) + (dropAfterLoad ? 1 : 0) - 1; the trip completes with the warning pearl_count unless after is exp, or exp - 1 when dropAfterLoad is true.",
+   "cases": [
+    {
+     "before": 3,
+     "dropAfterLoad": true,
+     "armedHome": false,
+     "after": 3,
+     "warning": false
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": true,
+     "armedHome": false,
+     "after": 2,
+     "warning": false
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": true,
+     "armedHome": false,
+     "after": 1,
+     "warning": true
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": true,
+     "armedHome": false,
+     "after": 4,
+     "warning": true
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": false,
+     "armedHome": false,
+     "after": 2,
+     "warning": false
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": false,
+     "armedHome": false,
+     "after": 1,
+     "warning": true
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": false,
+     "armedHome": false,
+     "after": 3,
+     "warning": true
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": true,
+     "armedHome": true,
+     "after": 2,
+     "warning": false
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": true,
+     "armedHome": true,
+     "after": 1,
+     "warning": false
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": true,
+     "armedHome": true,
+     "after": 3,
+     "warning": true
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": false,
+     "armedHome": true,
+     "after": 1,
+     "warning": false
+    },
+    {
+     "before": 3,
+     "dropAfterLoad": false,
+     "armedHome": true,
+     "after": 0,
+     "warning": true
+    }
+   ]
+  },
+  "bodies": {
+   "note": "loader report bodies: ok = accepted (200), else 400.",
+   "cases": [
+    {
+     "name": "a plain report",
+     "ok": true,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Qwerttze",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1767225000000
+       }
+      ],
+      "load": null
+     }
+    },
+    {
+     "name": "an owner nobody resolved",
+     "ok": true,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": false,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-2",
+        "owner": null,
+        "ownerKnown": false,
+        "presence": "armed",
+        "since": 1
+       }
+      ],
+      "load": null
+     }
+    },
+    {
+     "name": "a load in progress",
+     "ok": true,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": true,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Qwerttze",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1767225000000
+       }
+      ],
+      "load": {
+       "id": "pearl-1",
+       "requester": "Qwerttze",
+       "state": "loading",
+       "reason": null,
+       "at": 1767225601000,
+       "pearlGoneAt": null,
+       "requesterNearAt": null,
+       "pearlPresent": true,
+       "reopened": null
+      }
+     }
+    },
+    {
+     "name": "an aborted load",
+     "ok": true,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [],
+      "load": {
+       "id": "pearl-1",
+       "requester": "Qwerttze",
+       "state": "aborted",
+       "reason": "path_failed",
+       "at": 1767225601000,
+       "pearlGoneAt": null,
+       "requesterNearAt": null,
+       "pearlPresent": true,
+       "reopened": null
+      }
+     }
+    },
+    {
+     "name": "a failed reopen (addon loader)",
+     "ok": true,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": false,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Qwerttze",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1767225000000
+       }
+      ],
+      "load": {
+       "id": "pearl-1",
+       "requester": "Qwerttze",
+       "state": "aborted",
+       "reason": "reopen_failed",
+       "at": 1767225601000,
+       "pearlGoneAt": null,
+       "requesterNearAt": null,
+       "pearlPresent": true,
+       "reopened": false
+      }
+     }
+    },
+    {
+     "name": "a finished load with the arrival times",
+     "ok": true,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Qwerttze",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1767225000000
+       }
+      ],
+      "load": {
+       "id": "pearl-1",
+       "requester": "Qwerttze",
+       "state": "loaded",
+       "reason": null,
+       "at": 1767225601000,
+       "pearlGoneAt": 1767225603000,
+       "requesterNearAt": 1767225604000,
+       "pearlPresent": false,
+       "reopened": true
+      }
+     }
+    },
+    {
+     "name": "temporaryMode on is accepted (the station is flagged)",
+     "ok": true,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": true,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Qwerttze",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1767225000000
+       }
+      ],
+      "load": null
+     }
+    },
+    {
+     "name": "an unknown presence word",
+     "ok": false,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Q",
+        "ownerKnown": true,
+        "presence": "gone",
+        "since": 1
+       }
+      ],
+      "load": null
+     }
+    },
+    {
+     "name": "no player",
+     "ok": false,
+     "body": {
+      "v": 1,
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Qwerttze",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1767225000000
+       }
+      ],
+      "load": null
+     }
+    },
+    {
+     "name": "a bad pearl id",
+     "ok": false,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl 1!",
+        "owner": "Q",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1
+       }
+      ],
+      "load": null
+     }
+    },
+    {
+     "name": "an unknown abort reason",
+     "ok": false,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [],
+      "load": {
+       "id": "pearl-1",
+       "requester": "Qwerttze",
+       "state": "aborted",
+       "reason": "because",
+       "at": 1767225601000,
+       "pearlGoneAt": null,
+       "requesterNearAt": null,
+       "pearlPresent": true,
+       "reopened": null
+      }
+     }
+    },
+    {
+     "name": "a version that is not 1",
+     "ok": false,
+     "body": {
+      "v": 2,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": false,
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Qwerttze",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1767225000000
+       }
+      ],
+      "load": null
+     }
+    },
+    {
+     "name": "temporaryMode of the wrong type",
+     "ok": false,
+     "body": {
+      "v": 1,
+      "player": "LoaderBot",
+      "at": 1767225600000,
+      "dropPearlAfterLoad": true,
+      "temporaryMode": "yes",
+      "busy": false,
+      "playerNear": false,
+      "chambers": [
+       {
+        "id": "pearl-1",
+        "owner": "Qwerttze",
+        "ownerKnown": true,
+        "presence": "armed",
+        "since": 1767225000000
+       }
+      ],
+      "load": null
+     }
+    }
+   ]
+  },
+  "identity": {
+   "note": "a report's player must equal the station loader's player and the transport's player (case-insensitive): else 409. No matching station: accepted, allow is empty.",
+   "cases": [
+    {
+     "name": "the plugin loader: body, station and hello agree",
+     "stationLoader": "LoaderBot",
+     "bodyPlayer": "LoaderBot",
+     "transportPlayer": "LoaderBot",
+     "status": 200
+    },
+    {
+     "name": "case does not matter",
+     "stationLoader": "LoaderBot",
+     "bodyPlayer": "loaderbot",
+     "transportPlayer": "LOADERBOT",
+     "status": 200
+    },
+    {
+     "name": "the transport player is someone else",
+     "stationLoader": "LoaderBot",
+     "bodyPlayer": "LoaderBot",
+     "transportPlayer": "OtherBot",
+     "status": 409
+    },
+    {
+     "name": "the body names a different player than the station's loader",
+     "stationLoader": "LoaderBot",
+     "bodyPlayer": "OtherBot",
+     "transportPlayer": "OtherBot",
+     "status": 409
+    },
+    {
+     "name": "a player that is no station's loader is accepted with an empty allow list",
+     "stationLoader": null,
+     "bodyPlayer": "Nobody",
+     "transportPlayer": "Nobody",
+     "status": 200,
+     "allow": []
+    }
+   ]
+  }
+ }
+}

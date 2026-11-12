@@ -20,6 +20,7 @@ instead of your client.
 - **Repairs order items** with Bottles o' Enchanting from the stash before they're delivered (orders from the website can
   ask for it). See below.
 - **Repair passes** (new in 1.17.0): when idle, the bot repairs the low-durability items in the stash with bottles from the stash, and sends the items without Mending to a chest you pick on the Stash Manager website. See Repair mode below.
+- **Pearl travel** (new in 1.18.0, needs Stash Manager server 1.3.0, off by default, not tried in the game yet): the bot goes to a pearl station and back by whispering the station's loader bot, and a loader bot reports its approved travellers' pearls to the server. See Pearl travel below.
 - **Crafts what the stash can make for orders** (craft orders, new in 1.15.0): the website's build planner and the Printer can order items the stash does
   not hold but can make from what it holds; the bot crafts them at the crafting table set for the stash on the website. Needs a recipe table fetched
   from the Stash Manager server. See Crafting from the stash below.
@@ -86,6 +87,13 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash craftorders on/off` | Take orders with craft lines (on; needs `stash crafting on` and a recipe table from the server). `stash craftorders` shows the recipe table, the website's crafting table state and the caps |
 | `stash craftorders maxfills <n>` / `maxperhour <n>` | Grid fills one craft order may make (2048) and craft orders may make in an hour (4096) |
 | `stash kitSorting on/off` | Kit sorting (on): shulkers that score as kits go to the chests picked on the Stash Manager website. Off: kits sort like any shulker and nothing about kits is sent. The saved rules are kept. See Kit sorting |
+| `stash pearl travel on/off` | Pearl travel (off): this bot may travel from its stash to a pearl station and back. Set in game or in the proxy terminal only (the website's setting is read only). Needs the Stash Manager on and PearlDrop in the proxy. See Pearl travel below |
+| `stash pearl loader on/off` | Report the pearls of the travellers you approved on the website to the Stash Manager server (on). Needs PearlPlus auto load on |
+| `stash pearl grace <15-300 seconds>` | How long a pearl that is not seen is still believed to be there after its owner came back (45). Set in game or in the terminal only |
+| `stash pearl go <station id>` / `stash pearl back` | Start a trip to a station (the id is on the website's Pearl travel panel), or the way back home |
+| `stash pearl home` / `stash pearl home force` | Ask the server to clear the away mark. `force` (proxy terminal only) drops the mark and the trip here, whatever the server says |
+| `stash pearl stop` | Drop a trip that has not whispered yet. After the whisper a pull can't be undone |
+| `stash pearl status` | Where the pearl trip is and what it is waiting for |
 | `stash labels` | Show the signs the bot has put up, and any it gave up on |
 | `stash stayOn on/off` | Keep running after sorting, sorting again whenever a container changes |
 | `stash recheck <seconds>` | How often stay-on checks drop-offs (30) |
@@ -448,6 +456,44 @@ gives way to orders, players within 8 blocks and a stop, and puts everything bac
 - The Qwerte addon has no repair passes yet.
 
 It has not been tried in the game yet.
+
+## Pearl travel (1.18.0)
+Needs Stash Manager server 1.3.0. With an older server the bot makes no trips and nothing else changes.
+
+A **traveller** bot goes from its stash to a pearl **station** (a loader bot with stasis chambers, run by PearlPlus) and back. It whispers `load <pearl id>` to the loader, PearlPlus pulls it
+through its chamber, the bot and the loader both tell the Stash Manager server what they saw, and the bot throws a fresh pearl into the chamber it came through (PearlDrop). The way back is
+the same thing in reverse, through a pearl thrown at home before leaving. Stations, the approvals below and the Go / Back / Stop buttons are on the website's Pearl travel panel (Stash
+Manager server 1.3.0; contract `PEARL-CONTRACT-v1.0.md` rev 7). Nothing here sends a position: a station and a trip carry only ids, and the chamber positions stay in PearlPlus.
+
+**Traveller (the bot that travels).** `stash pearl travel on` (needs the Stash Manager on and PearlDrop in the proxy; off by default; PearlDrop switches itself on the first time the bot throws). A trip comes from the website, or from
+`stash pearl go <station id>` and `stash pearl back` (the id is shown on the panel). While the bot is away from its stash the **away guard** is on: sorting, the index push, website rescans,
+repair passes and orders are off (the order blocker says `travelling/away`). `stash pearl status` says where a trip is; `stash pearl stop` drops one that has not whispered yet (after the
+whisper a pull can't be undone); `stash pearl home` asks the server to clear the away mark (it works with travel off too, and the bot keeps telling the server while it is away);
+`stash pearl home force` (proxy terminal only) drops the mark and the trip here without the server. `stash pearl travel` and `grace` can't be changed from the dashboard (the website's setting is read
+only): turn travel on in game or in the terminal. A trip from the website needs the settings permission and a confirmation on the page. The bot starts at most one `go` trip per 5 minutes. Whispers of any kind (the first, the retry, a way back) are at least 30 s apart and at most 10 an hour, kept across restarts; a trip that hits the limit waits, then fails. A local `go` / `back` / `home` that the server never answers (an older server, or a refused request) is reported with an alert and in `stash pearl status`. Before the whisper the bot must be in the game for at least the grace period (`pearlGraceSeconds`,
+45 s by default) with its chat ready (online for 15 s), out of the queue and in the tab list, and its loader reporting within 60 s and in the tab list, with the sorter at a checkpoint, no order or repair pass, nobody but friends within 16 blocks, health 10 and food 6, and at least 2 pearls.
+The way back needs a return pearl at home: **stand next to your home chamber (within 2 blocks) when the server asks the bot to arm it.** This home throw is strict: only a free chamber within PearlDrop's own 2-block reach is used, never a nearer-looking one (a wrong chamber is worse than none); the re-arm after a pull, by contrast, may fall back to the nearest free chamber within 4 blocks. If the throw fails the trip does not start, the owner is alerted and `stash pearl status` says "Stand next to your home chamber (within 2 blocks) and try again". From the checkpoint to the whisper the sorter starts no new job; at the moment of `go` the sorter, bystanders and the loader being in the tab list are checked again and the bot waits (up to 90 s) instead of failing. The re-arm after a pull uses the
+chamber nearest to where the bot landed.
+
+**If something goes wrong.** No pull by the deadline and the bot still where it whispered: `pull_timeout`, the guard goes off, and for 5 minutes the bot still watches for a late pull. A
+pull that already happened, or that arrives late: `unexpected_location`, the guard stays on and the owner is alerted; clear it on the website ("it's home") or with `stash pearl home`. A
+disconnect or restart after the whisper is resumed from `plugins/qwerte-stash/pearl-trip.json` (it holds the place the bot whispered from, only compared locally, never logged or sent; the file is owner-only where the OS allows it (on Windows it keeps the folder's permissions), so keep the proxy folder private). A loader should stay within PearlPlus's presence range of its chambers (`autoDetect.temporaryRemovalRange`, 32 blocks by default): out of range a pearl is `unknown`, and a load that starts out of range is reported `loaded` only if the pearl is seen in range during the job and then gone. A death or a queue position after the whisper is never read as a pull: the bot is held until the owner clears it.
+
+**Loader (a bot running PearlPlus with auto load on).** With `pearlLoader` on (the default) the plugin reports the pearls of the travellers the owner approved: whether each is in its chamber and
+the loads that run. The owner approves this bot as the loader of a station on the website, adds the travellers to the station's allowed list and confirms each traveller's uuid; the server
+answers every report with that list. Only a traveller whose name is on the list **and** whose uuid (the one PearlPlus keyed the pearl by, from the game server) equals the confirmed one is
+reported or has a load reported; everything else stays on the loader. A pearl that is not seen counts as gone only after the grace period and only with the owner in the tab list (an owner in
+the queue or offline is `owner_offline`, never `empty`). A load is seen from the outside (PearlPlus sends no event), and a pearl still there after the walk is `aborted`, never `loaded`.
+
+| Setting | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `pearlTravel` | off | on or off | This bot may travel. `stash pearl travel on/off`. |
+| `pearlLoader` | on | on or off | Report the approved travellers' pearls (needs PearlPlus auto load on). `stash pearl loader on/off`. |
+| `pearlGraceSeconds` | 45 | 15 to 300 | Seconds a pearl that is not seen is still believed to be there after its owner (or the loader) came into the world; also the least time a traveller is in the game before a trip. `stash pearl grace <s>`. |
+
+### Not tested in game
+
+Nothing here has been run in game. The in-game spike (`PEARL-SPIKE.md`) was skipped, so these are unverified: pearls after a rejoin and in the queue (the plugin treats a pearl that is not seen as `unknown` until the grace period has passed, and a trip never starts from the queue), the whisper's sender identity, a pull across dimensions, the arrival and re-arm, and which chamber PearlDrop picks. The loader can't see PearlPlus's own queue, so it reports `loading` and `loaded` only. The owner's chamber positions are never sent, so the server shows them by id only. The Qwerte addon's pearl support is not part of this release.
 
 ## Versioning
 Major breaking changes: a new x.0.0 version. New features, bug fixes and more: 1.x.0. Minor bug fixes, single one-off patches or hotfixes: x.y.z.

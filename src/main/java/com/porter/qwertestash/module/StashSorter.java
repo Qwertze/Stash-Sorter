@@ -1179,6 +1179,10 @@ public class StashSorter extends AbstractFieldModule {
     private void tick() {
         if (notReady()) return;
         Alerts.pump(this);
+        // Away from the stash on a pearl trip (1.18.0): nothing is sorted, read, ordered or repaired until the bot is home again
+        if (com.porter.qwertestash.pearl.AwayGuard.away()) return;
+        // A trip is about to leave: no new job starts (one that is running is finished first, the precheck waits for it)
+        if (com.porter.qwertestash.pearl.AwayGuard.quiesced() && travelHold() == null) return;
         tickCount++;
         if (unstuckAsked) {
             unstuckAsked = false;
@@ -10565,6 +10569,21 @@ public class StashSorter extends AbstractFieldModule {
 
     public OrderFlow orderFlow() {
         return orders.flow;
+    }
+
+    /**
+     * Why a pearl trip can't leave now, as the contract's wait code, or null when the sorter is at a checkpoint (1.18.0): {@code busy_order} with an order in hand,
+     * {@code busy_repair} during a repair pass, {@code sorter_busy} while a container job, a shulker, a carry, a craft or a driven read is on. Bot tick only.
+     */
+    public @Nullable String travelHold() {
+        if (orders.flow.holdsOrder() || orders.flow.resumeId() != null) return "busy_order";
+        if (pass != null || repair != null || repairTrip != null) return "busy_repair";
+        Stash s = stash;
+        if (job != null || finishing || handle != null || compact != null || activeBin != null || (s != null && s.inFlight != null) || pendingResume != null
+            || craft != null || anvilRun != null || chestRun != null || naming != null || putBackTrip || tableStuck || driven || holdingCursor() || openContainerId() != 0) {
+            return "sorter_busy";
+        }
+        return null;
     }
 
     /** What an order has to wait for (finishing a shulker), or null. Bot tick only. */

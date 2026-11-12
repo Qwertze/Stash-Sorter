@@ -31,11 +31,22 @@ public final class OrderBlocker {
      */
     public record Snapshot(boolean acceptOrders, boolean deliverySet, boolean inGame, boolean inQueue, boolean playerControlled, boolean hasStash,
                            @Nullable String deliveryDimension, @Nullable String currentDimension, double deliveryDistance,
-                           @Nullable String busyWith, int freeCarrySlots, boolean shulkersKnown, boolean stashRead) {
+                           @Nullable String busyWith, int freeCarrySlots, boolean shulkersKnown, boolean stashRead, boolean away) {
+        /** A snapshot of a bot that is at its stash (the shape before pearl travel, 1.18.0). */
+        public Snapshot(boolean acceptOrders, boolean deliverySet, boolean inGame, boolean inQueue, boolean playerControlled, boolean hasStash,
+                        @Nullable String deliveryDimension, @Nullable String currentDimension, double deliveryDistance,
+                        @Nullable String busyWith, int freeCarrySlots, boolean shulkersKnown, boolean stashRead) {
+            this(acceptOrders, deliverySet, inGame, inQueue, playerControlled, hasStash, deliveryDimension, currentDimension, deliveryDistance, busyWith,
+                freeCarrySlots, shulkersKnown, stashRead, false);
+        }
     }
+
+    /** The reason while the bot is away from its stash on a pearl trip (PEARL-CONTRACT v1.0). */
+    public static final String AWAY = "travelling/away";
 
     public static @Nullable String compute(Snapshot s) {
         if (!s.acceptOrders()) return "orders off";
+        if (s.away()) return AWAY;
         if (!s.deliverySet()) return "no delivery container set";
         if (s.inQueue()) return "in the queue";
         if (!s.inGame()) return "bot not in game";

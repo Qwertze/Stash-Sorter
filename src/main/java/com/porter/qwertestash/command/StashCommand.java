@@ -83,6 +83,14 @@ public class StashCommand extends Command {
                 "kitSorting on/off",
                 "repairpass on/off",
                 "repair run | stop | status",
+                "pearl travel on/off",
+                "pearl loader on/off",
+                "pearl grace <15-300 seconds>",
+                "pearl go <station id>",
+                "pearl back",
+                "pearl home [force]",
+                "pearl stop",
+                "pearl status",
                 "labels",
                 "stayOn on/off",
                 "recheck <seconds>",
@@ -361,6 +369,57 @@ public class StashCommand extends Command {
                 }))
                 .then(literal("status").executes(c -> {
                     c.getSource().getEmbed().title("Repair Status").description(String.join("\n", MODULE.get(StashSorter.class).repairStatus())).primaryColor();
+                })))
+            .then(literal("pearl")
+                .then(literal("travel").then(argument("toggle", toggle()).executes(c -> {
+                    if (c.getSource().getSource() instanceof com.porter.qwertestash.manager.DashboardCommandSource) {
+                        c.getSource().getEmbed().title("Pearl Travel").description("Turned on or off only in game or in the proxy terminal, not from the dashboard.").errorColor();
+                        return;
+                    }
+                    CONFIG.pearlTravel = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Pearl Travel " + toggleStrCaps(CONFIG.pearlTravel)).description(CONFIG.pearlTravel
+                        ? "This bot can be sent to a pearl station and back from the website or with `stash pearl go <station id>`. It needs the Stash Manager on and PearlDrop in the proxy."
+                        : "No trips. A bot that is away stays held until it is home (`stash pearl home`).").primaryColor();
+                })))
+                .then(literal("loader").then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.pearlLoader = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Pearl Loader Report " + toggleStrCaps(CONFIG.pearlLoader)).description(CONFIG.pearlLoader
+                        ? "With PearlPlus's auto load on, the pearls of the travellers you approved on the website are reported to the Stash Manager server."
+                        : "Nothing about pearls is reported.").primaryColor();
+                })))
+                .then(literal("grace").then(argument("seconds", integer(15, 300)).executes(c -> {
+                    if (c.getSource().getSource() instanceof com.porter.qwertestash.manager.DashboardCommandSource) {
+                        c.getSource().getEmbed().title("Pearl Travel").description("The grace period is set only in game or in the proxy terminal, not from the dashboard.").errorColor();
+                        return;
+                    }
+                    CONFIG.pearlGraceSeconds = getInteger(c, "seconds");
+                    c.getSource().getEmbed().title("Pearl Grace Set").description("A pearl that is not seen is believed to be there for " + CONFIG.pearlGraceSeconds + " s after its owner came back into the world.").primaryColor();
+                })))
+                .then(literal("go").then(argument("station", word()).executes(c -> {
+                    String why = MODULE.get(StashManager.class).pearl().requestLocal("go", getString(c, "station"), false);
+                    pearlAnswer(c.getSource().getEmbed(), why, "The request goes to the server with the next heartbeat. The trip starts when the server's checks pass (see `stash pearl status`).");
+                })))
+                .then(literal("back").executes(c -> {
+                    String why = MODULE.get(StashManager.class).pearl().requestLocal("back", null, false);
+                    pearlAnswer(c.getSource().getEmbed(), why, "The request goes to the server with the next heartbeat.");
+                }))
+                .then(literal("home").executes(c -> {
+                    String why = MODULE.get(StashManager.class).pearl().requestLocal("home", null, false);
+                    pearlAnswer(c.getSource().getEmbed(), why, "Asked the server to clear the away mark. It does so only when it sees this bot away with no trip and no alert for it; otherwise the owner clears it on the website.");
+                }).then(literal("force").executes(c -> {
+                    if (c.getSource().getSource() != CommandSources.TERMINAL) {
+                        c.getSource().getEmbed().title("Pearl Travel").description("`home force` runs only in the proxy terminal.").errorColor();
+                        return;
+                    }
+                    MODULE.get(StashManager.class).pearl().requestForceHome();
+                    c.getSource().getEmbed().title("Pearl Travel").description("The away mark and the trip are dropped here, whatever the server says. Sorting and orders start again: make sure the bot is at its stash.").primaryColor();
+                })))
+                .then(literal("stop").executes(c -> {
+                    MODULE.get(StashManager.class).pearl().requestStop();
+                    c.getSource().getEmbed().title("Pearl Trip").description("A trip that has not whispered yet is dropped. After the whisper a pull can't be undone.").primaryColor();
+                }))
+                .then(literal("status").executes(c -> {
+                    c.getSource().getEmbed().title("Pearl Travel").description(MODULE.get(StashManager.class).pearl().statusLine()).primaryColor();
                 })))
             .then(literal("labels").executes(c -> {
                 c.getSource().getEmbed().title("Labels").description(MODULE.get(StashSorter.class).labelsReport()).primaryColor();
@@ -705,6 +764,11 @@ public class StashCommand extends Command {
      * while connected.
      */
     private static final int MARK_EXCLUDE = 0, MARK_DROPOFF = 1, MARK_COMPACT_SKIP = 2;
+
+    private static void pearlAnswer(com.aquarius.discord.Embed embed, @Nullable String why, String ok) {
+        if (why == null) embed.title("Pearl Travel").description(ok).primaryColor();
+        else embed.title("Pearl Travel").description(why).errorColor();
+    }
 
     /** "minecraft:Ender_Pearl" as "ender_pearl". */
     private static String itemId(String text) {

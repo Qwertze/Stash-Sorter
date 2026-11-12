@@ -85,6 +85,15 @@ public class StashConfig {
     public int repairPassMinGapManualMinutes = 5;
     public int repairPassMaxPerHour = 4;
     public int repairMinReserve = 0;
+    /**
+     * Pearl travel (1.18.0, PEARL-CONTRACT v1.0): this bot may travel from its stash to a pearl station and back by whispering `load` to the station's loader
+     * bot. Off by default: a trip moves the bot. Needs the Stash Manager on and PearlDrop in the proxy (the way back needs a pearl thrown at home).
+     */
+    public boolean pearlTravel = false;
+    /** Pearl loader (1.18.0): with PearlPlus's auto load on, report the pearls of the travellers the owner approved to the Stash Manager server. */
+    public boolean pearlLoader = true;
+    /** Seconds a pearl that is not seen is still believed to be there after its owner (or this bot) came back into the world, and the least time a traveller is in the game before a trip. */
+    public int pearlGraceSeconds = 45;
     /** Kit restock (1.16.0): while idle, build copies of templates with a keep count (needs kit orders on), up to {@code kitRestockPerHour} an hour. */
     public boolean kitRestock = true;
     public int kitRestockPerHour = 12;
