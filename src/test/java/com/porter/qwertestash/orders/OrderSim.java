@@ -487,11 +487,33 @@ final class OrderSim implements OrderFlow.Host {
     /** What the host did for an intent, for the tests. */
     String last = "";
 
+    /** What the test does for an enchant item (OrderFlow.EnchantLoads): the sim itself has no anvil. Null: nothing happens (the intent comes again). */
+    java.util.function.@Nullable Consumer<OrderFlow.EnchantLoads> enchantHandler;
+    int enchantRuns;
+    /** The bases the order's enchant items did not use, as the host was told when the bin was let go (ENCHANT-CONTRACT draft 3.4). */
+    final List<Order.Lot> basesReleased = new ArrayList<>();
+
+    @Override
+    public @Nullable String enchantProblem(Order order) {
+        return null;
+    }
+
+    @Override
+    public void craftBasesReleased(List<Order.Lot> bases) {
+        basesReleased.addAll(bases);
+    }
+
     /** Runs one intent the way the sorter would. @return false when the flow had nothing to do */
     boolean step() {
         OrderFlow.Intent intent = flow.next();
         phases.add(flow.phase());
         if (intent instanceof OrderFlow.Idle) return false;
+        if (intent instanceof OrderFlow.EnchantLoads el) {
+            last = "enchant";
+            enchantRuns++;
+            if (enchantHandler != null) enchantHandler.accept(el);
+            return true;
+        }
         if (intent instanceof OrderFlow.Build b) {
             Unit u = b.unit();
             last = "build";

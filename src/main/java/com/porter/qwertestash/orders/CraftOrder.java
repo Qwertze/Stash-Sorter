@@ -93,6 +93,13 @@ public final class CraftOrder {
             if (made.getOrDefault(l.id(), 0L) + taken.getOrDefault(l.id(), 0L) < l.count()) return "the steps don't make " + l.count() + " of " + l.id();
         }
         if (total > MAX_TOTAL) return "the craft lines ask for " + total + " in all, more than " + MAX_TOTAL;
+        // ENCHANT-CONTRACT draft 3.4: the bases made for enchant plans are part of the craft lines (merged with an ordered line of the same item)
+        java.util.Map<String, Long> lineCount = new java.util.HashMap<>();
+        for (Order.Qty l : craft.lines()) lineCount.merge(l.id(), (long) l.count(), Long::sum);
+        for (Order.Qty b : craft.forEnchant()) {
+            if (b.count() < 1 || !plain(b.id())) return "a base for the enchant plans is not a plain item id";
+            if (b.count() > lineCount.getOrDefault(b.id(), 0L)) return "the craft lines don't include " + b.count() + " of " + b.id() + " for the enchant plans";
+        }
         return null;
     }
 

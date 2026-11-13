@@ -42,7 +42,7 @@ public final class ManagerIndex {
 
     /** What is worked out once per key. */
     private record Info(String key, String id, String name, String englishName, int maxStack, List<String> details, boolean enchanted, int damage, int maxDamage, boolean mending,
-                        String match) {
+                        String match, EnchantFields.@Nullable Fields enchant) {
     }
 
     private static final class Agg {
@@ -124,6 +124,8 @@ public final class ManagerIndex {
             }
             // Only a stack with the Mending enchantment carries it (REPAIR-CONTRACT.md)
             if (i.mending()) o.addProperty("mending", true);
+            // ENCHANT-CONTRACT v1.0: the enchantments, the stored repair cost and the custom name of books and gear, for the enchant planner
+            if (i.enchant() != null) EnchantFields.write(o, i.enchant());
             // The plugin has no creative tabs: every item goes in "other"
             o.addProperty("tab", "other");
             o.addProperty("tabOrder", OTHER_ORDER);
@@ -385,11 +387,38 @@ public final class ManagerIndex {
     public record PearlHb(@Nullable JsonObject body, boolean clear) {
     }
 
+    /**
+     * What the heartbeat says about enchant orders (ENCHANT-CONTRACT v1.0, "Heartbeat, claim and capability"): {@code enchant: {v:1, enabled, mc, carry?}}.
+     * {@code carry} is the free carry slots after the gear is stowed (-1: left out, the server then assumes 20). With {@code clear} an explicit null is sent (the
+     * option was turned off or the version is not supported: the server forgets the capability); null leaves the key out. Needs a player.
+     */
+    public record EnchantHb(boolean enabled, @Nullable String mc, int carry, boolean clear) {
+    }
+
     /** @param pearl the {@code pearlTravel} key (needs a player); null leaves it out */
     public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
                                    @Nullable Naming naming, @Nullable Crafting crafting, @Nullable DeliveryStorage storage, @Nullable String deliveryHash,
                                    @Nullable Kits kits, @Nullable Craft craft, @Nullable AreaReport area, @Nullable RepairHb repair, @Nullable PearlHb pearl) {
+        return heartbeat(b, rescanDone, rescanBlocked, orderBlocker, delivery, naming, crafting, storage, deliveryHash, kits, craft, area, repair, pearl, null);
+    }
+
+    /** @param enchant the {@code enchant} key (needs a player); null leaves it out */
+    public static byte[] heartbeat(Built b, long rescanDone, @Nullable String rescanBlocked, @Nullable String orderBlocker, @Nullable Delivery delivery,
+                                   @Nullable Naming naming, @Nullable Crafting crafting, @Nullable DeliveryStorage storage, @Nullable String deliveryHash,
+                                   @Nullable Kits kits, @Nullable Craft craft, @Nullable AreaReport area, @Nullable RepairHb repair, @Nullable PearlHb pearl,
+                                   @Nullable EnchantHb enchant) {
         JsonObject o = new JsonObject();
+        if (enchant != null && b.player() != null && !b.player().isBlank()) {
+            if (enchant.clear() || enchant.mc() == null) o.add("enchant", JsonNull.INSTANCE);
+            else {
+                JsonObject e = new JsonObject();
+                e.addProperty("v", 1);
+                e.addProperty("enabled", enchant.enabled());
+                e.addProperty("mc", clamp(enchant.mc(), 32));
+                if (enchant.carry() >= 0) e.addProperty("carry", Math.min(36, enchant.carry()));
+                o.add("enchant", e);
+            }
+        }
         if (pearl != null && b.player() != null && !b.player().isBlank()) {
             if (pearl.body() != null) o.add("pearlTravel", pearl.body());
             else if (pearl.clear()) o.add("pearlTravel", JsonNull.INSTANCE);
@@ -760,7 +789,8 @@ public final class ManagerIndex {
         if (item.potion != null) details.add(title(item.potion));
         boolean enchanted = item.enchants != null && !item.enchants.isEmpty();
         info = new Info(key, clamp("minecraft:" + item.id, MAX_TEXT), clamp(name, MAX_TEXT), clamp(en, MAX_TEXT), Math.max(1, item.maxStack), details, enchanted,
-            durability(item.damage, item.maxDamage)[0], durability(item.damage, item.maxDamage)[1], item.hasMending(), clamp(item.matchKey(), MAX_TEXT));
+            durability(item.damage, item.maxDamage)[0], durability(item.damage, item.maxDamage)[1], item.hasMending(), clamp(item.matchKey(), MAX_TEXT),
+            EnchantFields.of(item));
         infos.put(key, info);
         return info;
     }

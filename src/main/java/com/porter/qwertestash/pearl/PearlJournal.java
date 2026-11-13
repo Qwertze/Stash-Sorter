@@ -129,7 +129,7 @@ public final class PearlJournal {
     }
 
     /** The file holds a position: readable and writable by its owner alone where the system can say so (POSIX permissions, else the File flags). */
-    private static void ownerOnly(Path p) {
+    public static void ownerOnly(Path p) {
         try {
             Files.setPosixFilePermissions(p, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
         } catch (IOException | RuntimeException e) {

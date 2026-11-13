@@ -16,3 +16,7 @@
 
 # Proxy logs written next to the project when run from here
 /log/
+
+# buildSrc output
+/buildSrc/build/
+/buildSrc/.gradle/

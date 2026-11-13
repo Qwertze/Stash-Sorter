@@ -53,12 +53,21 @@ public final class Unit {
 
     /** The index of the first load of this bin that is still to be crafted (flagged {@link Order.Lot#craft()}), or -1. */
     public int nextCraftLot() {
-        for (int i = 0; i < lots.size(); i++) if (lots.get(i).craft()) return i;
+        for (int i = 0; i < lots.size(); i++) if (lots.get(i).craft() && !lots.get(i).base()) return i;
+        return -1;
+    }
+
+    /** The index of the first load of this bin that is an item still to be enchanted ({@link Order.Lot#enchant()}), or -1. */
+    public int nextEnchantLot() {
+        for (int i = 0; i < lots.size(); i++) if (lots.get(i).enchant()) return i;
         return -1;
     }
 
     /** Craft trips started for it (an empty shulker crafted), and why crafting was given up on (null while it may be tried). */
     public int craftTries;
+    /** The same two counters for the bases made for enchant plans (ENCHANT-CONTRACT draft 3.4), which are made first and stall on their own. */
+    public long baseLoadsWaitSince;
+    public int baseLoadRounds;
     public @Nullable String craftFailure;
 
     /**

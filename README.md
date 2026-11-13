@@ -21,6 +21,8 @@ instead of your client.
   ask for it). See below.
 - **Repair passes** (new in 1.17.0): when idle, the bot repairs the low-durability items in the stash with bottles from the stash, and sends the items without Mending to a chest you pick on the Stash Manager website. See Repair mode below.
 - **Pearl travel** (new in 1.18.0, needs Stash Manager server 1.3.0, off by default, not tried in the game yet): the bot goes to a pearl station and back by whispering the station's loader bot, and a loader bot reports its approved travellers' pearls to the server. See Pearl travel below.
+- **Enchant orders** (new in 1.19.0, needs Stash Manager server 1.4.0, off by default, not tried in the game yet): the bot makes an enchanted item from a base item and enchanted books from the stash, with
+  Bottles o' Enchanting from the stash for the levels, and delivers it with the rest of the order. See Enchant orders below.
 - **Crafts what the stash can make for orders** (craft orders, new in 1.15.0): the website's build planner and the Printer can order items the stash does
   not hold but can make from what it holds; the bot crafts them at the crafting table set for the stash on the website. Needs a recipe table fetched
   from the Stash Manager server. See Crafting from the stash below.
@@ -87,6 +89,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash craftorders on/off` | Take orders with craft lines (on; needs `stash crafting on` and a recipe table from the server). `stash craftorders` shows the recipe table, the website's crafting table state and the caps |
 | `stash craftorders maxfills <n>` / `maxperhour <n>` | Grid fills one craft order may make (2048) and craft orders may make in an hour (4096) |
 | `stash kitSorting on/off` | Kit sorting (on): shulkers that score as kits go to the chests picked on the Stash Manager website. Off: kits sort like any shulker and nothing about kits is sent. The saved rules are kept. See Kit sorting |
+| `stash enchantorders on/off` | Take orders with enchant lines (off). Set in game or in the proxy terminal only. `stash enchantorders` shows the state. See Enchant orders below |
 | `stash pearl travel on/off` | Pearl travel (off): this bot may travel from its stash to a pearl station and back. Set in game or in the proxy terminal only (the website's setting is read only). Needs the Stash Manager on and PearlDrop in the proxy. See Pearl travel below |
 | `stash pearl loader on/off` | Report the pearls of the travellers you approved on the website to the Stash Manager server (on). Needs PearlPlus auto load on |
 | `stash pearl grace <15-300 seconds>` | How long a pearl that is not seen is still believed to be there after its owner came back (45). Set in game or in the terminal only |
@@ -457,6 +460,44 @@ gives way to orders, players within 8 blocks and a stop, and puts everything bac
 
 It has not been tried in the game yet.
 
+## Enchant orders (1.19.0)
+Needs Stash Manager server 1.4.0 (contract `ENCHANT-CONTRACT-v1.0.md`). With an older server nothing changes: the server never hands this bot an enchant order. It has not been tried in the game yet.
+
+The orderer picks an item and the enchantments on the website. The server finds the order of anvil steps with the fewest XP points (no step above 39 levels) with the shared `qwerte-core` library and reserves the base item, the enchanted books, the anvils and the experience bottles. This bot
+takes them from the stash, levels up with the bottles one step at a time and does the anvil work. The finished item is packed into a shulker with the rest of the order.
+
+**Turning it on.** `stash enchantorders on` (off by default; set in game or in the proxy terminal, the website's setting is read only). The claim and the heartbeat carry the capability only with the option on, the Stash Manager on, a supported Minecraft version (1.21.4 and 1.21.11) and none of the proxy's own `Enchanter`, `KitMaker` or
+`OrderFiller` modules on (an order that arrives while one is on is refused as `module_conflict`), and so does `AutoMend` or `AutoArmor` (they take XP and move the gear the bot puts aside; the plugin can't pause them). The check is made at planning, at each item's preflight and in the heartbeat (`enabled:false`). `AutoTotem` may stay on: the bottles are thrown from the main hand and the off hand is never touched. An item that is already past its first step is never failed by a module: after a restart it waits, with the status "waiting: turn off <module>", and goes on once it is off (a force-cancel still ends it).
+
+**What the bot does, per item.**
+1. **Preflight.** It finds the anvil (one standing in the stash area, else one from the stash is put down), then takes only what the order's `take` list names: the base, each book, all the bottles the plan calls for (its margin included) and one spare anvil, never more of a key than the order reserved. It checks that everything fits its free carry slots after its gear is stowed
+   (`1 + books + anvils + 1 + ceil(bottles / 64) <= carry`) and plans the item again with the real items: if that costs more XP points than the server's plan the item is refused as `cost_mismatch`; a lower cost is fine. Anything that fails here ends the item before the first step and everything is put back. Ten minutes without taking a stack, or more than `12 + 4 x leaves` trips, is `timeout`.
+2. **Steps.** The damaged Mending gear on the bot is put in the inventory (it would take the XP) and the bottles go into a hotbar slot that is selected (the main hand; the off hand is left alone). For each step the bot throws single bottles until its level reaches the step's cost (in batches while far from it), walks to the anvil, puts the left item in the first slot (exactly one item) and the right one in the second, reads the cost and compares it with the plan, takes the result and checks its enchantments (`wrong_result`). The result is taken with one quick-move click (an anvil that breaks on the pickup then can't leave it on the cursor) when the game would put it in a carry slot, else with two clicks into a chosen carry slot. If the window closes in the middle of a step the anvil is opened again (at most 3 times), never a failure for that alone.
+   A shown cost of 40 or more is `too_expensive`; a lower cost is accepted; a higher one under 40 is `cost_mismatch` before the first step and accepted (the bot levels up to it) later.
+3. **An anvil that breaks** is replaced by the spare and the item carries on; `anvil_broke` or `no_anvil` only if no spare is left.
+4. **Out of bottles.** The bot takes more from the stash (it may use the repair reserve, but not the bottles other open enchant orders hold). At most twice the item's planned bottles are fetched on top; past that, or with no free carry slot, or with none at all in the stash, it waits with a phase that says which ("waiting: ...") and looks again every 30 seconds. It never fails for this.
+5. **Pauses.** A player (not a friend) within 8 blocks, or a player controlling the bot, pauses the work between steps and never between putting the items in and taking the result. Past the first step a pause has no time limit; before it the usual 10 minutes apply. A disconnect or a queue hands over to the journal below.
+6. **Cancel.** Before the first step it applies at once. Past it the cancel waits for the item to finish; the finished item and the rest are returned to the stash, not delivered. A force-cancel (the website asks for a confirmation) stops at the next step boundary, returns the items, and the bot's next report is the server's acknowledgement.
+7. **Resume past step 1.** A running item is never failed after a restart: with the option off or another Minecraft version it is finished (the anvil rules are the same in the supported versions) and the items not started are refused; with a proxy module on it waits (see above). A saved plan that is not sound (a step pointing at an item that does not exist, a cost that does not replay) is not followed: the item is short with `wrong_result` and what is carried goes back.
+8. **Journal.** After every step the order's saved plan (`Saved.enchant`) records the plan made with the real items and the steps done, so a reconnect carries on at the right step: carried stacks are found again by what they are (book or item, enchantments, stored repair cost), and a step whose result is already carried is done. If it can't carry on, the item is `wrong_result`, everything is put back and the order can be retried.
+
+**Index keys.** The plugin's index key is made from the item's whole component patch, `REPAIR_COST` included (only the match key strips it), so one key means one stored repair cost and `rc` is exact per entry.
+
+**A missing base is crafted (draft 3.4).** When the stash has no usable base for an enchant line and craft orders are on, the server adds one base per missing item to the order's craft block (`craft.forEnchant`) and marks the plan's base `crafted: true`. The bot crafts it first (the same craft engine, table, ledger and budget as a craft order, before the first enchant item), keeps it in the inventory and uses it as the plan's base: nothing is taken from the stash for it, it counts in the carry formula, the plan is made again with the real crafted item, and it is never delivered. A base the plans did not use (a real base turned up when a curse was accepted) is put back with the leftovers and counted in `result.craft.returned`. If the craft fails (`result.craft.short`, the recipes do not match, no table) the plans that need a crafted base are short with `no_base` and the others go on. A restart between the craft and the enchanting does not craft again. Needs both `craftOrders` and `enchantOrders` on (the claim carries both flags; there is no new flag). Not tried in the game yet.
+
+**Reporting.** `result.enchant` has `made` (per line), `short` (one reason per line from the closed set `too_expensive`, `books_short`, `xp_short`, `no_anvil`, `inventory_full`, `cost_mismatch`, `mc_unsupported`, `mc_mismatch`, `busy`, `too_complex`, `no_base`, `anvil_broke`, `wrong_result`, `module_conflict`, `cap`, `cancelled`, `timeout`), the levels of the last finished item, the bottles used, the anvils broken and what was returned.
+The index now carries `ench` (enchantments), `rc` (stored repair cost) and `named` on books and gear, and the heartbeat carries `enchant: {v, enabled, mc, carry}`; the heartbeat reply's `enchant.bottlesReserved` is kept out of repair (`heldOrderBottles`). Nothing here sends or logs a position.
+
+**The shared library.** `qwerte-core` (the anvil rules, the tables for 1.21.4 and 1.21.11 and the planner) lives in the Qwertze repo. This plugin carries a synced copy under `com/porter/qwerte/core` (sources and the `enchant-*.json` tables, which end up in the jar). `tools/sync-qwerte-core.ps1` (or `./gradlew syncQwerteCore`) refreshes it. The build runs `checkQwerteCore` and **fails when the copy differs from `../Qwertze/qwerte-core`**;
+without that folder (a clone of this repo alone) it only warns and builds the committed copy.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `enchantOrders` | off | This bot takes enchant orders. `stash enchantorders on/off`. |
+
+### Not tested in game
+Nothing about the steps in the world has been run in game: the walk to the anvil and the window, the clicks into the anvil's slots, the cost read from the container property, throwing single bottles from the main hand, stowing and returning the gear, an anvil breaking, the pause behaviour, the resume, and the put-back. The planning, the preflight, the step flow against a fake anvil that follows the real rules, the journal, the protocol and the wire shapes against the server's jar are tested.
+
 ## Pearl travel (1.18.0)
 Needs Stash Manager server 1.3.0. With an older server the bot makes no trips and nothing else changes.
 
@@ -500,7 +541,7 @@ Major breaking changes: a new x.0.0 version. New features, bug fixes and more: 1
 
 ## Building
 Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in
-`build/libs/`.
+`build/libs/`. The build checks the synced copy of `qwerte-core` against `../Qwertze/qwerte-core` (see Enchant orders); run `tools/sync-qwerte-core.ps1` after changing the library.
 
 ## License
 GPL-3.0, the same as [Qwerte](https://github.com/Qwertze/Qwerte), which this is ported from.

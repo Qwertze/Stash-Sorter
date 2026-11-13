@@ -106,8 +106,39 @@ tasks.test {
     }
 }
 
+// --- qwerte-core: a synced copy of the shared enchant library ---------------------------------------------------
+// qwerte-core lives in the Qwertze repo; the plugin carries a copy under com/porter/qwerte/core (sources and the enchant-*.json
+// tables, so they land in the shaded jar). `syncQwerteCore` (or tools/sync-qwerte-core.ps1) refreshes it; `checkQwerteCore` fails the
+// build when the copy differs from the library. When the library folder is absent (a clone of this repo alone) the check only warns.
+// A relative -Pqwerte_core is resolved against the project directory (not the directory Gradle was started in).
+val qwerteCorePath: String = providers.gradleProperty("qwerte_core")
+    .map { raw -> File(raw).let { if (it.isAbsolute) it else File(layout.projectDirectory.asFile, raw) }.normalize().absolutePath }
+    .orElse(layout.projectDirectory.dir("../Qwertze/qwerte-core").asFile.normalize().absolutePath)
+    .get()
+
+val checkQwerteCore = tasks.register<qwertecore.tasks.CheckQwerteCore>("checkQwerteCore") {
+    group = "verification"
+    description = "Fails when the synced copy of qwerte-core differs from ../Qwertze/qwerte-core (skips with a warning when it is absent)"
+    corePath.set(qwerteCorePath)
+    pluginDir.set(layout.projectDirectory)
+}
+
+tasks.register<qwertecore.tasks.SyncQwerteCore>("syncQwerteCore") {
+    group = "build setup"
+    description = "Copies ../Qwertze/qwerte-core/src/main into this plugin (same as tools/sync-qwerte-core.ps1)"
+    corePath.set(qwerteCorePath)
+    pluginDir.set(layout.projectDirectory)
+}
+
+// The drift logic (buildSrc CoreSync, no Gradle types) is also compiled into the tests, which test it
+sourceSets.named("test") {
+    java.srcDir("buildSrc/src/main/java")
+    java.exclude("qwertecore/tasks/**")
+}
+
 tasks.withType<JavaCompile>().configureEach {
     dependsOn(checkAquariusJar)
+    if (name == "compileJava") dependsOn(checkQwerteCore)
     options.encoding = "UTF-8"
     options.release = javaReleaseVersion
 }

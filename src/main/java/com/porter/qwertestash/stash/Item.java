@@ -40,6 +40,11 @@ public final class Item {
     /** The damage value and the most damage the item takes (0 when it has none); saved, for the index's durability bar. */
     public int damage, maxDamage;
     /**
+     * The stored repair cost (the REPAIR_COST component, 0 when the stack has none): what an anvil adds to the next step on it. -1 in a stash saved
+     * before it was kept (unknown until its container is read again): the index then leaves {@code rc} out, and the server plans it as an estimate.
+     */
+    public int repairCost = -1;
+    /**
      * The stack has the Mending enchantment on it (an enchanted book only stores it, so a book never counts). Worked out from the
      * enchantments, so it holds for stacks saved before this existed.
      */
@@ -147,6 +152,8 @@ public final class Item {
         item.damage = dur[0];
         item.maxDamage = dur[1];
         item.blockData = components.get(DataComponentTypes.BLOCK_ENTITY_DATA) != null;
+        Integer repairCost = components.get(DataComponentTypes.REPAIR_COST);
+        item.repairCost = repairCost == null ? 0 : Math.max(0, repairCost);
 
         if (data.itemTags() != null) for (ItemTags tag : data.itemTags()) item.tags.add(tag.name());
         item.bundle = data.itemTags() != null && data.itemTags().contains(ItemTags.BUNDLES);

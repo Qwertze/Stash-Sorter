@@ -566,6 +566,31 @@ public class Stash {
         }
     }
 
+    /** The most bytes of a saved stash that are loaded (256 MiB: real ones are a few MiB). */
+    public static final long MAX_FILE_BYTES = 256L << 20;
+
+    /**
+     * A saved file above {@code max} bytes is renamed to {@code <file>.oversized-<timestamp>} (logged), so the next save can't overwrite it and the user's data is
+     * kept. @return the new path, or null when the file is within the bound (or could not be renamed: then it is logged and left alone, and null is returned)
+     */
+    private static void logError(String text, Object... args) {
+        if (QwerteStashPlugin.LOG != null) QwerteStashPlugin.LOG.error(text, args);
+    }
+
+    static @Nullable Path setAsideIfOversized(Path path, long max) throws IOException {
+        long size = Files.size(path);
+        if (size <= max) return null;
+        Path aside = path.resolveSibling(path.getFileName() + ".oversized-" + System.currentTimeMillis());
+        try {
+            Files.move(path, aside);
+            logError("Qwerte Stash: the saved stash file is {} MiB, more than the {} MiB read at most; it was renamed to {} and the stash starts fresh.", size >> 20, max >> 20, aside.getFileName());
+            return aside;
+        } catch (IOException e) {
+            logError("Qwerte Stash: the saved stash file is {} MiB (more than {} MiB) and could not be renamed aside: {}", size >> 20, max >> 20, e.toString());
+            return null;
+        }
+    }
+
     public void save() {
         try {
             Files.createDirectories(folder());
@@ -575,11 +600,14 @@ public class Stash {
             Path target = file(name, server);
             Path temp = target.resolveSibling(target.getFileName() + ".tmp");
             Files.writeString(temp, GSON.toJson(this), StandardCharsets.UTF_8);
+            // The file holds positions and the order journal: readable by its owner alone where the system can say so (best effort, as the pearl journal)
+            com.porter.qwertestash.pearl.PearlJournal.ownerOnly(temp);
             try {
                 Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            com.porter.qwertestash.pearl.PearlJournal.ownerOnly(target);
             dirty = false;
             StashIndex.touch(this);
         } catch (IOException e) {
@@ -617,6 +645,12 @@ public class Stash {
         if (!Files.exists(path)) return null;
 
         try {
+            // A generous bound: a stash file this big is not one of ours and is never read whole into memory. It is renamed aside (never overwritten by a
+            // later save) and the stash starts fresh
+            if (Files.size(path) > MAX_FILE_BYTES) {
+                setAsideIfOversized(path, MAX_FILE_BYTES);
+                return null; // not read, whether or not the rename worked
+            }
             Stash stash = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Stash.class);
             if (stash == null) return null;
             if (stash.orphans == null) stash.orphans = new ArrayList<>();

@@ -38,6 +38,7 @@ import com.porter.qwertestash.StashConfig.Mode;
 import com.porter.qwertestash.stash.Categories;
 import com.porter.qwertestash.manager.ManagerIndex;
 import com.porter.qwertestash.orders.AnvilNamer;
+import com.porter.qwertestash.orders.BaseSlots;
 import com.porter.qwertestash.orders.BinTracker;
 import com.porter.qwertestash.orders.ClickPlanner;
 import com.porter.qwertestash.orders.CraftBatch;
@@ -53,6 +54,16 @@ import com.porter.qwertestash.orders.CraftSlots;
 import com.porter.qwertestash.orders.CraftSub;
 import com.porter.qwertestash.orders.ChestStack;
 import com.porter.qwertestash.orders.CraftTrip;
+import com.porter.qwertestash.orders.Codes;
+import com.porter.qwertestash.orders.EnchantCarry;
+import com.porter.qwertestash.orders.EnchantGuard;
+import com.porter.qwertestash.orders.EnchantItems;
+import com.porter.qwertestash.orders.EnchantLedger;
+import com.porter.qwertestash.orders.EnchantOrder;
+import com.porter.qwertestash.orders.EnchantPreflight;
+import com.porter.qwertestash.orders.EnchantState;
+import com.porter.qwertestash.orders.EnchantTrip;
+import com.porter.qwertestash.orders.GearStow;
 import com.porter.qwertestash.orders.DeliveryBook;
 import com.porter.qwertestash.orders.DeliveryRoom;
 import com.porter.qwertestash.orders.Recipes;
@@ -187,7 +198,7 @@ public class StashSorter extends AbstractFieldModule {
     private static final int OWN_WINDOW_GRACE_MS = 10_000;
     private static final int REREAD_COOLDOWN_MS = 60_000;
 
-    private enum Job { Survey, Take, Deposit, Dump, Fetch, Clean, Fill, Compact, FetchSigns, Label, Gather, Ground, Explore, Unpack, Deliver, Name, Craft, Anvil, Chest, Repair }
+    private enum Job { Survey, Take, Deposit, Dump, Fetch, Clean, Fill, Compact, FetchSigns, Label, Gather, Ground, Explore, Unpack, Deliver, Name, Craft, Anvil, Chest, Repair, Enchant }
 
     private enum Step { Walking, Opening, Working }
 
@@ -723,12 +734,14 @@ public class StashSorter extends AbstractFieldModule {
         anvilRun = null;
         resetChestRun();
         resetRepair();
+        resetEnchant();
         anvilSpot = null;
         anvilStep = null;
         craftKeep.clear();
         orderCraftLots.clear();
         kitEmptyQueue.clear();
         orderCraftSurplus.clear();
+        orderReleasedBases.clear();
         CraftingTableSpot.useWebsite(null);
         CraftingTableSpot.sideMode(false);
         CraftingTableSpot.sideClear();
@@ -996,12 +1009,14 @@ public class StashSorter extends AbstractFieldModule {
         anvilRun = null;
         resetChestRun();
         resetRepair();
+        resetEnchant();
         anvilSpot = null;
         anvilStep = null;
         craftKeep.clear();
         orderCraftLots.clear();
         kitEmptyQueue.clear();
         orderCraftSurplus.clear();
+        orderReleasedBases.clear();
         CraftingTableSpot.useWebsite(null);
         CraftingTableSpot.sideMode(false);
         CraftingTableSpot.sideClear();
@@ -1319,6 +1334,7 @@ public class StashSorter extends AbstractFieldModule {
         else if (job == Job.Unpack) tickUnpack();
         else if (job == Job.Name) tickName();
         else if (job == Job.Repair) tickRepair();
+        else if (job == Job.Enchant) tickEnchant();
         else if (job == Job.Craft) tickCraft();
         else if (job == Job.Anvil) tickAnvilPlace();
         else if (job == Job.Chest) tickChestPlace();
@@ -3915,6 +3931,8 @@ public class StashSorter extends AbstractFieldModule {
 
         // A repair trip puts the gear back before it lets go (it carries on with that while giving way, see tickRepairWhileAway)
         if (job == Job.Repair && repairTrip != null && !repairUndoMode) repairYieldAbort = true;
+        // An enchant trip puts the anvil's contents and the gear back the same way before it lets go (the journal carries the item on)
+        if (job == Job.Enchant && enchantTrip != null) enchantYield = true;
         activity.releaseOurPathing();
         restoreRules();
         if (job != null) {
@@ -3930,6 +3948,7 @@ public class StashSorter extends AbstractFieldModule {
     /** While giving way with a repair trip in hand, the trip is told to stop and ticks on to put what it moved back. */
     private void tickRepairWhileAway() {
         if (job == Job.Repair && repairTrip != null && repairYieldAbort && !busy()) tickRepair();
+        if (job == Job.Enchant && enchantTrip != null && enchantYield && !busy()) tickEnchant();
     }
 
     private void tickYielding() {
@@ -4137,6 +4156,10 @@ public class StashSorter extends AbstractFieldModule {
         }
         if (job == Job.Repair) {
             // Nothing in the world was let go of: the trip carries on where it was (it stops itself if someone is near)
+            return;
+        }
+        if (job == Job.Enchant) {
+            // The trip was told to stop (enchantYield) and put the anvil's contents and the gear back: it ends itself, and the journal carries the item on
             return;
         }
         if (job == Job.Anvil) {
@@ -4594,6 +4617,11 @@ public class StashSorter extends AbstractFieldModule {
         if (chestRun != null) {
             if (continueChestRun()) return true;
             if (chestRun != null) return false;
+        }
+        // An enchant item under way goes on until it is over: its materials are carried, its steps are journalled
+        if (enchantRun != null) {
+            if (continueEnchant()) return true;
+            if (enchantRun != null) return false;
         }
 
         // What a repair cut short by a restart moved is put back first, then a repair under way goes on until it is over
@@ -8127,7 +8155,7 @@ public class StashSorter extends AbstractFieldModule {
 
         clickRefused = false;
         boolean busy = switch (job) {
-            case Survey, Clean, Fill, Label, Ground, Explore, Unpack, Name, Craft, Anvil, Chest, Repair -> false;
+            case Survey, Clean, Fill, Label, Ground, Explore, Unpack, Name, Craft, Anvil, Chest, Repair, Enchant -> false;
             case FetchSigns -> fetchSignsOne(c);
             case Take -> takeOne(c);
             case Fetch -> fetchOne(c);
@@ -8894,7 +8922,7 @@ public class StashSorter extends AbstractFieldModule {
         if (c == null) return;
 
         boolean ours = false;
-        if (openedAt >= openRequestedAt) ours = handle != null ? isShulkerWindow(c) : job == Job.Name ? c.getType() == ContainerType.ANVIL : job == Job.Craft ? c.getType() == ContainerType.CRAFTING : target != null && openRejection(c) == null;
+        if (openedAt >= openRequestedAt) ours = handle != null ? isShulkerWindow(c) : job == Job.Name || job == Job.Enchant ? c.getType() == ContainerType.ANVIL : job == Job.Craft ? c.getType() == ContainerType.CRAFTING : target != null && openRejection(c) == null;
         if (!ours && lastOpenClickAt != 0 && openedAt >= lastOpenClickAt && openedAt - lastOpenClickAt <= OPEN_ANSWER_MS && !foreignSinceClick) ours = true;
         if (ours) activity.claimWindow(id, openedAt);
     }
@@ -9696,6 +9724,7 @@ public class StashSorter extends AbstractFieldModule {
             case Anvil -> "putting an anvil down to name order shulkers at";
             case Chest -> "putting another chest up for the delivery storage";
             case Repair -> "repairing order items with experience bottles";
+            case Enchant -> "enchanting an order item at the anvil";
             case Explore -> "exploring the stash area (" + exploredChunks.size() + " chunks seen, " + unreachableChunks.size() + " out of reach)";
             case Ground -> "picking up " + groundLabel + " from the ground" + (positions ? " at " + (groundCell == null ? "?" : fmt(groundCell)) : "");
         } + " (" + moved + " moved)" + unrecognisedNote();
@@ -9999,7 +10028,7 @@ public class StashSorter extends AbstractFieldModule {
             scan = repairScan(s);
             bottles = repairBottles();
         }
-        usable = RepairRules.usable(bottles, 0, repairReserve(s));
+        usable = RepairRules.usable(bottles, EnchantState.SHARED.bottlesReserved(), repairReserve(s));
         List<RepairRules.Cand> all = new ArrayList<>(scan.mend());
         for (RepairRules.BoxStop b : scan.boxes()) all.addAll(b.mend());
         for (RepairRules.Cand c : all) {
@@ -10179,7 +10208,7 @@ public class StashSorter extends AbstractFieldModule {
             for (RepairRules.Cand c : scan.mend()) if (!repairMemory.recentlyFailed(c.memoryKey())) mend.add(c);
             scan = new RepairRules.Scan(mend, scan.needs(), scan.boxes(), scan.inShulkers(), scan.inShulkerReasons());
         }
-        long usable = RepairRules.usable(repairBottles(), 0, repairReserve(s));
+        long usable = RepairRules.usable(repairBottles(), EnchantState.SHARED.bottlesReserved(), repairReserve(s));
         BlockPos feet = playerFeet();
         Map<String, double[]> positions = new HashMap<>();
         RepairRules.Plan plan = RepairRules.plan(scan, usable, freeCarryCount(), repairArmour(), repairPort.at(45) != null, feet.x() + 0.5, feet.z() + 0.5,
@@ -10823,7 +10852,15 @@ public class StashSorter extends AbstractFieldModule {
     private List<BinTracker.Held> carriedHeld(Bin bin) {
         List<BinTracker.Held> out = new ArrayList<>();
         // An order's craft gathers its inputs fresh: the crafted loads and surplus already carried are not what it is gathering
-        Set<Integer> aside = craft != null && craft.oc != null && bin == craft.bin ? orderCraftHeld() : Set.of();
+        // The same for an enchant item's gather: a base the order crafted (ENCHANT-CONTRACT draft 3.4) is not the base it gathers from the stash
+        EnchantRun gathering = enchantRun;
+        Set<Integer> aside = (craft != null && craft.oc != null && bin == craft.bin) || (gathering != null && bin == gathering.bin) ? orderCraftHeld() : Set.of();
+        // The bases made for enchant plans (draft 3.4) are never packed into any bin: a plain stack of the same id in the bin's own lots must not take one
+        List<Integer> bases = baseSlots();
+        if (!bases.isEmpty()) {
+            aside = new HashSet<>(aside);
+            aside.addAll(bases);
+        }
         for (int slot : carriedSlots()) {
             Item it = inventoryItem(slot);
             if (it == null || it.isShulker() || aside.contains(slot)) continue;
@@ -11372,6 +11409,7 @@ public class StashSorter extends AbstractFieldModule {
         if (intent instanceof OrderFlow.Name n) return startName(n);
         if (intent instanceof OrderFlow.Craft c) return startOrderCraft(c);
         if (intent instanceof OrderFlow.CraftLoads cl) return startOrderCraftLoads(cl);
+        if (intent instanceof OrderFlow.EnchantLoads el) return startEnchant(el);
         if (intent instanceof OrderFlow.Deliver d) return startDeliver(d);
         if (intent instanceof OrderFlow.Expand x) return startExpand(x);
         if (intent instanceof OrderFlow.Recheck rc) return startRecheck(rc);
@@ -11927,6 +11965,936 @@ public class StashSorter extends AbstractFieldModule {
         @Override
         public void afterClick() {
             wait = Math.max(wait, CONFIG.delayTicks);
+        }
+    };
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0). An enchant item is a load of its bin that is made at the anvil before the bin is built
+    // (OrderFlow.EnchantLoads comes again until the item is finished or short). One EnchantRun is one item: the preflight (the anvil, the base,
+    // the books, the anvil spare and all the bottles taken by the order's take keys only, the carry check, the plan made again with the real
+    // items), the steps (Job.Enchant: EnchantTrip, with XpLeveler throwing and GearStow putting the gear away), a top-up of bottles when they ran
+    // out, and the put-back of what is left. The decisions are pure and tested (EnchantPreflight, EnchantTrip, EnchantLedger, ...); this runs
+    // them on the bot tick thread. Every step is journalled in the order's saved plan, so a restart carries on at the right step. Nothing
+    // here is ever logged or reported with a position.
+
+    private enum EnchantPhase { Prepare, Gather, Trip, TopUp, PutBack }
+
+    private static final class EnchantRun {
+        final Unit unit;
+        final int n;
+        EnchantPhase phase = EnchantPhase.Prepare, afterGather = EnchantPhase.Prepare;
+        @Nullable EnchantPreflight pre;
+        @Nullable Bin bin;
+        EnchantOrder.@Nullable ItemPlan real;
+        boolean anvilChecked, leaving;
+        int lastHave, putBackTries, topUpLevels;
+        long waitUntilTick;
+        @Nullable String waitWhy;
+        /** What was about to be put back, by index key, to refund the budget with what really left. */
+        Map<String, Long> putBackBefore = new HashMap<>();
+
+        EnchantRun(Unit unit, int n) {
+            this.unit = unit;
+            this.n = n;
+        }
+    }
+
+    private @Nullable EnchantRun enchantRun;
+    private @Nullable EnchantTrip enchantTrip;
+    private @Nullable GearStow gearStow;
+    private @Nullable GoalNear enchantGoal;
+    private boolean enchantYield;
+
+    private static String mcVersionNow() {
+        try {
+            String v = com.aquarius.Globals.MC_VERSION;
+            if (v != null && !v.isBlank()) return v;
+        } catch (RuntimeException | LinkageError ignored) {
+            // The build's own version below
+        }
+        return com.porter.qwertestash.BuildConstants.MC_VERSION;
+    }
+
+    /** Why enchant lines can't be carried out now (a {@link Codes} reason), or null: the option, the Minecraft version, the proxy's own modules. */
+    private @Nullable String enchantProblemNow(EnchantOrder.@Nullable Block block) {
+        if (!CONFIG.enchantOrders) return Codes.BUSY;
+        String mc = mcVersionNow();
+        if (!com.porter.qwerte.core.enchant.McData.SUPPORTED.contains(mc)) return Codes.MC_UNSUPPORTED;
+        if (block != null && !block.mc().equals(mc)) return Codes.MC_MISMATCH;
+        List<String> enabled = com.porter.qwertestash.manager.ProxySources.enabledModuleNames();
+        if (EnchantGuard.conflict(enabled) != null) return Codes.MODULE_CONFLICT;
+        return null;
+    }
+
+    /** The {@code enchant.carry} of the heartbeat: the free carry slots after the gear is stowed. */
+    public int enchantCarry() {
+        GearStow g = new GearStow(repairPort);
+        return EnchantCarry.heartbeatCarry(freeCarryCount(), g.damagedMendingArmour(), false);
+    }
+
+    /** The bot's experience points now: the level and the bar together. */
+    private static double xpPoints() {
+        try {
+            var me = CACHE.getPlayerCache().getThePlayer();
+            if (me == null || !Alerts.online()) return 0;
+            int level = me.getLevel();
+            double next = com.porter.qwerte.core.enchant.EnchantRules.points(level + 1) - com.porter.qwerte.core.enchant.EnchantRules.points(level);
+            return com.porter.qwerte.core.enchant.EnchantRules.points(level) + Math.max(0, Math.min(1, me.getExperience())) * next;
+        } catch (RuntimeException | LinkageError e) {
+            return 0;
+        }
+    }
+
+    /** A carried stack as the anvil sees it. */
+    private EnchantItems.@Nullable Held enchantHeld(int slot, @Nullable Item it) {
+        if (it == null || it.isShulker()) return null;
+        com.porter.qwertestash.manager.EnchantFields.Fields f = com.porter.qwertestash.manager.EnchantFields.of(it);
+        return new EnchantItems.Held(slot, it.indexKey(), it.id, it.count, "enchanted_book".equals(it.id), f == null ? Map.of() : f.ench(), Math.max(0, it.repairCost), it.customName);
+    }
+
+    /** Every carried stack of the order (not the bot's own gear, not a shulker), in carry slots. */
+    private List<EnchantItems.Held> enchantCarriedStacks() {
+        List<EnchantItems.Held> out = new ArrayList<>();
+        for (int slot : carriedSlots()) {
+            EnchantItems.Held h = enchantHeld(slot, inventoryItem(slot));
+            if (h != null) out.add(h);
+        }
+        return out;
+    }
+
+    /** The index keys the enchant work of this order knows: the take keys and the keys of finished items waiting for their bin. */
+    private Set<String> enchantKeys() {
+        Set<String> keys = new HashSet<>();
+        EnchantLedger l = orders.flow.enchantLedger();
+        if (l != null) keys.addAll(l.block().takeMap().keySet());
+        keys.addAll(finishedEnchantKeys());
+        return keys;
+    }
+
+    /** The keys of finished enchant items that wait for their bin to be built. */
+    private Set<String> finishedEnchantKeys() {
+        Set<String> out = new HashSet<>();
+        List<Unit> all = orders.flow.units();
+        for (int i = Math.min(orders.flow.index(), all.size()); i < all.size(); i++) {
+            Unit u = all.get(i);
+            if (u.built || u.have) continue;
+            for (Order.Lot lot : u.lots) if (lot.crafted() && lot.key().indexOf('#') >= 0) out.add(lot.key());
+        }
+        return out;
+    }
+
+    /** The carry slots holding finished enchant items that wait for their bin (never put back, never used as materials). */
+    private Set<Integer> enchantKeptSlots() {
+        Set<Integer> out = new HashSet<>();
+        List<String> keys = new ArrayList<>(finishedEnchantKeysList());
+        for (int slot : carriedSlots()) {
+            Item it = inventoryItem(slot);
+            if (it == null) continue;
+            int at = keys.indexOf(it.indexKey());
+            if (at >= 0) {
+                keys.remove(at);
+                out.add(slot);
+            }
+        }
+        return out;
+    }
+
+    private List<String> finishedEnchantKeysList() {
+        List<String> out = new ArrayList<>();
+        List<Unit> all = orders.flow.units();
+        for (int i = Math.min(orders.flow.index(), all.size()); i < all.size(); i++) {
+            Unit u = all.get(i);
+            if (u.built || u.have) continue;
+            for (Order.Lot lot : u.lots) if (lot.crafted() && lot.key().indexOf('#') >= 0) out.add(lot.key());
+        }
+        return out;
+    }
+
+    /** The carried stacks that are the materials of this item (by the plan's keys, the bottles, the anvils of the take), not the finished items of other bins. */
+    private List<EnchantItems.Held> enchantOwned(EnchantRun r) {
+        EnchantLedger l = orders.flow.enchantLedger();
+        Set<String> keys = new HashSet<>();
+        if (l != null) keys.addAll(l.block().takeMap().keySet());
+        Set<Integer> kept = enchantKeptSlots();
+        // The bases the order's craft made are not taken from the stash: never charged to the take budget, never put back by an item (draft 3.4)
+        Set<Integer> crafted = orderCraftHeld();
+        List<EnchantItems.Held> out = new ArrayList<>();
+        for (EnchantItems.Held h : enchantCarriedStacks()) if (keys.contains(h.key()) && !kept.contains(h.slot()) && !crafted.contains(h.slot())) out.add(h);
+        return out;
+    }
+
+    /**
+     * The carried stacks the order's craft made as bases for its enchant plans (ENCHANT-CONTRACT draft 3.4): the crafted stacks set aside for the order
+     * ({@link #orderCraftHeld}) that the made base loads of the bin claim, as many as there are such loads. Fresh or not is the preflight's to check.
+     */
+    private List<EnchantItems.Held> enchantMadeBases() {
+        List<EnchantItems.Held> out = new ArrayList<>();
+        for (int slot : baseSlots()) {
+            EnchantItems.Held h = enchantHeld(slot, inventoryItem(slot));
+            if (h != null) out.add(h);
+        }
+        return out;
+    }
+
+    /** A stack with no components, as the stash keys a plain item: what a crafted load or a made base is (the check {@code craftResumed} makes too). */
+    private static boolean freshPlain(@Nullable Item it) {
+        return it != null && it.indexKey().equals("minecraft:" + it.id);
+    }
+
+    /**
+     * The carry slots holding the bases the order's craft made for its enchant plans and that wait for their items, plus the made bases the items did not use
+     * ({@link #orderReleasedBases}): never packed into a shulker ({@link #carriedHeld}), never taken as a gathered base, never put back by an item. Claimed by
+     * {@link BaseSlots}: as many per item id as the flow's made base loads say, fresh plain stacks only, so a slot whose base was used up and now holds the
+     * enchanted result is not one.
+     */
+    private List<Integer> baseSlots() {
+        if (orderCraftLots.isEmpty() && orderReleasedBases.isEmpty()) return List.of();
+        List<Integer> out = new ArrayList<>();
+        if (!orderCraftLots.isEmpty()) {
+            List<BaseSlots.Stack> crafted = new ArrayList<>();
+            for (var e : new ArrayList<>(orderCraftLots.entrySet())) {
+                Item it = inventoryItem(e.getKey());
+                if (it != null && it.id.equals(e.getValue()) && !it.isShulker()) crafted.add(new BaseSlots.Stack(e.getKey(), "minecraft:" + it.id, freshPlain(it)));
+            }
+            out.addAll(BaseSlots.claim(orders.flow.madeBases(), crafted));
+        }
+        for (int slot : orderReleasedBases) if (freshPlain(inventoryItem(slot)) && !out.contains(slot)) out.add(slot);
+        java.util.Collections.sort(out);
+        return out;
+    }
+
+    /** What the order's enchant work carries now, by index key (for the end-of-order put-back and the report). */
+    private Map<String, Long> enchantCarriedCounts() {
+        Map<String, Long> out = new LinkedHashMap<>();
+        Set<String> keys = enchantKeys();
+        Set<Integer> crafted = orderCraftHeld();
+        for (EnchantItems.Held h : enchantCarriedStacks()) if (keys.contains(h.key()) && !crafted.contains(h.slot())) out.merge(h.key(), (long) Math.max(1, h.count()), Long::sum);
+        return out;
+    }
+
+    /** The free carry slots there will be once the damaged Mending gear is stowed, plus the slots the order's stacks take now. */
+    private int enchantLiveCarry(List<EnchantItems.Held> owned) {
+        GearStow g = new GearStow(repairPort);
+        int gear = Repair.slotsNeeded(g.damagedMendingArmour(), false, 0);
+        return Math.max(0, freeCarryCount() - gear) + owned.size();
+    }
+
+    /** The bottles the stash holds (loose and in shulkers), not what is carried. */
+    private long stashBottlesNow() {
+        Stash st = orders.st();
+        if (st == null) return 0;
+        StockPlanner.Survey sv = orders.survey(st, Set.of(Repair.BOTTLE));
+        return sv.available().getOrDefault(Repair.BOTTLE, 0L) + sv.shulkerAvailable().getOrDefault(Repair.BOTTLE, 0L);
+    }
+
+    /** Starts the item of OrderFlow.EnchantLoads. @return true when a job was started */
+    private boolean startEnchant(OrderFlow.EnchantLoads el) {
+        if (compact != null || craft != null || anvilRun != null || chestRun != null || repair != null || repairTrip != null || enchantRun != null) return false;
+        OrderFlow flow = orders.flow;
+        EnchantLedger ledger = flow.enchantLedger();
+        Unit u = el.unit();
+        int at = u.nextEnchantLot();
+        if (ledger == null || at < 0) return false;
+        int n = u.lots.get(at).enchantItem();
+        if (n < 0 || n >= ledger.items().size()) {
+            // A lot the ledger does not know: left out
+            u.lots.remove(at);
+            return false;
+        }
+        EnchantRun r = new EnchantRun(u, n);
+        enchantRun = r;
+        step("order: enchanting item " + (n + 1) + "/" + ledger.items().size() + "; next: " + (ledger.item(n).status == EnchantLedger.Status.RUNNING ? "carry on with its steps." : "gather what it needs."));
+        return continueEnchant();
+    }
+
+    /** The next job of the enchant item in hand. @return true when one was started; false when it waits or is over ({@link #enchantRun} is null then) */
+    private boolean continueEnchant() {
+        EnchantRun r = enchantRun;
+        if (r == null) return false;
+        if (job != null) return true;
+        if (!orders.gate()) return false;
+        OrderFlow flow = orders.flow;
+        EnchantLedger ledger = flow.enchantLedger();
+        if (ledger == null) {
+            enchantRun = null;
+            return false;
+        }
+        // The order ended, was cancelled before the item's first step, or is parked: what was gathered goes back; the journal stays (a park is not an end)
+        if (r.phase != EnchantPhase.PutBack && (!flow.running() || flow.cancelRequested() || flow.parkRequested())) {
+            r.leaving = true;
+            r.phase = EnchantPhase.PutBack;
+            step("enchanting: stopped, the order ended; next: put back what was gathered.");
+        }
+        EnchantLedger.Item item = ledger.item(r.n);
+        switch (r.phase) {
+            case Prepare -> {
+                return enchantPrepare(r, flow, ledger, item);
+            }
+            case Gather -> {
+                return enchantGather(r, flow, ledger);
+            }
+            case Trip -> {
+                return enchantStartTrip(r, flow, ledger, item);
+            }
+            case TopUp -> {
+                return enchantTopUp(r, flow, ledger);
+            }
+            case PutBack -> {
+                return enchantPutBack(r, flow, ledger);
+            }
+        }
+        return false;
+    }
+
+    /** The preflight ends the item before its first step: it is short with this reason and everything goes back. */
+    private boolean enchantRefuse(EnchantRun r, String code, String why) {
+        OrderFlow flow = orders.flow;
+        String safe = Codes.safe(code);
+        step("enchanting: item " + (r.n + 1) + " refused (" + safe + "): " + why + "; next: put back what was gathered.");
+        flow.enchantItemShort(r.unit, r.n, safe);
+        // A refusal for the order as a whole (the option went off, a module came on, the version differs) applies to every item still to make
+        if (safe.equals(Codes.MODULE_CONFLICT) || safe.equals(Codes.MC_MISMATCH) || safe.equals(Codes.MC_UNSUPPORTED)) flow.enchantAbandon(safe);
+        r.phase = EnchantPhase.PutBack;
+        return continueEnchant();
+    }
+
+    private enum AnvilReady { Ready, Wait, Started, None }
+
+    /** An anvil to work at: the one set or found, else one put down (from the stash, or the spare carried). The search is spread over ticks. */
+    private AnvilReady enchantAnvil() {
+        AnvilSpot.Spot spot = namingSpot();
+        AnvilFinder.Way way = spot == null || anvilSkip.contains(spot.pos()) || (AnvilSpot.here(spot) && Containers.isLoaded(spot.pos()) && !AnvilSpot.isAnvil(spot.pos()))
+            ? anvilWay() : AnvilFinder.Way.USE;
+        if (way == AnvilFinder.Way.WAIT) return AnvilReady.Wait;
+        spot = namingSpot();
+        if (way == AnvilFinder.Way.USE && spot != null) return AnvilReady.Ready;
+        if (way == AnvilFinder.Way.PLACE && startAnvilRun()) return AnvilReady.Started;
+        if (anvilRun != null) return AnvilReady.Wait;
+        return AnvilReady.None;
+    }
+
+    private boolean enchantPrepare(EnchantRun r, OrderFlow flow, EnchantLedger ledger, EnchantLedger.Item item) {
+        // The journal: the item is past its preflight; the carried stacks are looked for again by what they are
+        if (item.status == EnchantLedger.Status.RUNNING && item.real != null) {
+            r.real = item.real;
+            r.phase = EnchantPhase.Trip;
+            return continueEnchant();
+        }
+        if (item.status != EnchantLedger.Status.PENDING) {
+            // Ended already (a restart between the end and the bin): the lot is dropped
+            // (a journal that could not be resumed is here too: the item is short and what is carried goes back)
+            flow.enchantItemShort(r.unit, r.n, item.reason == null ? Codes.CANCELLED : item.reason);
+            r.phase = EnchantPhase.PutBack;
+            return continueEnchant();
+        }
+        EnchantOrder.ItemRef ref = ledger.block().items().get(r.n);
+        String problem = enchantProblemNow(ledger.block());
+        if (problem != null) return enchantRefuse(r, problem, "this bot can't make enchant items now");
+        if (r.pre == null) r.pre = new EnchantPreflight(ref, ledger.block().mc(), new HashSet<>(ledger.block().curse()), ledger, System::currentTimeMillis);
+        String stalled = r.pre.stalled();
+        if (stalled != null) return enchantRefuse(r, stalled, "the preflight made no headway");
+        flow.setPhase("enchanting " + (r.n + 1) + "/" + ledger.items().size() + ": preparing");
+
+        // The anvil first: one from the stash is put down before the spare is taken
+        if (!r.anvilChecked) {
+            switch (enchantAnvil()) {
+                case Wait -> {
+                    return false;
+                }
+                case Started -> {
+                    return true;
+                }
+                case None -> {
+                    return enchantRefuse(r, Codes.NO_ANVIL, "no anvil stands in the stash area and none could be put down");
+                }
+                case Ready -> r.anvilChecked = true;
+            }
+        }
+        List<EnchantItems.Held> owned = enchantOwned(r);
+        // A plan whose base the order's craft made (draft 3.4) uses one of the crafted stacks in hand: nothing is taken for it, and its slot counts in the carry formula
+        List<EnchantItems.Held> made = ref.plan().baseCrafted() ? enchantMadeBases() : List.of();
+        // The crafted bases of later items are already in the inventory, so they are simply not free (the server counts them as occupied: need + L); this item's own
+        // crafted base is added back, as the owned stacks are (EnchantCarry.liveCarry)
+        EnchantPreflight.Decision d = r.pre.decide(owned, made, enchantLiveCarry(owned) + EnchantCarry.ownBaseSlot(ref.plan().baseCrafted(), !made.isEmpty()));
+        if (d instanceof EnchantPreflight.Refuse f) return enchantRefuse(r, f.code(), f.why());
+        if (d instanceof EnchantPreflight.Ready ready) {
+            r.real = ready.real();
+            ledger.begin(r.n, ready.real());
+            flow.enchantChanged();
+            info("Enchanting: item {}/{} planned with the real items: {} steps, {} XP points.", r.n + 1, ledger.items().size(), ready.real().steps().size(), ready.real().points());
+            r.phase = EnchantPhase.Trip;
+            return continueEnchant();
+        }
+        EnchantPreflight.Gather g = (EnchantPreflight.Gather) d;
+        List<Order.Lot> lots = new ArrayList<>();
+        for (EnchantPreflight.Lot lot : g.lots()) lots.addAll(Order.expand(lot.key(), lot.count(), Math.max(1, stackOf(baseIdOf(lot.key())))));
+        r.bin = new Bin(new Unit(Unit.Kind.Bin, "", lots));
+        r.lastHave = 0;
+        r.afterGather = EnchantPhase.Prepare;
+        r.phase = EnchantPhase.Gather;
+        return continueEnchant();
+    }
+
+    private boolean enchantGather(EnchantRun r, OrderFlow flow, EnchantLedger ledger) {
+        Bin bin = r.bin;
+        if (bin == null) {
+            r.phase = r.afterGather;
+            return continueEnchant();
+        }
+        BinTracker.Need need = needOf(bin);
+        if (need == null) {
+            r.bin = null;
+            r.phase = r.afterGather;
+            return continueEnchant();
+        }
+        if (r.pre != null) {
+            int have = carriedHeld(bin).size();
+            r.pre.tripMade(have > r.lastHave);
+            r.lastHave = have;
+            String stalled = r.pre.stalled();
+            if (stalled != null && r.afterGather == EnchantPhase.Prepare) return enchantRefuse(r, stalled, "gathering made no headway");
+        }
+        flow.setPhase("enchanting " + (r.n + 1) + "/" + ledger.items().size() + ": gathering");
+        if (freeCarryCount() < 2) {
+            if (r.afterGather == EnchantPhase.Prepare) return enchantRefuse(r, Codes.INVENTORY_FULL, "no carry room to gather the materials");
+            // A top-up with no room goes on with what is held
+            r.bin = null;
+            r.phase = r.afterGather;
+            return continueEnchant();
+        }
+        Box source = binSourceFor(bin);
+        if (source != null) {
+            gatherLeft = bin.lots.size();
+            step("enchanting: gathering " + Recipes.pretty(Recipes.ns(baseIdOf(need.lot().key()))) + " (" + carriedHeld(bin).size() + "/" + bin.lots.size() + " stacks in hand); next: the anvil.");
+            return start(Job.Gather, source);
+        }
+        // Taking from a shulker puts it down: not while shulker handling is paused (tried again; the preflight's clock runs meanwhile)
+        if (shulkerPause() != null && findUnpackSource(bin) != null) return false;
+        if (freeCarryCount() >= 2 && startBinUnpack(bin, "enchanting: ")) return true;
+        if (r.afterGather != EnchantPhase.Prepare) {
+            // A top-up that finds nothing more: the trip waits for bottles (see TopUp)
+            r.bin = null;
+            r.phase = EnchantPhase.TopUp;
+            return continueEnchant();
+        }
+        String key = need.lot().key();
+        EnchantOrder.ItemPlan plan = ledger.block().items().get(r.n).plan();
+        String code = key.equals(plan.baseKey()) ? Codes.NO_BASE : key.equals(EnchantOrder.BOTTLE_KEY) ? Codes.XP_SHORT : ledger.anvilKeys().contains(key) ? Codes.NO_ANVIL : Codes.BOOKS_SHORT;
+        return enchantRefuse(r, code, "the stash has no more of what the order reserved (" + noSourceDetail(bin) + ")");
+    }
+
+    private boolean enchantStartTrip(EnchantRun r, OrderFlow flow, EnchantLedger ledger, EnchantLedger.Item item) {
+        EnchantOrder.ItemPlan real = r.real != null ? r.real : item.real;
+        if (real == null) {
+            r.phase = EnchantPhase.Prepare;
+            return continueEnchant();
+        }
+        // A running item is never failed by a module that came on (the contract's "cannot fail once started"): past its first step it waits, with the status
+        // saying which module to turn off, and goes on once it is off (a force-cancel still ends it at the next boundary). Before the first step it is refused.
+        String module = EnchantGuard.conflict(com.porter.qwertestash.manager.ProxySources.enabledModuleNames());
+        if (module != null) {
+            if (item.stepsDone < 1) return enchantEndShort(r, Codes.MODULE_CONFLICT, module + " is on");
+            if (EnchantGuard.pausesRunningItem(Codes.MODULE_CONFLICT, flow.forceCancelled())) {
+                flow.setPhase("waiting: turn off " + module);
+                return false;
+            }
+        }
+        // The anvil must stand: one that broke on the last pickup is replaced by the spare (or one found); none means the item can't go on
+        switch (enchantAnvil()) {
+            case Wait -> {
+                return false;
+            }
+            case Started -> {
+                return true;
+            }
+            case None -> {
+                String code = ledger.anvilsBroken() > 0 ? Codes.ANVIL_BROKE : Codes.NO_ANVIL;
+                return enchantEndShort(r, code, "no anvil to go on with");
+            }
+            case Ready -> {
+            }
+        }
+        EnchantOrder.ItemRef ref = ledger.block().items().get(r.n);
+        enchantYield = false;
+        EnchantTrip t;
+        try {
+            t = new EnchantTrip(enchantPort, ledger.block().mc(), ref.key(), real, item.stepsDone);
+        } catch (RuntimeException e) {
+            return enchantEndShort(r, Codes.MC_UNSUPPORTED, "no enchantment table for this Minecraft version");
+        }
+        enchantTrip = t;
+        markJobStart();
+        job = Job.Enchant;
+        target = null;
+        actions = 0;
+        tries = 0;
+        stepTicks = 0;
+        jobRunTicks = 0;
+        step = Step.Working;
+        resetJobState();
+        // The anvil may be well outside the stash area
+        jobStartedInside = false;
+        AnvilSpot.Spot spot = namingSpot();
+        enchantGoal = spot == null ? null : new GoalNear(spot.pos(), REACH_RANGE_SQ);
+        step("order: enchanting item " + (r.n + 1) + "/" + ledger.items().size() + " (" + (real.steps().size() - item.stepsDone) + " steps to go); next: put what is left back.");
+        return true;
+    }
+
+    private void tickEnchant() {
+        EnchantTrip t = enchantTrip;
+        EnchantRun r = enchantRun;
+        if (t == null || r == null) {
+            endEnchantJob();
+            return;
+        }
+        OrderFlow flow = orders.flow;
+        t.tick();
+        EnchantTrip.Stage st = t.stage();
+        if (st != EnchantTrip.Stage.Walk && st != EnchantTrip.Stage.Open) step = Step.Working;
+        // Between steps the bot may report (a force-cancel is acknowledged by the report); in the middle of one it may not
+        boolean mid = st == EnchantTrip.Stage.Place || st == EnchantTrip.Stage.Cost || st == EnchantTrip.Stage.Take || st == EnchantTrip.Stage.Settle || st == EnchantTrip.Stage.Retrieve;
+        flow.enchantAtBoundary(!mid);
+        EnchantLedger ledger = flow.enchantLedger();
+        if (ledger != null && t.waiting() != null) flow.setPhase("paused: " + t.waiting());
+        else if (ledger != null) flow.setPhase("enchanting " + (r.n + 1) + "/" + ledger.items().size() + ": step " + Math.min(t.step() + 1, Math.max(1, t.steps())) + "/" + t.steps());
+        if (t.done()) endEnchantTrip(t, r);
+    }
+
+    private void endEnchantJob() {
+        enchantTrip = null;
+        enchantGoal = null;
+        enchantYield = false;
+        activity.releaseOurPathing();
+        restoreRules();
+        job = null;
+        target = null;
+        step = Step.Walking;
+        wait = CONFIG.delayTicks;
+        orders.flow.enchantAtBoundary(true);
+    }
+
+    /** The trip is over: what it ended with decides what comes next (put the spare down, fetch bottles, put the leftovers back, or just go on). */
+    private void endEnchantTrip(EnchantTrip t, EnchantRun r) {
+        EnchantTrip.Outcome o = t.outcome();
+        OrderFlow flow = orders.flow;
+        EnchantLedger ledger = flow.enchantLedger();
+        int used = t.bottlesUsed();
+        endEnchantJob();
+        if (ledger == null || o == null) {
+            enchantRun = null;
+            return;
+        }
+        ledger.addBottles(used);
+        ledger.anvilBroke(o.anvilsBroken());
+        flow.enchantChanged();
+        debug(() -> "Enchant trip over: " + o.kind() + ", " + o.stepsDone() + " steps done, " + used + " bottles used.");
+        switch (o.kind()) {
+            case FINISHED -> {
+                EnchantItems.Held got = null;
+                if (o.spec() != null) for (EnchantItems.Held h : enchantCarriedStacks()) if (o.spec().matches(h) && !enchantKeptSlots().contains(h.slot())) got = h;
+                Item it = got == null ? null : inventoryItem(got.slot());
+                if (it == null) {
+                    enchantEndShort(r, Codes.WRONG_RESULT, "the finished item is not in the inventory");
+                    return;
+                }
+                // The finished stack is the bin's lot now, and it is the order's (never the sorter's) until the bin is built
+                stashHeld.put(got.slot(), it.id);
+                flow.enchantItemDone(r.unit, r.n, it.indexKey(), it.variant, got.ench());
+                info("Enchanting: item {}/{} is finished ({} bottles used so far).", r.n + 1, ledger.items().size(), ledger.bottlesUsed());
+                r.phase = EnchantPhase.PutBack;
+            }
+            case SHORT -> enchantEndShort(r, o.reason() == null ? Codes.WRONG_RESULT : o.reason(), "the anvil work could not be finished");
+            case FORCE_CANCELLED -> enchantEndShort(r, Codes.CANCELLED, "the order was cancelled");
+            case NEED_ANVIL -> {
+                // The spare is put down (or another found) and the trip is made again from the journal
+                // An anvil that is still standing but could not be reached or opened is given up on; one that broke is simply gone (its spot may be used again)
+                AnvilSpot.Spot was = namingSpot();
+                if (was != null && Containers.isLoaded(was.pos()) && AnvilSpot.isAnvil(was.pos())) anvilSkip.add(was.pos());
+                r.phase = EnchantPhase.Trip;
+            }
+            case NEED_BOTTLES -> {
+                r.topUpLevels = o.levels();
+                r.phase = EnchantPhase.TopUp;
+            }
+            case ABORTED -> {
+                // Everything is put back where the journal can find it again; the item is carried on when the bot may work
+                enchantRun = null;
+            }
+        }
+    }
+
+    /** The item ends short: its lot is left out of the bin and everything carried goes back (the finished steps' work is lost with it). */
+    private boolean enchantEndShort(EnchantRun r, String code, String why) {
+        String safe = Codes.safe(code);
+        step("enchanting: item " + (r.n + 1) + " is short (" + safe + "): " + why + "; next: put back what is carried.");
+        orders.flow.enchantItemShort(r.unit, r.n, safe);
+        r.phase = EnchantPhase.PutBack;
+        return continueEnchant();
+    }
+
+    /** More bottles when the held ones ran out before the level was reached (D3): allowed into the repair reserve; with none at all it waits and says so. */
+    private boolean enchantTopUp(EnchantRun r, OrderFlow flow, EnchantLedger ledger) {
+        if (tickCount < r.waitUntilTick) return false;
+        long missing = Math.max(1, Math.round(com.porter.qwerte.core.enchant.EnchantRules.points(r.topUpLevels) - xpPoints()));
+        int want = (int) Math.min(2048, (missing * 115 / 100 + com.porter.qwerte.core.enchant.EnchantRules.XP_PER_BOTTLE - 1) / com.porter.qwerte.core.enchant.EnchantRules.XP_PER_BOTTLE + 3);
+        long stash = stashBottlesNow();
+        long allow = EnchantLedger.topUpAllowance(stash, EnchantState.SHARED.bottlesReserved(), ledger.taken(EnchantOrder.BOTTLE_KEY));
+        // At most twice the item's planned bottles are ever fetched on top (a runaway Mending drain or a wrong plan can't empty the stash)
+        EnchantOrder.ItemPlan planned = ledger.item(r.n).real != null ? ledger.item(r.n).real : ledger.block().items().get(r.n).plan();
+        long cap = Math.max(0, 2L * planned.bottles() - ledger.topped(r.n));
+        String waitWhy = null;
+        if (freeCarryCount() < 2) waitWhy = "no free carry slot for more bottles";
+        else if (cap <= 0) waitWhy = "the top-up limit for this item (twice its planned bottles) is used";
+        else if (allow <= 0) waitWhy = "out of experience bottles (the stash has " + stash + ")";
+        if (waitWhy != null) {
+            // Wait with a status message and look again (it never fails for this)
+            flow.setPhase("waiting: " + waitWhy);
+            if (!waitWhy.equals(r.waitWhy) || tickCount - r.waitUntilTick > 20 * 60) step("enchanting: " + waitWhy + "; waiting, looking again in 30 s.");
+            r.waitWhy = waitWhy;
+            r.waitUntilTick = tickCount + 20 * 30;
+            return false;
+        }
+        r.waitWhy = null;
+        want = (int) Math.min(want, Math.min(allow, cap));
+        ledger.addTopped(r.n, want);
+        List<Order.Lot> lots = new ArrayList<>(Order.expand(EnchantOrder.BOTTLE_KEY, want, 64));
+        r.bin = new Bin(new Unit(Unit.Kind.Bin, "", lots));
+        r.lastHave = 0;
+        r.afterGather = EnchantPhase.Trip;
+        r.phase = EnchantPhase.Gather;
+        ledger.toppedUp();
+        flow.enchantChanged();
+        step("enchanting: out of bottles at step " + (ledger.item(r.n).stepsDone + 1) + "; taking " + want + " more from the stash (the repair reserve may be used).");
+        return continueEnchant();
+    }
+
+    /** The slots of what the item leaves: everything carried except the finished items that wait for their bins. */
+    private List<Integer> enchantLeft() {
+        Set<Integer> kept = enchantKeptSlots();
+        Set<Integer> held = orderCraftHeld();
+        List<Integer> out = new ArrayList<>();
+        for (int slot : looseCarried()) {
+            if (kept.contains(slot) || held.contains(slot) || pendingSourceShulker(slot)) continue;
+            out.add(slot);
+        }
+        return out;
+    }
+
+    private boolean enchantPutBack(EnchantRun r, OrderFlow flow, EnchantLedger ledger) {
+        // Source shulkers emptied for the item go back first, then what is left of the materials
+        if (handle == null && returnSpentShulker()) return true;
+        if (r.putBackTries < 3) {
+            List<Integer> left = enchantLeft();
+            if (!left.isEmpty()) {
+                r.putBackTries++;
+                if (r.putBackBefore.isEmpty()) {
+                    for (int slot : left) {
+                        Item it = inventoryItem(slot);
+                        if (it != null) r.putBackBefore.merge(it.indexKey(), (long) it.count, Long::sum);
+                    }
+                }
+                if (putBack(left, "enchanting: putting " + left.size() + " leftover stacks back")) return true;
+            }
+        }
+        // What went back is given back to the budget (the next item takes it again), what is still carried is not
+        Map<String, Long> still = new HashMap<>();
+        for (int slot : enchantLeft()) {
+            Item it = inventoryItem(slot);
+            if (it != null) still.merge(it.indexKey(), (long) it.count, Long::sum);
+        }
+        Map<String, Long> back = new HashMap<>();
+        for (var e : r.putBackBefore.entrySet()) {
+            long n = e.getValue() - Math.max(0, still.getOrDefault(e.getKey(), 0L));
+            ledger.refund(e.getKey(), n);
+            if (n > 0) back.put(e.getKey(), n);
+        }
+        // result.enchant.returned lists everything that went back to the stash, also when an item ended short and the order went on
+        ledger.addReturned(back);
+        enchantRun = null;
+        flow.enchantChanged();
+        return false;
+    }
+
+    private void resetEnchant() {
+        enchantRun = null;
+        enchantTrip = null;
+        gearStow = null;
+        enchantGoal = null;
+        enchantYield = false;
+        orders.flow.enchantAtBoundary(true);
+    }
+
+    /** The trip's view of the bot: the player inventory and the anvil window; walking and opening through the pathfinder, clicks through the inventory queue. */
+    private final EnchantTrip.Port enchantPort = new EnchantTrip.Port() {
+        private GearStow gear() {
+            GearStow g = gearStow;
+            if (g == null) {
+                Stash s = orders.st();
+                g = new GearStow(repairPort).seed(s == null || s.repairGear == null ? List.of() : Repair.parseLedger(s.repairGear));
+                gearStow = g;
+            }
+            return g;
+        }
+
+        @Override
+        public boolean busy() {
+            return StashSorter.this.busy();
+        }
+
+        @Override
+        public boolean abort() {
+            OrderFlow flow = orders.flow;
+            // A cancel before the first step ends the item at once; past it the cancel is queued (cancelRequested() is false then) and a force-cancel stops at a
+            // step boundary through forceCancelled(), never in the middle of a step. The order ending, a park and a module that took over abort at any time
+            if (enchantYield || !flow.running() || flow.parkRequested() || (flow.cancelRequested() && !flow.forceCancelled())) return true;
+            // A force-cancel heard while the bot only walks, stows or levels up (nothing in the anvil) ends the trip at once, so a leveler's pause does not hold it
+            EnchantTrip t = enchantTrip;
+            if (flow.forceCancelled() && t != null) {
+                EnchantTrip.Stage st = t.stage();
+                return (st == EnchantTrip.Stage.Start || st == EnchantTrip.Stage.Stow || st == EnchantTrip.Stage.Level) && anvilWindow() == null;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean forceCancelled() {
+            return orders.flow.forceCancelled();
+        }
+
+        @Override
+        public boolean controlled() {
+            return !orders.gate();
+        }
+
+        @Override
+        public boolean playerNear() {
+            return repairPlayerNear(false);
+        }
+
+        @Override
+        public double points() {
+            return xpPoints();
+        }
+
+        @Override
+        public int level() {
+            return StashSorter.xpLevel();
+        }
+
+        @Override
+        public int bottles() {
+            return repairPort.bottles();
+        }
+
+        @Override
+        public boolean bottleReady() {
+            return gear().bottleReady();
+        }
+
+        @Override
+        public boolean refill() {
+            return gear().refill();
+        }
+
+        @Override
+        public boolean throwBottle() {
+            // From the MAIN hand (the selected hotbar slot GearStow put the bottles in): the off hand, a totem included, is never touched. Looking straight down first
+            if (!gear().bottleReady()) return false;
+            float pitch = com.aquarius.Globals.BOT.getPitch();
+            float yaw = com.aquarius.Globals.BOT.getYaw();
+            if (Math.abs(pitch - 90f) > 0.5f) {
+                InputRequestFuture look = INPUTS.submit(InputRequest.builder().owner(StashSorter.this).yaw(yaw).pitch(90f).priority(REPAIR_INPUT_PRIORITY).build());
+                activity.noteInput(look, tickCount);
+                return false;
+            }
+            InputRequestFuture f = INPUTS.submit(InputRequest.builder().owner(StashSorter.this)
+                .input(Input.builder().rightClick(true).hand(org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand.MAIN_HAND)
+                    .clickTarget(ClickTarget.None.INSTANCE).clickRequiresRotation(true).build())
+                .yaw(yaw).pitch(90f).priority(REPAIR_INPUT_PRIORITY).build());
+            activity.noteInput(f, tickCount);
+            return f != InputRequestFuture.rejected;
+        }
+
+        @Override
+        public int orbsNear() {
+            return repairPort.orbsNear();
+        }
+
+        @Override
+        public int stowGear() {
+            return gear().stow();
+        }
+
+        @Override
+        public boolean restoreGear() {
+            GearStow g = gearStow;
+            if (g == null) return true;
+            if (!g.restore()) return false;
+            gearStow = null;
+            return true;
+        }
+
+        @Override
+        public List<EnchantItems.Held> carried() {
+            return enchantCarriedStacks();
+        }
+
+        @Override
+        public boolean arrived() {
+            return enchantGoal != null && arrivedAt(enchantGoal);
+        }
+
+        @Override
+        public boolean walk() {
+            AnvilSpot.Spot spot = namingSpot();
+            if (spot == null || !activity.mayRequest()) return false;
+            enchantGoal = requestWalk(spot.pos(), "the anvil");
+            wait = 10;
+            return true;
+        }
+
+        @Override
+        public boolean pathing() {
+            return activity.ownPathing();
+        }
+
+        @Override
+        public boolean anvilBlock() {
+            AnvilSpot.Spot spot = namingSpot();
+            // Not known to be gone while the chunk is not loaded
+            return spot != null && !anvilSkip.contains(spot.pos()) && (!Containers.isLoaded(spot.pos()) || AnvilSpot.isAnvil(spot.pos()));
+        }
+
+        @Override
+        public boolean anvilOpen() {
+            return anvilWindow() != null;
+        }
+
+        @Override
+        public boolean otherWindowOpen() {
+            return openContainerId() != 0 && ownsWindow() && anvilWindow() == null;
+        }
+
+        @Override
+        public boolean openPaused() {
+            return StashSorter.this.openPaused();
+        }
+
+        @Override
+        public void opened() {
+            if (CONFIG.containerDelay > 0) wait = Math.max(wait, openWait());
+        }
+
+        @Override
+        public boolean open() {
+            AnvilSpot.Spot spot = namingSpot();
+            if (spot == null || !activity.mayRequest() || activity.ownPathing()) return false;
+            openIdBefore = openContainerId();
+            openRequestedAt = lastOpenClickAt = System.currentTimeMillis();
+            foreignSinceClick = false;
+            requestOpen(spot.pos(), "the anvil");
+            wait = CONFIG.settleTicks;
+            return true;
+        }
+
+        @Override
+        public boolean place(int left, int right) {
+            Container c = anvilWindow();
+            if (c == null || holdingCursor() || inventoryItem(left) == null || inventoryItem(right) == null) return false;
+            if (Item.of(c.getItemStack(0)) != null || Item.of(c.getItemStack(1)) != null) return false;
+            anvilCostBefore = anvilCostSeen;
+            RequestFuture f = submit(new ClickItem(c.getContainerId(), toWindow(left, c), ClickItemAction.LEFT_CLICK), new ClickItem(c.getContainerId(), 0, ClickItemAction.LEFT_CLICK),
+                new ClickItem(c.getContainerId(), toWindow(right, c), ClickItemAction.LEFT_CLICK), new ClickItem(c.getContainerId(), 1, ClickItemAction.LEFT_CLICK));
+            if (f == RequestFuture.rejected) return false;
+            actions++;
+            wait = CONFIG.delayTicks;
+            return true;
+        }
+
+        @Override
+        public int leftCount() {
+            Container c = anvilWindow();
+            Item it = c == null ? null : Item.of(c.getItemStack(0));
+            return it == null ? 0 : it.count;
+        }
+
+        @Override
+        public int rightCount() {
+            Container c = anvilWindow();
+            Item it = c == null ? null : Item.of(c.getItemStack(1));
+            return it == null ? 0 : it.count;
+        }
+
+        @Override
+        public int cost() {
+            Container c = anvilWindow();
+            return c != null && anvilCostSeen > anvilCostBefore && anvilCostWindow == c.getContainerId() ? anvilCost : -1;
+        }
+
+        @Override
+        public EnchantItems.@Nullable Held result() {
+            Container c = anvilWindow();
+            return c == null ? null : enchantHeld(2, Item.of(c.getItemStack(2)));
+        }
+
+        @Override
+        public boolean take() {
+            Container c = anvilWindow();
+            if (c == null || holdingCursor()) return false;
+            int into = freeCarrySlot();
+            if (into == -1) return false;
+            // One atomic quick move: with two clicks an anvil that breaks on the pickup leaves the result on the cursor as the window closes. The game puts a quick-moved
+            // stack in the last empty inventory slot (hotbar 8 down to 0, then the main inventory 35 down to 9); only when that is a carry slot is it used, so
+            // the stack never lands in a slot the sorter does not carry in (else the two clicks into a chosen carry slot are made)
+            int quick = -1;
+            for (int i = 8; i >= 0 && quick < 0; i--) if (inventoryItem(i) == null) quick = i;
+            for (int i = 35; i >= 9 && quick < 0; i--) if (inventoryItem(i) == null) quick = i;
+            RequestFuture f = quick >= 0 && carry.contains(quick)
+                ? submit(new ShiftClick(c.getContainerId(), 2, ShiftClickItemAction.LEFT_CLICK))
+                : submit(new ClickItem(c.getContainerId(), 2, ClickItemAction.LEFT_CLICK), new ClickItem(c.getContainerId(), toWindow(into, c), ClickItemAction.LEFT_CLICK));
+            if (f == RequestFuture.rejected) return false;
+            actions++;
+            wait = CONFIG.delayTicks;
+            return true;
+        }
+
+        @Override
+        public boolean retrieve() {
+            Container c = anvilWindow();
+            if (c == null) return true;
+            if (holdingCursor()) return false;
+            for (int anvilSlot = 0; anvilSlot <= 1; anvilSlot++) {
+                if (Item.of(c.getItemStack(anvilSlot)) == null) continue;
+                int into = freeCarrySlot();
+                if (into == -1) return false;
+                RequestFuture f = submit(new ClickItem(c.getContainerId(), anvilSlot, ClickItemAction.LEFT_CLICK), new ClickItem(c.getContainerId(), toWindow(into, c), ClickItemAction.LEFT_CLICK));
+                if (f != RequestFuture.rejected) wait = CONFIG.delayTicks;
+                return false;
+            }
+            return true;
+        }
+
+        @Override
+        public boolean close() {
+            if (inventoryTrip || openContainerId() == 0 || !ownsWindow()) return true;
+            closeSafely();
+            return false;
+        }
+
+        @Override
+        public void stepDone(int step, int shown) {
+            OrderFlow flow = orders.flow;
+            EnchantLedger l = flow.enchantLedger();
+            EnchantRun r = enchantRun;
+            if (l == null || r == null) return;
+            l.stepDone(r.n, step);
+            flow.enchantChanged();
+            debug(() -> "Enchant step " + (step + 1) + " done, the anvil showed " + shown + " levels.");
+        }
+
+        @Override
+        public void say(String text) {
+            debug(() -> text);
         }
     };
 
@@ -12529,6 +13497,8 @@ public class StashSorter extends AbstractFieldModule {
     // Carry slots holding a crafted load for the bin in hand (until it is built) and the crafted surplus carried between bins (until the
     // order ends), by slot and the item id in it. Nothing puts them away meanwhile (craftReserved).
     private final Map<Integer, String> orderCraftLots = new ConcurrentHashMap<>(), orderCraftSurplus = new ConcurrentHashMap<>();
+    /** Slots of made bases that the enchant items did not use (released with their bin, draft 3.4): surplus of the craft, but never packed into a shulker either. */
+    private final Set<Integer> orderReleasedBases = ConcurrentHashMap.newKeySet();
     // The stacks set aside for an order that ended, until they are put back (the final report waits for that, a little)
     private final Map<Integer, String> orderReturnWatch = new ConcurrentHashMap<>();
     // Grid fills made for craft orders in the last hour
@@ -12758,6 +13728,7 @@ public class StashSorter extends AbstractFieldModule {
         if (!orders.flow.running()) {
             orderCraftLots.clear();
             orderCraftSurplus.clear();
+            orderReleasedBases.clear();
             return Set.of();
         }
         // A crafted load is kept for as long as a bin still to build has it; one whose bin was skipped or given up on is let go
@@ -12770,7 +13741,8 @@ public class StashSorter extends AbstractFieldModule {
         }
         orderCraftLots.entrySet().removeIf(e -> {
             Item it = inventoryItem(e.getKey());
-            if (it == null || !it.id.equals(e.getValue())) return true;
+            // A crafted load is a plain stack: a slot that now holds something with components (an enchanted result in the slot a base vacated) is no longer one
+            if (it == null || !it.id.equals(e.getValue()) || !freshPlain(it)) return true;
             for (int i = 0; i < wanted.size(); i++) {
                 Order.Lot lot = wanted.get(i);
                 if (Recipes.ns(lot.key()).equals("minecraft:" + it.id) && lot.count() == it.count) {
@@ -12783,6 +13755,10 @@ public class StashSorter extends AbstractFieldModule {
         orderCraftSurplus.entrySet().removeIf(e -> {
             Item it = inventoryItem(e.getKey());
             return it == null || !it.id.equals(e.getValue());
+        });
+        orderReleasedBases.removeIf(slot -> {
+            Item it = inventoryItem(slot);
+            return it == null || !orderCraftSurplus.containsKey(slot) || !freshPlain(it);
         });
         Set<Integer> out = new HashSet<>(orderCraftLots.keySet());
         out.addAll(orderCraftSurplus.keySet());
@@ -15666,6 +16642,8 @@ public class StashSorter extends AbstractFieldModule {
         if (h != null && h.phase == ChestPhase.Gather) return h.bin;
         PassRun ps = pass;
         if (ps != null && ps.phase == PassPhase.Items) return ps.bin;
+        EnchantRun e = enchantRun;
+        if (e != null && e.phase == EnchantPhase.Gather) return e.bin;
         return null;
     }
 
@@ -16101,6 +17079,84 @@ public class StashSorter extends AbstractFieldModule {
         @Override
         public Map<String, Long> craftCarried() {
             return orderSurplusCounts();
+        }
+
+        @Override
+        public void craftBasesReleased(List<Order.Lot> bases) {
+            // Bases the enchant items did not use (ENCHANT-CONTRACT draft 3.4): their stacks stop being a bin's loads and are surplus of the craft, so they are put
+            // back with the order's leftovers and counted in result.craft.returned (matched slot by slot, like CraftResume)
+            // Only fresh plain stacks are claimed (a stale load whose base was used up finds no stack and is ignored)
+            Map<String, Integer> released = new HashMap<>();
+            for (Order.Lot lot : bases) released.merge(Recipes.ns(lot.key()), 1, Integer::sum);
+            List<BaseSlots.Stack> crafted = new ArrayList<>();
+            for (var e : new ArrayList<>(orderCraftLots.entrySet())) {
+                Item it = inventoryItem(e.getKey());
+                if (it != null && it.id.equals(e.getValue()) && !it.isShulker()) crafted.add(new BaseSlots.Stack(e.getKey(), "minecraft:" + it.id, freshPlain(it)));
+            }
+            for (int slot : BaseSlots.claim(released, crafted)) {
+                Item it = inventoryItem(slot);
+                if (it == null) continue;
+                orderCraftLots.remove(slot);
+                orderCraftSurplus.put(slot, it.id);
+                orderReleasedBases.add(slot);
+            }
+            CraftLedger saving = orders.flow.craftLedger();
+            if (saving != null) {
+                saving.setSurplus(orderSurplusCounts());
+                orders.flow.craftLedgerChanged();
+            }
+        }
+
+        @Override
+        public void craftBaseUsed() {
+            // A base was used up by a finished item: the slot it vacated may now hold the enchanted result, so claims on stale slots are dropped (orderCraftHeld prunes
+            // every crafted slot that is not a plain stack any more)
+            orderCraftHeld();
+        }
+
+        // Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0)
+
+        @Override
+        public @Nullable String enchantProblem(Order order) {
+            return enchantProblemNow(order.enchant);
+        }
+
+        @Override
+        public void enchantResumed(List<Unit> units) {
+            // After a restart the finished enchant items that wait for their bins are the order's again (never the sorter's): their slots are registered as held
+            for (Unit u : units) {
+                if (u.built || u.have) continue;
+                for (Order.Lot lot : u.lots) {
+                    if (!lot.crafted() || lot.key().indexOf('#') < 0) continue;
+                    for (int slot : carry) {
+                        Item it = inventoryItem(slot);
+                        if (it != null && it.indexKey().equals(lot.key()) && !stashHeld.containsKey(slot)) {
+                            stashHeld.put(slot, it.id);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        @Override
+        public Map<String, Long> enchantCarried() {
+            return enchantCarriedCounts();
+        }
+
+        @Override
+        public void enchantWatch(Map<String, Long> carried) {
+            // The put-back is the leftover trip's; nothing to set up
+        }
+
+        @Override
+        public boolean enchantReturning() {
+            return !orderLeftoverTried && !enchantCarriedCounts().isEmpty();
+        }
+
+        @Override
+        public Map<String, Long> enchantStillCarried() {
+            return enchantCarriedCounts();
         }
 
         @Override

@@ -170,6 +170,20 @@ public final class ProxySources {
         return out;
     }
 
+    /**
+     * The simple class names of the proxy's enabled modules ({@code Enchanter}, {@code KitMaker}...), for the enchant guard; empty when the list can't be
+     * read (the guard then finds no conflict, as the repair code finds no module).
+     */
+    public static List<String> enabledModuleNames() {
+        List<String> out = new ArrayList<>();
+        guard(() -> {
+            for (Module m : MODULE.getModules()) guard(() -> {
+                if (m.isEnabled()) out.add(m.getClass().getSimpleName());
+            });
+        });
+        return out;
+    }
+
     static JsonArray plugins() {
         JsonArray out = new JsonArray();
         guard(() -> {

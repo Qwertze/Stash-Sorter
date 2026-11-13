@@ -92,6 +92,8 @@ public final class StockPlanner {
             if (l.type().equals(Order.CRAFT)) continue;
             // Kit lines (1.16.0) are planned by KitPlanner, not from the stash as items
             if (l.type().equals(Order.KIT)) continue;
+            // Enchant lines (1.19.0) are loads made at the anvil before their bin (the lots come in as craftLots), not taken from the stash as items
+            if (l.type().equals(Order.ENCHANT)) continue;
             if ((l.type().equals(Order.SHULKER) || isShulkerKey(l.key())) && shulkerUnits.size() + emptyUnits.size() + (long) l.count() > Order.MAX_BINS) {
                 // Checked before anything is counted out: a line of millions would never finish
                 return new Plan(List.of(), notes, "too big: that is more than " + Order.MAX_BINS + " shulkers");

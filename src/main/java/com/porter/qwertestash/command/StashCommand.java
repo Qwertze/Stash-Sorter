@@ -370,6 +370,24 @@ public class StashCommand extends Command {
                 .then(literal("status").executes(c -> {
                     c.getSource().getEmbed().title("Repair Status").description(String.join("\n", MODULE.get(StashSorter.class).repairStatus())).primaryColor();
                 })))
+            .then(literal("enchantorders")
+                .executes(c -> {
+                    c.getSource().getEmbed().title("Enchant Orders " + toggleStrCaps(CONFIG.enchantOrders))
+                        .description(CONFIG.enchantOrders
+                            ? "Orders with enchant lines are taken. The claim says so only with the Stash Manager on, a supported Minecraft version and none of the proxy's Enchanter, KitMaker or OrderFiller on."
+                            : "Orders with enchant lines are not taken: the server will not give this bot one. `stash enchantorders on` turns them on.").primaryColor();
+                })
+                .then(argument("toggle", toggle()).executes(c -> {
+                    if (c.getSource().getSource() instanceof com.porter.qwertestash.manager.DashboardCommandSource) {
+                        c.getSource().getEmbed().title("Enchant Orders").description("Turned on or off only in game or in the proxy terminal, not from the dashboard.").errorColor();
+                        return;
+                    }
+                    CONFIG.enchantOrders = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Enchant Orders " + toggleStrCaps(CONFIG.enchantOrders))
+                        .description(CONFIG.enchantOrders
+                            ? "Orders with enchant lines are taken: the bot takes the base, books, an anvil spare and bottles from the stash, levels up and uses an anvil. It moves its own Mending gear off while it throws bottles."
+                            : "Orders with enchant lines are not taken.").primaryColor();
+                })))
             .then(literal("pearl")
                 .then(literal("travel").then(argument("toggle", toggle()).executes(c -> {
                     if (c.getSource().getSource() instanceof com.porter.qwertestash.manager.DashboardCommandSource) {

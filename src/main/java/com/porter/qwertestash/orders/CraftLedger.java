@@ -30,6 +30,8 @@ public final class CraftLedger {
     private final Map<String, Long> take = new LinkedHashMap<>(), budget = new LinkedHashMap<>(), surplus = new LinkedHashMap<>(), used = new LinkedHashMap<>(),
         returned = new LinkedHashMap<>();
     private final Map<String, Long> wanted = new LinkedHashMap<>(), made = new LinkedHashMap<>();
+    /** Per key: how many of the wanted are bases for enchant plans (ENCHANT-CONTRACT draft 3.4): made and used, never delivered. */
+    private final Map<String, Long> forEnchant = new LinkedHashMap<>();
     /** Per key: how many are short and the first reason (a later one for the same key is added to the count only). */
     private final Map<String, Long> shortCount = new LinkedHashMap<>();
     private final Map<String, String> shortReason = new LinkedHashMap<>();
@@ -61,6 +63,7 @@ public final class CraftLedger {
             budget.merge(Recipes.ns(t.id()), (long) t.count(), Long::sum);
         }
         for (Order.Line l : craftLines) wanted.merge(l.key(), (long) l.count(), Long::sum);
+        for (Order.Qty q : craft.forEnchant()) if (q.count() > 0) forEnchant.merge(q.id(), (long) q.count(), Long::sum);
         this.plannedFills = (int) Math.min(Integer.MAX_VALUE, craft.stepFills());
     }
 
@@ -191,8 +194,10 @@ public final class CraftLedger {
     public void setDelivered(Map<String, Integer> delivered, Map<String, Integer> requested) {
         lost.clear();
         for (var e : wanted.entrySet()) {
-            long m = Math.min(e.getValue(), made.getOrDefault(e.getKey(), 0L));
-            long itemPart = Math.max(0, requested.getOrDefault(e.getKey(), 0) - e.getValue());
+            // The bases made for enchant plans are never delivered: only the ordered part of a line can be lost on the way to a shulker
+            long ordered = Math.max(0, e.getValue() - forEnchant.getOrDefault(e.getKey(), 0L));
+            long m = Math.min(ordered, made.getOrDefault(e.getKey(), 0L));
+            long itemPart = Math.max(0, requested.getOrDefault(e.getKey(), 0) - ordered);
             long got = Math.min(m, Math.max(0, delivered.getOrDefault(e.getKey(), 0) - itemPart));
             if (m - got > 0) lost.put(e.getKey(), m - got);
         }

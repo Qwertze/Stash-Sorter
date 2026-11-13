@@ -17,7 +17,7 @@ import java.util.TreeMap;
  * PROTOCOL.md specifies, so the website's preview and the bot agree.
  */
 public final class Order {
-    public static final String ITEM = "item", SHULKER = "shulker", CRAFT = "craft", KIT = "kit";
+    public static final String ITEM = "item", SHULKER = "shulker", CRAFT = "craft", KIT = "kit", ENCHANT = "enchant";
     /** The most steps and take entries a craft block may have (CRAFT-CONTRACT.md "Orders"). */
     public static final int MAX_CRAFT_STEPS = 64, MAX_CRAFT_TAKE = 64;
     /** A line asking for more than this is not read (it shows up as undelivered); the server caps them as well. */
@@ -43,6 +43,36 @@ public final class Order {
     public record Lot(String key, @Nullable String variant, int count, int craftState) {
         /** An ordinary load, taken from the stash; a load still to be crafted (not in the stash); a load that was crafted (in hand, not in the stash). */
         public static final int NONE = 0, PENDING = 1, CRAFTED = 2;
+        /**
+         * An item still to be enchanted (1.19.0, ENCHANT-CONTRACT v1.0): not in the stash as such, made at the anvil before its bin is built. Its variant is
+         * {@link #enchantVariant}, the number of the item in the order's enchant ledger; once it is finished the lot is the finished stack (state CRAFTED).
+         */
+        public static final int ENCHANT = 3;
+
+        /** The variant text of an enchant lot: {@code enchant:<item number>}. */
+        public static String enchantVariant(int n) {
+            return "enchant:" + n;
+        }
+
+        /** The item number of an enchant lot, or -1. */
+        public int enchantItem() {
+            if (craftState != ENCHANT || variant == null || !variant.startsWith("enchant:")) return -1;
+            try {
+                return Integer.parseInt(variant.substring("enchant:".length()));
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+        }
+
+        /** A load that is an item still to be enchanted. */
+        public boolean enchant() {
+            return craftState == ENCHANT;
+        }
+
+        /** The load of the enchanted item number {@code n} of a line (one item, one slot). */
+        public static Lot toEnchant(String key, int n) {
+            return new Lot(key, enchantVariant(n), 1, ENCHANT);
+        }
 
         public Lot(String key, @Nullable String variant, int count) {
             this(key, variant, count, NONE);
@@ -55,6 +85,22 @@ public final class Order {
         /** A load of a craft line, still to be made before its bin is built. */
         public static Lot toCraft(String key, int count) {
             return new Lot(key, null, count, PENDING);
+        }
+
+        /**
+         * The variant text of a load that is a base for an enchant plan (1.19.0, ENCHANT-CONTRACT draft 3.4): made by the order's craft block, kept in hand for the enchant
+         * run and never put in a shulker. It lives in the last bin that has enchant loads until that bin is built (then {@link OrderFlow} lets it go).
+         */
+        public static final String BASE_VARIANT = "enchantbase";
+
+        /** A load of a craft line that is a base for the enchant plans, still to be made. */
+        public static Lot toBase(String key, int count) {
+            return new Lot(key, BASE_VARIANT, count, PENDING);
+        }
+
+        /** A base for the enchant plans (still to be made, or made and waiting in hand): never delivered. */
+        public boolean base() {
+            return BASE_VARIANT.equals(variant) && (craftState == PENDING || craftState == CRAFTED);
         }
 
         /** The load of a craft line is to be made before its bin is built. */
@@ -95,7 +141,13 @@ public final class Order {
      * never more of an id is taken from the stash than it says. {@code malformed} is a block that is there but could not be read: every
      * craft line is then short ({@code recipe_mismatch}).
      */
-    public record Craft(int v, String mc, String recipes, List<Qty> lines, List<CraftStep> steps, List<Qty> take, List<Qty> leftovers, int fills, boolean malformed) {
+    public record Craft(int v, String mc, String recipes, List<Qty> lines, List<CraftStep> steps, List<Qty> take, List<Qty> leftovers, int fills, boolean malformed,
+                        List<Qty> forEnchant) {
+        /** A block without bases for enchant plans (every block before ENCHANT-CONTRACT draft 3.4). */
+        public Craft(int v, String mc, String recipes, List<Qty> lines, List<CraftStep> steps, List<Qty> take, List<Qty> leftovers, int fills, boolean malformed) {
+            this(v, mc, recipes, lines, steps, take, leftovers, fills, malformed, List.of());
+        }
+
         public static Craft unreadable() {
             return new Craft(0, "", "", List.of(), List.of(), List.of(), List.of(), 0, true);
         }
@@ -118,6 +170,8 @@ public final class Order {
     public final @Nullable Craft craft;
     /** The kit block (1.16.0, KIT-CONTRACT v2), or null when the order has no kit lines. */
     public final KitOrder.@Nullable Snapshot kit;
+    /** The enchant block (1.19.0, ENCHANT-CONTRACT v1.0), or null when the order has no enchant lines; {@link EnchantOrder.Block#unreadable()} when it is there but wrong. */
+    public final EnchantOrder.@Nullable Block enchant;
     /** A kit restock job (1.16.0): never from the server, never reported; its kit is filed by the sorter instead of delivered. */
     public boolean restock;
     /** For a restock job: it tops up an incomplete copy in the chain target (else it builds a new copy from an empty shulker). */
@@ -140,6 +194,12 @@ public final class Order {
     }
 
     public Order(String id, List<Line> lines, @Nullable ShulkerNames names, boolean repairAll, @Nullable Craft craft, KitOrder.@Nullable Snapshot kit) {
+        this(id, lines, names, repairAll, craft, kit, null);
+    }
+
+    public Order(String id, List<Line> lines, @Nullable ShulkerNames names, boolean repairAll, @Nullable Craft craft, KitOrder.@Nullable Snapshot kit,
+                 EnchantOrder.@Nullable Block enchant) {
+        this.enchant = enchant;
         this.kit = kit;
         this.id = id;
         this.lines = lines;
@@ -162,6 +222,18 @@ public final class Order {
         return out;
     }
 
+    /** The enchant lines, in line order. */
+    public List<Line> enchantLines() {
+        List<Line> out = new ArrayList<>();
+        for (Line l : lines) if (l.type().equals(ENCHANT)) out.add(l);
+        return out;
+    }
+
+    public boolean hasEnchant() {
+        for (Line l : lines) if (l.type().equals(ENCHANT)) return true;
+        return false;
+    }
+
     public boolean hasKit() {
         for (Line l : lines) if (l.type().equals(KIT)) return true;
         return false;
@@ -169,7 +241,22 @@ public final class Order {
 
     public boolean hasCraft() {
         for (Line l : lines) if (l.type().equals(CRAFT)) return true;
-        return false;
+        return hasEnchantBases();
+    }
+
+    /** The craft block makes bases for enchant plans (ENCHANT-CONTRACT draft 3.4 {@code craft.forEnchant}): made, used by the enchant run, never delivered. */
+    public boolean hasEnchantBases() {
+        return craft != null && !craft.malformed() && !craft.forEnchant().isEmpty();
+    }
+
+    /**
+     * What the craft engine makes for this order: the craft lines (delivered), then the bases for the enchant plans (not delivered), as the server's
+     * {@code craft.lines} merge them per key. The craft ledger counts what was wanted and made from this.
+     */
+    public List<Line> craftWanted() {
+        List<Line> out = new ArrayList<>(craftLines());
+        if (hasEnchantBases()) for (Qty q : craft.forEnchant()) if (q.count() > 0) out.add(new Line(CRAFT, q.id(), q.count()));
+        return out;
     }
 
     /** An item line is wanted for repair when the order says repair all or the line asks for it. Shulker lines never are. */
@@ -218,7 +305,7 @@ public final class Order {
                 String type = l.get("type").getAsString();
                 String key = l.get("key").getAsString();
                 int count = l.get("count").getAsInt();
-                if ((type.equals(ITEM) || type.equals(SHULKER) || type.equals(CRAFT) || type.equals(KIT)) && !key.isEmpty() && count >= 1 && count <= MAX_LINE_COUNT) lines.add(new Line(type, key, count, type.equals(ITEM) && flag(l, "repair")));
+                if ((type.equals(ITEM) || type.equals(SHULKER) || type.equals(CRAFT) || type.equals(KIT) || type.equals(ENCHANT)) && !key.isEmpty() && count >= 1 && count <= MAX_LINE_COUNT) lines.add(new Line(type, key, count, type.equals(ITEM) && flag(l, "repair")));
             } catch (RuntimeException ex) {
                 // A broken line is left out and shows up as undelivered
             }
@@ -230,7 +317,16 @@ public final class Order {
             return null;
         }
         // A broken names field is read as no names: naming never fails an order
-        return id.isEmpty() || lines.isEmpty() ? null : new Order(id, lines, ShulkerNames.parse(o.get("names")), flag(o, "repairAll"), parseCraft(o.get("craft")), kitOf(o, lines));
+        return id.isEmpty() || lines.isEmpty() ? null : new Order(id, lines, ShulkerNames.parse(o.get("names")), flag(o, "repairAll"), parseCraft(o.get("craft")), kitOf(o, lines), enchantOf(o, lines));
+    }
+
+    /** The enchant block; an order with enchant lines and no readable block gets the unreadable marker (every enchant item is then short). */
+    private static EnchantOrder.@Nullable Block enchantOf(JsonObject o, List<Line> lines) {
+        EnchantOrder.Block b = EnchantOrder.parse(o.get("enchant"));
+        if (b == null) {
+            for (Line l : lines) if (l.type().equals(ENCHANT)) return EnchantOrder.Block.unreadable();
+        }
+        return b;
     }
 
     /** The kit block; an order with kit lines and no readable block gets the unreadable marker (every kit is then short). */
@@ -262,7 +358,19 @@ public final class Order {
                     qtys(so.get("inputs"), "id", 64)));
             }
             int fills = c.get("fills").getAsInt();
-            return new Craft(v, mc, recipes, lines, steps, take, leftovers, fills, false);
+            // ENCHANT-CONTRACT draft 3.4: how many of each craft line are bases for enchant plans. Optional; there but wrong makes the whole block unreadable
+            List<Qty> forEnchant = List.of();
+            JsonElement fe = c.get("forEnchant");
+            if (fe != null && !fe.isJsonNull()) {
+                forEnchant = qtys(fe, "key", EnchantOrder.MAX_ITEMS);
+                long total = 0;
+                for (Qty q : forEnchant) {
+                    if (q.count() < 1 || !CraftOrder.plain(q.id())) return Craft.unreadable();
+                    total += q.count();
+                }
+                if (total > EnchantOrder.MAX_ITEMS) return Craft.unreadable();
+            }
+            return new Craft(v, mc, recipes, lines, steps, take, leftovers, fills, false, forEnchant);
         } catch (RuntimeException ex) {
             return Craft.unreadable();
         }

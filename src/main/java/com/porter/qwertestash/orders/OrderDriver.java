@@ -96,6 +96,17 @@ public final class OrderDriver {
         craftOrdersWhen = supplier;
     }
 
+    private volatile java.util.function.@Nullable BooleanSupplier enchantOrdersWhen;
+
+    /**
+     * Whether the claim carries {@code enchantOrders: 1} (1.19.0, ENCHANT-CONTRACT v1.0): asked when the claim is made. Only a bot with the option on, a supported
+     * Minecraft version and none of the proxy's Enchanter, KitMaker or OrderFiller on claims it, or one that holds an enchant order. The server also needs
+     * {@code player} in the claim, which every claim carries.
+     */
+    public void enchantOrdersWhen(java.util.function.BooleanSupplier supplier) {
+        enchantOrdersWhen = supplier;
+    }
+
     /** A new session (the bot reconnected): the order is parked, what the server said before is stale. */
     public void reset() {
         pendingOrders = 0;
@@ -158,6 +169,8 @@ public final class OrderDriver {
             if (report.terminal()) flow.ack(report.id());
             return null;
         }
+        // A force-cancel of an enchant order is acknowledged by the bot's next report: while a cancel is queued the bot reports only between steps
+        if (report != null && !report.terminal() && flow.holdStatus()) return null;
         if (report != null) {
             String sig = report.id() + "|" + report.status() + "|" + report.phase() + "|" + report.done() + "|" + report.message();
             if (!sig.equals(lastStatusSig) && (report.terminal() || now - lastStatusAt >= STATUS_MS)) {
@@ -183,7 +196,7 @@ public final class OrderDriver {
                     // 409: the order is already finished or moved on, nothing more to say about it. One still being worked on is stopped
                     // at the next safe point (the website gave up on it, say) instead of being carried out for nobody
                     if (code != 200 && code != 409) return false;
-                    if (code == 409 && !report.terminal() && flow.cancel(report.id())) {
+                    if (code == 409 && !report.terminal() && flow.cancelHard(report.id())) {
                         listener.event("warn", "Order " + shortId(report.id()) + " was finished on the website, stopping");
                     }
                     minimalFor = null;
@@ -210,6 +223,9 @@ public final class OrderDriver {
             // 1.16.0 (KIT-CONTRACT v2 "Claim"): this bot can build kits (kit sorting and kit orders on, the type table loaded), or it holds a kit order
             java.util.function.BooleanSupplier kitAsk = kitOrdersWhen;
             if (kitAsk != null && kitAsk.getAsBoolean()) o.addProperty("kitOrders", 1);
+            // 1.19.0 (ENCHANT-CONTRACT v1.0 "Heartbeat, claim and capability"): this bot makes enchant items
+            java.util.function.BooleanSupplier enchantAsk = enchantOrdersWhen;
+            if (enchantAsk != null && enchantAsk.getAsBoolean()) o.addProperty("enchantOrders", 1);
             return new Request("/api/v1/orders/claim", bytes(o, player), (code, body) -> {
                 if (code == 204) {
                     pendingOrders = 0;
@@ -318,7 +334,7 @@ public final class OrderDriver {
         o.add("progress", progress);
         o.addProperty("message", clamp(r.message(), MESSAGE_MAX));
         // A cancelled craft order still reports what it made and gave back (result.craft); other cancelled orders send no result
-        if (r.terminal() && (!r.status().equals("cancelled") || r.craft() != null || r.kit() != null)) {
+        if (r.terminal() && (!r.status().equals("cancelled") || r.craft() != null || r.kit() != null || r.enchant() != null)) {
             JsonObject result = new JsonObject();
             result.addProperty("shulkers", Math.max(0, r.shulkers()));
             JsonArray lines = new JsonArray();
@@ -337,6 +353,8 @@ public final class OrderDriver {
             if (r.craft() != null) result.add("craft", r.craft());
             // Only when the order had kit lines (KIT-CONTRACT v2): template ids, item keys, counts and reason codes only
             if (r.kit() != null) result.add("kit", r.kit());
+            // Only when the order had enchant lines (ENCHANT-CONTRACT v1.0): item keys, enchantment ids, counts and reason codes only; never a position
+            if (r.enchant() != null) result.add("enchant", r.enchant());
             o.add("result", result);
         }
         return o;

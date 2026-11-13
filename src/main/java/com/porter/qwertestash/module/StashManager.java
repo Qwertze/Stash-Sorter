@@ -885,7 +885,8 @@ public class StashManager extends Module {
         ManagerIndex.RepairHb repairNow = repairBody(built);
         PearlTripDriver.ManagerBody pearlBody = pearlDriver.body();
         ManagerIndex.PearlHb pearlNow = new ManagerIndex.PearlHb(pearlBody.object(), pearlBody.clear());
-        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash(), kitsBody(built), craftNow, areaNow, repairNow, pearlNow), key, (code, body) -> {
+        ManagerIndex.EnchantHb enchantNow = enchantBody();
+        send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash(), kitsBody(built), craftNow, areaNow, repairNow, pearlNow, enchantNow), key, (code, body) -> {
             if (ManagerIndex.craftShapeRefused(code, body, craftSentOrders, craftLegacy)) {
                 // Not a failure of the server: it does not know the newer fields. Sent again at once in the 1.15.0 shape, and from now on
                 craftLegacy = true;
@@ -899,6 +900,8 @@ public class StashManager extends Module {
             heartbeatSeen = true;
             driver().onHeartbeat(body);
             pearlReplied(body);
+            // The bottles open enchant orders reserve: repair passes keep their hands off them (ENCHANT-CONTRACT v1.0, TL4-B1)
+            com.porter.qwertestash.orders.EnchantState.SHARED.onHeartbeat(body);
             sentSig = sig;
             if (done >= 0 && rescanDone == done) {
                 rescanDone = -1;
@@ -1317,6 +1320,14 @@ public class StashManager extends Module {
                 ManagerIndex.KitCaps caps = kitCaps();
                 return caps != null && (caps.enabled() || sorter().orderFlow().kitResult() != null);
             });
+            // The claim carries enchantOrders: 1 for a bot that makes enchant items (option on, supported version, no conflicting proxy module);
+            // an enchant order held over a restart is claimed with it as well, or the server fails it as "downgraded"
+            d.enchantOrdersWhen(() -> {
+                OrderFlow f = sorter().orderFlow();
+                if (f.enchantLedger() != null || f.resumeHasEnchant()) return true;
+                return CONFIG.enchantOrders && com.porter.qwerte.core.enchant.McData.SUPPORTED.contains(mcVersion())
+                    && com.porter.qwertestash.orders.EnchantGuard.conflict(com.porter.qwertestash.manager.ProxySources.enabledModuleNames()) == null;
+            });
             driver = d;
         }
         return d;
@@ -1505,6 +1516,34 @@ public class StashManager extends Module {
         } catch (RuntimeException e) {
             building.set(false);
         }
+    }
+
+    // Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0): the heartbeat's capability block
+
+    private boolean enchantAnnounced;
+
+    /**
+     * The {@code enchant} key of the heartbeat. With the option on and a supported Minecraft version it says whether this bot takes enchant orders now ({@code enabled}
+     * is false while the proxy's Enchanter, KitMaker or OrderFiller is on) and how many carry slots are free once the gear is stowed. Turning the option off sends one
+     * explicit null (the server forgets the capability); a bot that never had it on sends nothing. Tick thread.
+     */
+    private ManagerIndex.@Nullable EnchantHb enchantBody() {
+        String mc = mcVersion();
+        boolean supported = com.porter.qwerte.core.enchant.McData.SUPPORTED.contains(mc);
+        if (!CONFIG.enchantOrders || !supported) {
+            if (!enchantAnnounced) return null;
+            enchantAnnounced = false;
+            return new ManagerIndex.EnchantHb(false, null, -1, true);
+        }
+        enchantAnnounced = true;
+        boolean free = com.porter.qwertestash.orders.EnchantGuard.conflict(com.porter.qwertestash.manager.ProxySources.enabledModuleNames()) == null;
+        int carry;
+        try {
+            carry = sorter().enchantCarry();
+        } catch (RuntimeException e) {
+            carry = -1;
+        }
+        return new ManagerIndex.EnchantHb(free, mc, carry, false);
     }
 
     private static String mcVersion() {

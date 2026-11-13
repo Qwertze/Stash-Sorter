@@ -90,6 +90,12 @@ public class StashConfig {
      * bot. Off by default: a trip moves the bot. Needs the Stash Manager on and PearlDrop in the proxy (the way back needs a pearl thrown at home).
      */
     public boolean pearlTravel = false;
+    /**
+     * Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0): this bot may carry out orders with enchant lines: it takes the base, the books and the bottles from the
+     * stash, levels up with the bottles and does the anvil work. Off by default: it throws bottles, moves its gear and uses an anvil. The claim carries
+     * {@code enchantOrders: 1} only with this on, the Stash Manager on, a supported Minecraft version and none of the proxy's Enchanter, KitMaker or OrderFiller on.
+     */
+    public boolean enchantOrders = false;
     /** Pearl loader (1.18.0): with PearlPlus's auto load on, report the pearls of the travellers the owner approved to the Stash Manager server. */
     public boolean pearlLoader = true;
     /** Seconds a pearl that is not seen is still believed to be there after its owner (or this bot) came back into the world, and the least time a traveller is in the game before a trip. */

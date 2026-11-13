@@ -207,9 +207,64 @@ public final class OrderFlow {
         default int deliveryChests() {
             return 1;
         }
+
+        /**
+         * Why this bot can't carry out the order's enchant lines (1.19.0, ENCHANT-CONTRACT v1.0), as a {@link Codes} reason, or null when it can: the option is off,
+         * the order's Minecraft version is not this bot's ({@code mc_mismatch}), or the proxy's own Enchanter, KitMaker or OrderFiller is on ({@code module_conflict}).
+         * Asked once, when the order is planned. A host that can't enchant says so, and every enchant item is short with the reason.
+         */
+        default @Nullable String enchantProblem(Order order) {
+            return Codes.BUSY;
+        }
+
+        /**
+         * A plan was taken up again after a restart (1.19.0): finished enchant items that are still carried are set aside again (the host forgot which slots they
+         * were in). Items that are not carried any more are the host's to report: it returns the keys (finished lots) to drop.
+         */
+        default void enchantResumed(List<Unit> units) {
+        }
+
+        /** The order ends: these stacks (by index key) of the order's enchant work are carried and go back; the host watches them leave. */
+        default void enchantWatch(Map<String, Long> carried) {
+        }
+
+        /** Some stack of the ones watched is still carried (the put-back is not over). */
+        default boolean enchantReturning() {
+            return false;
+        }
+
+        /** What of the watched stacks is still carried, by index key. */
+        default Map<String, Long> enchantStillCarried() {
+            return Map.of();
+        }
+
+        /** What the order's enchant work carries now (bases, books, bottles, spare anvils, finished items), by index key; given back when the order ends. */
+        default Map<String, Long> enchantCarried() {
+            return Map.of();
+        }
+
+        /**
+         * The enchant items of the bin are all made and these bases the craft made for them (ENCHANT-CONTRACT draft 3.4) are still in hand: they are no longer
+         * the bin's loads. The host keeps them as surplus of the craft, so they are put back with the leftovers and counted in {@code result.craft.returned}.
+         */
+        default void craftBasesReleased(List<Order.Lot> bases) {
+        }
+
+        /** An enchant item was finished with a base the craft made: that stack is gone from the inventory (the host forgets stale claims on its slot). */
+        default void craftBaseUsed() {
+        }
     }
 
-    public sealed interface Intent permits Idle, Build, Fetch, Name, Deliver, Craft, CraftLoads, Expand, Recheck {
+    public sealed interface Intent permits Idle, Build, Fetch, Name, Deliver, Craft, CraftLoads, EnchantLoads, Expand, Recheck {
+    }
+
+    /**
+     * Make the enchant items of this bin (1.19.0, ENCHANT-CONTRACT v1.0): the first load flagged {@link Order.Lot#enchant()} ({@link Unit#nextEnchantLot}) is
+     * gathered, planned again with the real items and worked at the anvil before the bin is built. The intent comes again until the item is finished or short;
+     * the host decides each time from the ledger whether to gather, to put an anvil down, to fetch bottles or to run the steps. It reports through
+     * {@link #enchantItemDone}, {@link #enchantItemShort} and {@link #enchantChanged}, or {@link #enchantAbandon}.
+     */
+    public record EnchantLoads(Unit unit) implements Intent {
     }
 
     /** Nothing for the host to do for the order now. */
@@ -268,10 +323,15 @@ public final class OrderFlow {
 
     /** A snapshot of the order for the server. */
     public record Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered,
-                         @Nullable JsonObject repair, @Nullable JsonObject craft, @Nullable JsonObject kit) {
+                         @Nullable JsonObject repair, @Nullable JsonObject craft, @Nullable JsonObject kit, @Nullable JsonObject enchant) {
+        public Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered,
+                      @Nullable JsonObject repair, @Nullable JsonObject craft, @Nullable JsonObject kit) {
+            this(id, status, phase, done, total, message, shulkers, delivered, repair, craft, kit, null);
+        }
+
         public Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered,
                       @Nullable JsonObject repair, @Nullable JsonObject craft) {
-            this(id, status, phase, done, total, message, shulkers, delivered, repair, craft, null);
+            this(id, status, phase, done, total, message, shulkers, delivered, repair, craft, null, null);
         }
 
         public Report(String id, String status, String phase, int done, int total, String message, int shulkers, Map<String, Integer> delivered,
@@ -310,6 +370,8 @@ public final class OrderFlow {
         public @Nullable String repair;
         /** The craft ledger so far (CraftLedger.toSaved as JSON text), or null for none / an older save (1.15.0). */
         public @Nullable String craft;
+        /** The enchant ledger and journal so far (EnchantLedger.toSaved as JSON text), or null for none / an older save (1.19.0). */
+        public @Nullable String enchant;
 
         public static final class UnitSave {
             /** 0 Shulker, 1 Empty, 2 Bin. */
@@ -432,6 +494,11 @@ public final class OrderFlow {
         return u.kitTemplate != null && kitResult != null && kitSettled.add(u);
     }
 
+    /** What the order's enchant lines have done (1.19.0, ENCHANT-CONTRACT v1.0), with the journal of the item in hand. Null when the order has none. */
+    private @Nullable EnchantLedger enchantLedger;
+    private Map<String, Long> enchantReturnPlanned = Map.of();
+    private long enchantReturnSince;
+    private boolean enchantReturnSettled = true, forceCancelled;
     /** What the order's craft lines have done (1.15.0). Null when the order has none. */
     private @Nullable CraftLedger craftLedger;
     /** When an order with craft lines ends, what is carried of it goes back: the report waits (a little) for that to be over. */
@@ -482,9 +549,46 @@ public final class OrderFlow {
         return parked && running();
     }
 
-    /** The server asked for this order to be stopped and it has not been yet. */
+    /**
+     * The server asked for this order to be stopped and it has not been yet. An enchant item past its first step is finished first (ENCHANT-CONTRACT v1.0,
+     * "Cancel"): the cancel is queued and shows here only once the item has ended, so nothing in the host stops the anvil work half way.
+     */
     public boolean cancelRequested() {
-        return cancelRequested && running();
+        return cancelRequested && running() && !enchantHoldsCancel();
+    }
+
+    /** A cancel was asked for and waits for the enchant item in hand to finish. */
+    public boolean cancelQueued() {
+        return cancelRequested && running() && enchantHoldsCancel();
+    }
+
+    private boolean enchantHoldsCancel() {
+        return enchantLedger != null && enchantLedger.pastStepOne() && !forceCancelled;
+    }
+
+    /** An enchant item is past its first step: pauses have no time limit then (ENCHANT-CONTRACT v1.0, TL3-B-a). */
+    private boolean pauseExempt() {
+        return enchantLedger != null && enchantLedger.pastStepOne();
+    }
+
+    /**
+     * The status report waits: a cancel is queued for an enchant item past its first step and the bot is in the middle of a step. A force-cancel is
+     * acknowledged by the bot's next report (the server then lets go of the reservations), so while a cancel is queued the bot reports only at step boundaries.
+     */
+    public boolean holdStatus() {
+        return cancelRequested && running() && pauseExempt() && !enchantBoundary;
+    }
+
+    private boolean enchantBoundary = true;
+
+    /** The enchant trip is between steps (true) or in the middle of one (false). */
+    public void enchantAtBoundary(boolean at) {
+        enchantBoundary = at;
+    }
+
+    /** A force-cancel was heard (the server answered a report with 409 while the order was still ours): stop at the next step boundary. */
+    public boolean forceCancelled() {
+        return forceCancelled && running();
     }
 
     public State state() {
@@ -579,6 +683,11 @@ public final class OrderFlow {
         crafted = 0;
         repair = null;
         craftLedger = null;
+        enchantLedger = null;
+        enchantReturnPlanned = Map.of();
+        enchantReturnSettled = true;
+        forceCancelled = false;
+        enchantBoundary = true;
         returnPlanned = Map.of();
         returnSettled = true;
         repairKeys = repairExplicit = java.util.Set.of();
@@ -614,6 +723,11 @@ public final class OrderFlow {
         repairExplicit = o.repairExplicitKeys();
         repair = repairKeys.isEmpty() ? null : new Repair.Report();
         craftLedger = null;
+        enchantLedger = null;
+        enchantReturnPlanned = Map.of();
+        enchantReturnSettled = true;
+        forceCancelled = false;
+        enchantBoundary = true;
         kitResult = null;
         kitSettled.clear();
         message = "";
@@ -653,10 +767,16 @@ public final class OrderFlow {
                 List<Order.Lot> made = craftLotsOf(o, craftLedger);
                 if (made == null) {
                     host.say("The order's craft lines are cut into more than " + CraftOrder.MAX_LOTS + " loads: not crafted.");
-                    craftLedger = CraftLedger.refused(o.craftLines(), craftLedger.table(), craftLedger.maxFills(), CraftOrder.RECIPE_MISMATCH);
+                    craftLedger = CraftLedger.refused(o.craftWanted(), craftLedger.table(), craftLedger.maxFills(), CraftOrder.RECIPE_MISMATCH);
                 }
                 else craftLots = made;
             }
+        }
+        // Enchant lines (1.19.0): every item is a load of its bin that is made at the anvil first; an order the bot can't carry out has them all short
+        List<Order.Lot> enchantLots = List.of();
+        if (o.hasEnchant() && enchantLedger == null) {
+            enchantLedger = startEnchant(o);
+            if (!resumed) enchantLots = enchantLotsOf(o, enchantLedger);
         }
 
         if (resumed) {
@@ -682,7 +802,7 @@ public final class OrderFlow {
                 if (p.lotCraft != null) {
                     for (int i = 0; i < u.lots.size() && i < p.lotCraft.size(); i++) {
                         Integer c = p.lotCraft.get(i);
-                        if (c != null && (c == Order.Lot.PENDING || c == Order.Lot.CRAFTED)) {
+                        if (c != null && (c == Order.Lot.PENDING || c == Order.Lot.CRAFTED || c == Order.Lot.ENCHANT)) {
                             Order.Lot lot = u.lots.get(i);
                             u.lots.set(i, new Order.Lot(lot.key(), lot.variant(), lot.count(), c));
                         }
@@ -720,15 +840,24 @@ public final class OrderFlow {
                     // A broken record is a fresh ledger: the order goes on with its full budget
                 }
             }
+            if (enchantLedger != null && saved.enchant != null) {
+                try {
+                    enchantLedger.restore(com.google.gson.JsonParser.parseString(saved.enchant).getAsJsonObject());
+                } catch (RuntimeException e) {
+                    // A broken record is a fresh ledger: the items are planned and gathered again from the start
+                }
+            }
         }
         else {
-            StockPlanner.Plan fresh = craftLots.isEmpty() ? host.plan(o) : host.plan(o, craftLots);
+            List<Order.Lot> extraLots = new ArrayList<>(craftLots);
+            extraLots.addAll(enchantLots);
+            StockPlanner.Plan fresh = extraLots.isEmpty() ? host.plan(o) : host.plan(o, extraLots);
             KitPlanner.Plan kitPlan = o.hasKit() ? kitPlanOf(o, fresh) : null;
             boolean kitUnits = kitPlan != null && !kitPlan.units().isEmpty();
             // An order of kit lines alone has no other unit: the stock planner's "nothing to deliver" is not a failure then
             if (fresh.failure() != null && !(kitUnits && fresh.failure().equals("nothing to deliver"))) {
                 // An order that is only craft lines this bot can't craft fails with the reason, not just "nothing to deliver"
-                String note = craftLedger == null ? null : craftLedger.note();
+                String note = craftLedger != null ? craftLedger.note() : enchantLedger == null ? null : enchantLedger.note();
                 return note == null || fresh.failure().contains(note) ? fresh.failure() : cutTo(fresh.failure(), MESSAGE_MAX - note.length() - 2) + "; " + note;
             }
             plan.addAll(fresh.units());
@@ -742,6 +871,8 @@ public final class OrderFlow {
             }
             // The i-th shulker of the plan (shulker lines, then empty shulkers, then bins) gets the i-th name; kit units are named for their template
             if (o.names != null) for (int i = 0; i < plan.size(); i++) if (plan.get(i).kitTemplate == null) plan.get(i).name = o.names.nameFor(i);
+            // The bases the craft makes for the enchant plans (draft 3.4) are added last: they are not packed, counted or delivered
+            attachBases(o, plan);
         }
 
         String why = host.checkEmpties(new ArrayList<>(plan.subList(start, plan.size())));
@@ -755,6 +886,12 @@ public final class OrderFlow {
         phase = "starting";
         // A resumed order whose craft lines can't be carried out now (the table is gone, the check fails): what is left to craft is short
         if (resumed && craftLedger != null && craftLedger.refusedAtStart()) craftAbandon(CraftOrder.RECIPE_MISMATCH);
+        // A resumed order whose enchant lines can't be carried out now (the option is off, a module is on): what is left to enchant is short
+        if (resumed && enchantLedger != null) {
+            String problem = host.enchantProblem(o);
+            if (problem != null) enchantAbandon(problem);
+            else host.enchantResumed(new ArrayList<>(units.subList(Math.min(start, units.size()), units.size())));
+        }
         if (resumed && craftLedger != null) {
             Map<String, Long> gone = host.craftResumed(new ArrayList<>(units.subList(Math.min(start, units.size()), units.size())), craftLedger.savedSurplus());
             if (!gone.isEmpty()) {
@@ -788,6 +925,7 @@ public final class OrderFlow {
                 s.units.add(p);
             }
             if (craftLedger != null) s.craft = craftLedger.toSaved().toString();
+            if (enchantLedger != null) s.enchant = enchantLedger.toSaved().toString();
             host.save(s);
         }
         if (o.restock) host.say("Kit restock: " + (units.size() - index) + " kit to build.");
@@ -829,7 +967,8 @@ public final class OrderFlow {
      */
     private CraftLedger startCraft(Order o) {
         Recipes table = host.craftTable();
-        List<Order.Line> lines = o.craftLines();
+        // The craft lines (delivered) and the bases for the enchant plans (draft 3.4: made and used, never delivered)
+        List<Order.Line> lines = o.craftWanted();
         if (table == null) {
             host.say("This order has craft lines but this bot has no recipe table or craft orders are off: they are not crafted.");
             return CraftLedger.refused(lines, Recipes.empty(), 0, CraftOrder.RECIPE_MISMATCH);
@@ -859,6 +998,100 @@ public final class OrderFlow {
         return out;
     }
 
+    /**
+     * The bases the craft makes for the enchant plans (ENCHANT-CONTRACT draft 3.4 {@code craft.forEnchant}) are loads of the last bin that has enchant loads, flagged
+     * {@link Order.Lot#base()}: the craft engine makes them like any craft load, before the first enchant item (see {@link #next}), they stay in hand for the enchant run,
+     * and they never reach a shulker ({@link #releaseBases}). Nothing is added when the craft or the enchant lines can't be carried out here: the plans that need a
+     * crafted base are then short with {@code no_base} when their preflight finds none.
+     */
+    private void attachBases(Order o, List<Unit> plan) {
+        CraftLedger c = craftLedger;
+        EnchantLedger e = enchantLedger;
+        if (c == null || e == null || c.refusedAtStart() || e.refusedAtStart() || !o.hasEnchantBases()) return;
+        Unit target = null;
+        for (Unit u : plan) if (u.kind == Unit.Kind.Bin && u.nextEnchantLot() >= 0) target = u;
+        if (target == null) return;
+        for (Order.Qty q : o.craft.forEnchant()) {
+            int max = Math.max(1, host.maxStack(q.id()));
+            for (Order.Lot lot : Order.expand(q.id(), q.count(), max)) target.lots.add(Order.Lot.toBase(lot.key(), lot.count()));
+        }
+    }
+
+    /** The bin has bases for the enchant plans (still to be made, or made and in hand). */
+    private static boolean hasBases(Unit u) {
+        for (Order.Lot lot : u.lots) if (lot.base()) return true;
+        return false;
+    }
+
+    /** The bases the craft made for the enchant plans and that wait in hand for their items, by plain item id (the sum of the made base loads). */
+    public Map<String, Integer> madeBases() {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        for (Unit u : units) {
+            if (u.built || u.have) continue;
+            for (Order.Lot lot : u.lots) if (lot.base() && lot.crafted()) out.merge(lot.key(), lot.count(), Integer::sum);
+        }
+        return out;
+    }
+
+    /** The unit from the one in hand on that has a base still to be made, or null. */
+    private @Nullable Unit pendingBaseUnit() {
+        for (int i = Math.max(0, index); i < units.size(); i++) {
+            Unit u = units.get(i);
+            if (u.built || u.have) continue;
+            for (Order.Lot lot : u.lots) if (lot.base() && lot.craft()) return u;
+        }
+        return null;
+    }
+
+    /**
+     * Every enchant item of the bin is made: the bases still in hand are not part of the shulker. The lots are taken out of the bin, and the host is told which
+     * stacks they were ({@link Host#craftBasesReleased}) so it keeps them as surplus of the craft, put back with the leftovers and reported in
+     * {@code result.craft.returned}. A base that was never made counts as short.
+     */
+    private void releaseBases(Unit u, boolean unmade) {
+        CraftLedger l = craftLedger;
+        List<Order.Lot> kept = new ArrayList<>();
+        for (int i = u.lots.size() - 1; i >= 0; i--) {
+            Order.Lot lot = u.lots.get(i);
+            if (!lot.base()) continue;
+            if (lot.craft()) {
+                // The order ends with it still to make: the ledger closes it with the reason of the end
+                if (!unmade) continue;
+                u.lots.remove(i);
+                if (l != null) l.addShort(lot.key(), lot.count(), CraftOrder.INTERRUPTED);
+            }
+            else {
+                u.lots.remove(i);
+                kept.add(lot);
+            }
+        }
+        saveCraft(u);
+        if (!kept.isEmpty()) host.craftBasesReleased(kept);
+    }
+
+    /**
+     * The enchant item {@code n} went into a finished item, so the base the craft made for it is gone: one made base load is dropped from the bin that holds
+     * them. Not called for an item that ended short: whether its base is still carried is the host's to see (an unused one is returned, a stale load is harmless).
+     * @return the unit whose lots changed (the caller saves it), or null
+     */
+    private @Nullable Unit baseUsed(int n) {
+        EnchantLedger l = enchantLedger;
+        if (l == null || n < 0 || n >= l.items().size()) return null;
+        EnchantOrder.ItemPlan plan = l.block().items().get(n).plan();
+        String key = plan.baseKey();
+        if (!plan.baseCrafted() || key == null) return null;
+        for (Unit u : units) {
+            for (int i = 0; i < u.lots.size(); i++) {
+                Order.Lot lot = u.lots.get(i);
+                if (!lot.base() || !lot.crafted() || !lot.key().equals(key)) continue;
+                if (lot.count() > 1) u.lots.set(i, lot.withCount(lot.count() - 1));
+                else u.lots.remove(i);
+                return u;
+            }
+        }
+        return null;
+    }
+
     /** The order's craft ledger, or null when it has no craft lines. */
     public @Nullable CraftLedger craftLedger() {
         return craftLedger;
@@ -875,7 +1108,9 @@ public final class OrderFlow {
             Order.Lot lot = u.lots.get(i);
             if (!lot.craft()) continue;
             int rank = l == null ? 0 : l.rank(lot.key());
-            if (best < 0 || rank < bestRank) {
+            // A base for the enchant plans (draft 3.4) is made before the loads of the bin
+            boolean first = best < 0 || (lot.base() && !u.lots.get(best).base()) || (lot.base() == u.lots.get(best).base() && rank < bestRank);
+            if (first) {
                 best = i;
                 bestRank = rank;
             }
@@ -885,6 +1120,13 @@ public final class OrderFlow {
 
     /** The host is starting a round of crafting for this bin (counted: a host that never finishes one does not hold the order). */
     public void craftLoadsStarted(Unit u) {
+        // The bases for the enchant plans (draft 3.4) are made first and have their own counters: a stall of theirs never shorts the bin's ordinary craft loads
+        int next = nextCraftLot(u);
+        if (next >= 0 && u.lots.get(next).base()) {
+            u.baseLoadsWaitSince = 0;
+            u.baseLoadRounds++;
+            return;
+        }
         u.craftLoadsWaitSince = 0;
         u.craftLoadRounds++;
     }
@@ -952,6 +1194,167 @@ public final class OrderFlow {
         saveCraft(null);
     }
 
+    // Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0)
+
+    /**
+     * The ledger of an enchant order. When the bot can't carry the order out (the block can't be read, the option is off, the version differs, a proxy module is
+     * on) every item is short with the reason and nothing is made; the rest of the order goes on.
+     */
+    private EnchantLedger startEnchant(Order o) {
+        EnchantOrder.Block b = o.enchant == null ? EnchantOrder.Block.unreadable() : o.enchant;
+        if (b.malformed()) {
+            host.say("The order's enchant block could not be read: its enchant lines are not made.");
+            return EnchantLedger.refused(b, Codes.CAP);
+        }
+        String why = host.enchantProblem(o);
+        if (why != null) {
+            host.say("This order has enchant lines that this bot can't make now (" + why + "): they are not made.");
+            return EnchantLedger.refused(b, why);
+        }
+        return new EnchantLedger(b);
+    }
+
+    /** One load per item of the order, flagged as an item still to be enchanted; none for an order that was refused. */
+    private static List<Order.Lot> enchantLotsOf(Order o, EnchantLedger ledger) {
+        List<Order.Lot> out = new ArrayList<>();
+        if (ledger.refusedAtStart()) return out;
+        for (EnchantLedger.Item i : ledger.items()) out.add(Order.Lot.toEnchant(i.ref.key(), i.ref.n()));
+        return out;
+    }
+
+    /** The order's enchant ledger, or null when it has no enchant lines. */
+    public @Nullable EnchantLedger enchantLedger() {
+        return enchantLedger;
+    }
+
+    /** The phase text for an enchant item ("enchanting 2/5: gathering", "enchanting: step 3/7"). */
+    private String enchantPhase(EnchantLedger.Item it) {
+        int total = enchantLedger == null ? 0 : enchantLedger.items().size();
+        String where = "enchanting " + (it.ref.n() + 1) + "/" + total;
+        if (it.status == EnchantLedger.Status.RUNNING && it.real != null) return where + ": step " + Math.min(it.stepsDone + 1, Math.max(1, it.real.steps().size())) + "/" + it.real.steps().size();
+        return where + ": preparing";
+    }
+
+    /** The saved record of this order: the ledger as it is now (the journal). */
+    public void enchantChanged() {
+        Order o = order;
+        Saved s = o == null || enchantLedger == null ? null : host.saved(o.id);
+        if (s == null) return;
+        s.enchant = enchantLedger.toSaved().toString();
+        host.save(s);
+    }
+
+    /** The unit's lots, the rekeys and the ledger are written to the saved plan. */
+    private void saveEnchant(Unit changed) {
+        saveEnchant(changed, null);
+    }
+
+    /** As above, also for a second unit whose lots changed (the bin that holds the crafted bases): one save. */
+    private void saveEnchant(Unit changed, @Nullable Unit also) {
+        Order o = order;
+        Saved s = o == null ? null : host.saved(o.id);
+        if (s == null) return;
+        for (Unit target : also == null || also == changed ? new Unit[] {changed} : new Unit[] {changed, also}) writeLots(s, target);
+        if (enchantLedger != null) s.enchant = enchantLedger.toSaved().toString();
+        host.save(s);
+    }
+
+    private void writeLots(Saved s, Unit changed) {
+        int at = units.indexOf(changed);
+        if (at >= 0 && at < s.units.size()) {
+            Saved.UnitSave p = s.units.get(at);
+            p.lotKeys.clear();
+            p.lotVariants.clear();
+            p.lotCounts.clear();
+            p.lotCraft.clear();
+            for (Order.Lot lot : changed.lots) {
+                p.lotKeys.add(lot.key());
+                p.lotVariants.add(lot.variant() == null ? "" : lot.variant());
+                p.lotCounts.add(lot.count());
+                p.lotCraft.add(lot.craftState());
+            }
+            p.rekeys.clear();
+            for (String[] r : changed.rekeys) {
+                p.rekeys.add(r[0]);
+                p.rekeys.add(r[1]);
+            }
+        }
+    }
+
+    /**
+     * Enchant item {@code n} of this bin is finished and carried: its lot is the finished stack now ({@code key} and {@code variant} as the stash would know it),
+     * so the bin is built from it, and the shulker's content counts back to the line's key. Saved with the journal.
+     */
+    public void enchantItemDone(Unit u, int n, String key, @Nullable String variant, Map<String, Integer> levels) {
+        EnchantLedger l = enchantLedger;
+        if (l == null) return;
+        for (int i = 0; i < u.lots.size(); i++) {
+            Order.Lot lot = u.lots.get(i);
+            if (!lot.enchant() || lot.enchantItem() != n) continue;
+            String asked = lot.key();
+            u.lots.set(i, new Order.Lot(key, variant, 1, Order.Lot.CRAFTED));
+            if (!key.equals(asked)) u.rekeys.add(new String[] {key, asked});
+            break;
+        }
+        l.done(n, levels);
+        // The base the craft made for it went into the finished item: the ledger first, then the base load, one save
+        Unit baseUnit = baseUsed(n);
+        saveEnchant(u, baseUnit);
+        if (baseUnit != null) host.craftBaseUsed();
+    }
+
+    /** Enchant item {@code n} of this bin can't be made: it is short with this reason ({@link Codes}) and the bin goes on without it. */
+    public void enchantItemShort(Unit u, int n, String reason) {
+        EnchantLedger l = enchantLedger;
+        if (l == null) return;
+        for (int i = u.lots.size() - 1; i >= 0; i--) {
+            Order.Lot lot = u.lots.get(i);
+            if (lot.enchant() && lot.enchantItem() == n) u.lots.remove(i);
+        }
+        // The ledger first. A crafted base is not dropped here: past step 1 it may be used up or not (the first step may be a book merge), and only the host can see
+        // what is still carried. A base still carried stays an unused base (returned and reported); a stale load is harmless, the host claims only stacks it finds.
+        l.fail(n, reason);
+        saveEnchant(u);
+    }
+
+    /**
+     * Enchanting can't go on at all (the option went off, a module came on, another Minecraft version): every enchant item not started is short with this
+     * reason. An item that is past its first step is never failed here (the contract's "cannot fail once started"): the host finishes it, or waits for it.
+     */
+    public void enchantAbandon(String reason) {
+        EnchantLedger l = enchantLedger;
+        if (l == null) return;
+        for (Unit u : units) {
+            for (int i = u.lots.size() - 1; i >= 0; i--) {
+                Order.Lot lot = u.lots.get(i);
+                if (!lot.enchant()) continue;
+                int n = lot.enchantItem();
+                if (n >= 0 && n < l.items().size() && l.item(n).status == EnchantLedger.Status.RUNNING && l.item(n).stepsDone >= 1) continue;
+                u.lots.remove(i);
+            }
+        }
+        l.failNotStarted(reason);
+        Order o = order;
+        Saved s = o == null ? null : host.saved(o.id);
+        if (s != null) {
+            for (int at = 0; at < units.size() && at < s.units.size(); at++) {
+                Saved.UnitSave p = s.units.get(at);
+                p.lotKeys.clear();
+                p.lotVariants.clear();
+                p.lotCounts.clear();
+                p.lotCraft.clear();
+                for (Order.Lot lot : units.get(at).lots) {
+                    p.lotKeys.add(lot.key());
+                    p.lotVariants.add(lot.variant() == null ? "" : lot.variant());
+                    p.lotCounts.add(lot.count());
+                    p.lotCraft.add(lot.craftState());
+                }
+            }
+            s.enchant = l.toSaved().toString();
+            host.save(s);
+        }
+    }
+
     /** The unit's lots and the ledger are written to the saved plan, so a restart carries on from here. */
     private void saveCraft(@Nullable Unit changed) {
         Order o = order;
@@ -983,6 +1386,16 @@ public final class OrderFlow {
         return true;
     }
 
+    /**
+     * The server answered a report with 409 while the order was still running here: it is finished or force-cancelled there. The order stops at the next safe
+     * point; an enchant item past its first step stops at the next step boundary (its items are returned) instead of being finished first.
+     */
+    public boolean cancelHard(String id) {
+        if (!cancel(id)) return false;
+        if (state == State.Running && enchantLedger != null) forceCancelled = true;
+        return true;
+    }
+
     /** Stops working on the order but keeps it resumable: the server still holds it, and a later claim carries on. */
     public void park() {
         if (!running()) return;
@@ -1010,6 +1423,13 @@ public final class OrderFlow {
         return s != null && s.craft != null;
     }
 
+    /** The saved order has enchant lines (its ledger and journal are saved with it). */
+    public boolean resumeHasEnchant() {
+        String id = host.savedId();
+        Saved s = id == null ? null : host.saved(id);
+        return s != null && s.enchant != null;
+    }
+
     /** Drops saved state of an order the server no longer holds for this bot. */
     public void dropSaved(@Nullable String keepId) {
         String saved = host.savedId();
@@ -1032,7 +1452,7 @@ public final class OrderFlow {
         if (state == State.Running) {
             if (!host.gate()) {
                 if (pausedSince == 0) pausedSince = now;
-                else if (now - pausedSince > PAUSE_TIMEOUT_MS) finish(State.Failed, "the bot was held up for too long (" + host.pauseReason() + ")");
+                else if (now - pausedSince > PAUSE_TIMEOUT_MS && !pauseExempt()) finish(State.Failed, "the bot was held up for too long (" + host.pauseReason() + ")");
                 else phase = "paused: " + host.pauseReason();
             }
             else pausedSince = 0;
@@ -1058,11 +1478,26 @@ public final class OrderFlow {
             craftLedger.setReturned(back);
             returnSettled = true;
         }
+        // The same for the enchant work: result.enchant.returned is what went back to the stash, not what was meant to
+        if (state != State.Running && enchantLedger != null && !enchantReturnSettled) {
+            if (host.enchantReturning() && now - enchantReturnSince < RETURN_WAIT_MS) {
+                return new Report(order.id, "in_progress", "putting enchant items back", Math.min(index, units.size()), units.size(), message, shulkersDelivered,
+                    new LinkedHashMap<>(delivered), repair == null ? null : repair.toJson(), null);
+            }
+            Map<String, Long> still = host.enchantStillCarried(), back = new LinkedHashMap<>();
+            for (var e : enchantReturnPlanned.entrySet()) {
+                long n = e.getValue() - Math.max(0, still.getOrDefault(e.getKey(), 0L));
+                if (n > 0) back.put(e.getKey(), n);
+            }
+            enchantLedger.addReturned(back);
+            enchantReturnSettled = true;
+        }
         String kp = state == State.Running ? kitPhase() : null;
         String shown = state == State.Running && host.rereading() ? "re-reading containers" : kp != null && !phase.startsWith("paused") ? kp : phase;
         JsonObject kitJson = kitResult == null || !kitResult.any() ? null : kitResult.toJson();
         return new Report(order.id, status, shown, Math.min(index, units.size()), units.size(), message, shulkersDelivered, new LinkedHashMap<>(delivered),
-            repair == null ? null : repair.toJson(), craftLedger == null || !craftLedger.any() ? null : craftLedger.toResult(), kitJson);
+            repair == null ? null : repair.toJson(), craftLedger == null || !craftLedger.any() ? null : craftLedger.toResult(), kitJson,
+            enchantLedger == null || !enchantLedger.any() ? null : enchantLedger.toResult());
     }
 
     // Repair (1.13.0, REPAIR-CONTRACT.md)
@@ -1273,14 +1708,14 @@ public final class OrderFlow {
             reset();
             return new Idle();
         }
-        if (cancelRequested) {
+        if (cancelRequested()) {
             finish(State.Cancelled, "cancelled");
             return new Idle();
         }
         if (!host.gate()) {
             long now = clock.getAsLong();
             if (pausedSince == 0) pausedSince = now;
-            else if (now - pausedSince > PAUSE_TIMEOUT_MS) {
+            else if (now - pausedSince > PAUSE_TIMEOUT_MS && !pauseExempt()) {
                 finish(State.Failed, "the bot was held up for too long (" + host.pauseReason() + ")");
                 return new Idle();
             }
@@ -1316,6 +1751,20 @@ public final class OrderFlow {
             if (problem != null) {
                 finish(shulkersDelivered > 0 ? State.Delivered : State.Failed, problem);
                 return new Idle();
+            }
+
+            // The bases for the enchant plans (ENCHANT-CONTRACT draft 3.4) are made before anything else is done (nothing is built or carried yet at the start of an
+            // order), chunk by chunk like any craft load; one that can't be made is short, and the plans that need it end short with no_base when they are reached
+            Unit baseUnit = craftLedger == null || units.get(index).have ? null : pendingBaseUnit();
+            if (baseUnit != null) {
+                long now = clock.getAsLong();
+                if (baseUnit.baseLoadsWaitSince == 0) baseUnit.baseLoadsWaitSince = now;
+                if (now - baseUnit.baseLoadsWaitSince > CRAFT_START_WAIT_MS || baseUnit.baseLoadRounds >= MAX_CRAFT_ROUNDS) {
+                    for (int i = baseUnit.lots.size() - 1; i >= 0; i--) if (baseUnit.lots.get(i).base() && baseUnit.lots.get(i).craft()) craftLotShort(baseUnit, i, CraftOrder.TIMEOUT);
+                    continue;
+                }
+                phase = craftPhase(baseUnit.lots.get(nextCraftLot(baseUnit)).key(), 0);
+                return new CraftLoads(baseUnit);
             }
 
             Unit u = units.get(index);
@@ -1439,6 +1888,16 @@ public final class OrderFlow {
                     skip("lost a finished shulker");
                     continue;
                 }
+                // Its enchant items (1.19.0) are made first, one at a time, before anything of the bin is built (the anvil work puts no shulker down, so a pause in
+                // shulker handling does not hold it). The intent comes again until the item is finished or short.
+                if (enchantLedger != null && u.nextEnchantLot() >= 0) {
+                    int at = u.nextEnchantLot();
+                    EnchantLedger.Item it = enchantLedger.item(Math.max(0, Math.min(u.lots.get(at).enchantItem(), enchantLedger.items().size() - 1)));
+                    phase = enchantPhase(it);
+                    return new EnchantLoads(u);
+                }
+                // Every enchant item of the bin is made: the bases still in hand are not part of the shulker (draft 3.4)
+                if (hasBases(u)) releaseBases(u, true);
                 // Building puts a shulker down: it waits while shulker handling is paused (as long as PAUSE_TIMEOUT_MS allows)
                 String paused = host.buildPauseReason();
                 if (paused != null) {
@@ -1457,7 +1916,8 @@ public final class OrderFlow {
                     long now = clock.getAsLong();
                     if (u.craftLoadsWaitSince == 0) u.craftLoadsWaitSince = now;
                     if (now - u.craftLoadsWaitSince > CRAFT_START_WAIT_MS || u.craftLoadRounds >= MAX_CRAFT_ROUNDS) {
-                        for (int i = u.lots.size() - 1; i >= 0; i--) if (u.lots.get(i).craft()) craftLotShort(u, i, CraftOrder.TIMEOUT);
+                        // Only the ordinary craft loads: the bases have their own counters and are handled where they are made first
+                        for (int i = u.lots.size() - 1; i >= 0; i--) if (u.lots.get(i).craft() && !u.lots.get(i).base()) craftLotShort(u, i, CraftOrder.TIMEOUT);
                         continue;
                     }
                     phase = craftPhase(u.lots.get(nextCraftLot(u)).key(), 0);
@@ -1716,6 +2176,8 @@ public final class OrderFlow {
     public void finish(State end, String text) {
         if (order == null || state != State.Running) return;
         settleConfirmed();
+        // The bases made for the enchant plans and not used are surplus of the craft now: put back with the leftovers and reported as returned (draft 3.4)
+        if (craftLedger != null) for (Unit bu : units) if (hasBases(bu)) releaseBases(bu, false);
         // The craft lines still open are short (cancelled, or the order ended first); what is carried of them goes back
         if (craftLedger != null) {
             craftLedger.closeOpen(end == State.Cancelled ? CraftOrder.CANCELLED : CraftOrder.INTERRUPTED);
@@ -1724,6 +2186,15 @@ public final class OrderFlow {
             host.craftWatch(returnPlanned);
             returnSince = clock.getAsLong();
             returnSettled = false;
+        }
+        // The enchant items still open are short (cancelled, or the order ended first); what is carried of them goes back
+        if (enchantLedger != null) {
+            enchantLedger.failRest(end == State.Cancelled ? Codes.CANCELLED : Codes.TIMEOUT);
+            enchantReturnPlanned = host.enchantCarried();
+            host.enchantWatch(enchantReturnPlanned);
+            enchantReturnSince = clock.getAsLong();
+            enchantReturnSettled = false;
+            enchantChanged();
         }
         // The kits still open are short (cancelled, or the order ended first)
         if (kitResult != null) {
@@ -1737,7 +2208,9 @@ public final class OrderFlow {
         }
         // Every way an order ends carries the one note about shulkers that went without their names
         // Added once: endNote may already hold it (perhaps cut short at MESSAGE_MAX); the whole message stays within MESSAGE_MAX
-        text = withNotes(text, unnamedNote(), craftedNote(), repair == null ? null : repair.note(), craftLedger == null ? null : craftLedger.note());
+        String craftNote = craftLedger == null ? null : craftLedger.note(), enchantNote = enchantLedger == null ? null : enchantLedger.note();
+        text = withNotes(text, unnamedNote(), craftedNote(), repair == null ? null : repair.note(),
+            craftNote == null ? enchantNote : enchantNote == null ? craftNote : craftNote + "; " + enchantNote);
         String kitNote = kitResult == null ? null : kitResult.note();
         if (kitNote != null && !text.contains(kitNote)) text = text.isEmpty() ? kitNote : cutTo(text, Math.max(20, MESSAGE_MAX - kitNote.length() - 2)) + "; " + kitNote;
         state = end;
