@@ -100,6 +100,7 @@ import com.porter.qwertestash.stash.CraftingTableSpot;
 import com.porter.qwertestash.stash.DeliverySpot;
 import com.porter.qwertestash.stash.GoneBoxes;
 import com.porter.qwertestash.stash.GoneWatch;
+import com.porter.qwertestash.stash.BotBox;
 import com.porter.qwertestash.stash.PlaceSearch;
 import com.porter.qwertestash.stash.Item;
 import com.porter.qwertestash.stash.KitRouting;
@@ -564,6 +565,8 @@ public class StashSorter extends AbstractFieldModule {
             of(ClientBotTick.Starting.class, e -> restart()),
             // A player taking the account over stops the bot's ticks: a shulker being collected is left where it is for now
             of(ClientBotTick.Stopped.class, e -> collectInterrupted(playerControlling() ? "a player took control of the bot" : "the bot's ticks stopped")),
+            // A server position correction: a flood of them at one spot is a pinned bot (async thread, only counted)
+            of(com.aquarius.event.client.PlayerSetbackEvent.class, e -> pin.noteSetback(System.currentTimeMillis())),
             of(ClientDisconnectEvent.class, e -> {
                 disconnecting = true;
                 restart();
@@ -748,6 +751,9 @@ public class StashSorter extends AbstractFieldModule {
         craftCard = null;
         craftCardDetail = null;
         orders.clearDeliveryFailure();
+        // What was put down before a restart is not remembered as ours, and nothing marked in a pin is kept
+        ownPlaced.clear();
+        unreachableMarks.clear();
         orderSources.clear();
         sourceShulkers.clear();
         unpackingNow = null;
@@ -892,6 +898,8 @@ public class StashSorter extends AbstractFieldModule {
      * shulker of ours still standing is left where it is and listed with the orphaned ones, not finished.
      */
     private void unstuck() {
+        pin.reset();
+        pinActive = false;
         int openId = openContainerId();
         if (openId != 0 && ownsWindow()) closeOnDisable(openId, containerOpenedAt());
         activity.releaseOurPathing();
@@ -1179,6 +1187,252 @@ public class StashSorter extends AbstractFieldModule {
 
     // The sorting loop
 
+    // ------------------------------------------------------------------------------------------------------------------
+    // Being pinned (1.21.0): a block put down inside the bot's own box (or anything else that holds it in one place) makes the
+    // server correct its position every tick, and every walk then fails. Nothing of the sorter's runs while it is pinned, so
+    // no walk times out, no delivery fails and no container is marked unreachable because of it; it breaks the block it put
+    // down itself, or steps out, and goes on when it is free. Bot tick thread, except the setback count (network thread).
+
+    private final PinWatch pin = new PinWatch();
+    /** Blocks the sorter asked to be put down, for 10 minutes, with the block name that is expected there (null: a chest or barrel). */
+    private final Map<BlockPos, OwnBlock> ownPlaced = new LinkedHashMap<>();
+    private record OwnBlock(@Nullable String name, long ms) {
+    }
+    private static final long OWN_BLOCK_MS = 10 * 60_000L;
+    /** A pin takes back what was marked failed or unreachable this long before it was noticed. */
+    private static final long PIN_LOOKBACK_MS = 2 * 60_000L;
+    private final PinPolicy.DeliveryFailure deliveryFailure = new PinPolicy.DeliveryFailure();
+    private final PinPolicy.RecentMarks<Box> unreachableMarks = new PinPolicy.RecentMarks<>();
+    private boolean pinActive, pinHelpSent;
+    private long pinStartMs, pinLastEndMs = -1;
+    // How long into the pin the last alert went out (-1: none yet)
+    private long pinAlertAt = -1;
+    private int pinAttempt, pinWaitTicks, pinStepLeft;
+    private long pinNextTry;
+    private float pinYaw;
+    // Where the bot was at the last try: a bot that has moved since is only being corrected, not held
+    private double pinSampleX, pinSampleZ;
+
+    private void rememberOwnPlaced(BlockPos pos) {
+        ownPlaced.remove(pos);
+        ownPlaced.put(pos, new OwnBlock(null, System.currentTimeMillis()));
+        while (ownPlaced.size() > 32) ownPlaced.remove(ownPlaced.keySet().iterator().next());
+    }
+
+    private void rememberOwnPlaced(BlockPos pos, ItemData item) {
+        rememberOwnPlaced(pos);
+        ownPlaced.put(pos, new OwnBlock(item.name(), System.currentTimeMillis()));
+    }
+
+    /** A block we put down that is in the bot's box now (and still stands), or null. */
+    private @Nullable BlockPos ownObstruction() {
+        if (ownPlaced.isEmpty()) return null;
+        double px = CACHE.getPlayerCache().getX(), py = CACHE.getPlayerCache().getY(), pz = CACHE.getPlayerCache().getZ();
+        long now = System.currentTimeMillis();
+        ownPlaced.values().removeIf(o -> now - o.ms() > OWN_BLOCK_MS);
+        for (var e : ownPlaced.entrySet()) {
+            BlockPos c = e.getKey();
+            if (!BotBox.overlapsCell(px, py, pz, c.x(), c.y(), c.z()) || !Containers.isLoaded(c)) continue;
+            var block = World.getBlock(c.x(), c.y(), c.z());
+            if (block.isAir()) continue;
+            String want = e.getValue().name();
+            if (want == null ? (block.name().equals("chest") || block.name().equals("barrel")) : block.name().equals(want)) return c;
+        }
+        return null;
+    }
+
+    /**
+     * The block that may be mined back to free the bot, or null: a block we put down that is an anvil or a crafting table (not a
+     * stash container); else, when nothing remembered explains the pin (after a restart), an anvil or crafting table in the bot's box
+     * outside the stash area. Never a chest, a barrel or a shulker box, and nothing inside the stash area in the scan.
+     */
+    private @Nullable BlockPos pinMinable(@Nullable BlockPos ours, double px, double py, double pz) {
+        if (ours != null) {
+            return PinPolicy.minable(World.getBlock(ours.x(), ours.y(), ours.z()).name(), stash.boxAt(ours) != null) ? ours : null;
+        }
+        List<PinPolicy.Cell> box = new ArrayList<>();
+        for (int x = (int) Math.floor(px - BotBox.HALF_WIDTH); x <= (int) Math.floor(px + BotBox.HALF_WIDTH); x++) {
+            for (int z = (int) Math.floor(pz - BotBox.HALF_WIDTH); z <= (int) Math.floor(pz + BotBox.HALF_WIDTH); z++) {
+                for (int y = (int) Math.floor(py); y <= (int) Math.floor(py + BotBox.HEIGHT); y++) {
+                    BlockPos c = new BlockPos(x, y, z);
+                    if (!BotBox.overlapsCell(px, py, pz, x, y, z) || !Containers.isLoaded(c)) continue;
+                    var block = World.getBlock(x, y, z);
+                    if (block.isAir()) continue;
+                    boolean keep = stash.boxAt(c) != null || (stash.hasArea() && stash.inArea(c, 0));
+                    box.add(new PinPolicy.Cell(x, y, z, block.name(), keep));
+                }
+            }
+        }
+        PinPolicy.Cell hit = PinPolicy.firstMinable(box);
+        return hit == null ? null : new BlockPos(hit.x(), hit.y(), hit.z());
+    }
+
+    /** The world as the step-out check sees it. */
+    private final PinPolicy.Ground pinGround = new PinPolicy.Ground() {
+        @Override
+        public String name(int x, int y, int z) {
+            if (!Containers.isLoaded(new BlockPos(x, y, z))) return "unloaded";
+            var b = World.getBlock(x, y, z);
+            return b.isAir() ? "air" : b.name();
+        }
+
+        @Override
+        public boolean solid(int x, int y, int z) {
+            if (!Containers.isLoaded(new BlockPos(x, y, z))) return false;
+            var b = World.getBlock(x, y, z);
+            return !b.isAir() && b.solidBlock();
+        }
+    };
+
+    /** What marks a container unreachable (a pin takes the marks of its time back). */
+    private void markUnreachable(Box box) {
+        box.unreachable = true;
+        unreachableMarks.mark(box, System.currentTimeMillis());
+    }
+
+    /** A walk or open that got nowhere because the bot was pinned is not held against the container or the delivery. */
+    private boolean pinCutShort() {
+        return !PinPolicy.walkFailureCounts(pin.pinned(), jobStartMs, pinLastEndMs);
+    }
+
+    /**
+     * Every tick while the sorter is running. @return true while the bot is pinned and this is handling it (nothing else runs)
+     */
+    private boolean pinTick(boolean foreign) {
+        long now = System.currentTimeMillis();
+        double px = CACHE.getPlayerCache().getX(), py = CACHE.getPlayerCache().getY(), pz = CACHE.getPlayerCache().getZ();
+        boolean walking = activity.ownPathing() || (job != null && step == Step.Walking) || placeWalk != null || anvilStep == AnvilStep.Walk;
+        BlockPos stuckIn = ownObstruction();
+        if (!pin.observe(now, px, py, pz, walking, stuckIn != null)) {
+            if (pinActive) endPin(now);
+            return false;
+        }
+        if (!pinActive) beginPin(now, px, pz);
+        // Someone else is moving the bot: the normal give-way applies, and the pin watch goes on
+        if (foreign) return false;
+
+        if (pinStepLeft > 0) {
+            pinStepLeft--;
+            InputRequestFuture f = INPUTS.submit(InputRequest.builder().owner(this)
+                .input(Input.builder().pressingForward(true).build()).yaw(pinYaw).pitch(0f).priority(LABEL_INPUT_PRIORITY).build());
+            activity.noteInput(f, tickCount);
+            return true;
+        }
+        if (activity.ownPathing()) {
+            // A break of ours is going: let it finish, not for ever
+            if (++pinWaitTicks > 100) {
+                activity.releaseOurPathing();
+                restoreRules();
+                pinWaitTicks = 0;
+            }
+            return true;
+        }
+        pinWaitTicks = 0;
+        long pinnedMs = now - pinStartMs;
+        PinPolicy.Alert due = PinPolicy.alert(pinnedMs, pinAlertAt, pinHelpSent);
+        if (due == PinPolicy.Alert.Pinned) {
+            pinAlertAt = pinnedMs;
+            alert("Pinned for {} min and not free yet; waiting. Nothing is failed meanwhile.", pinnedMs / 60_000);
+        }
+        else if (due == PinPolicy.Alert.NeedsHelp) {
+            pinHelpSent = true;
+            pinAlertAt = pinnedMs;
+            alert("Still pinned after 30 min, needs help. Nothing is failed; the sorter keeps pausing.");
+        }
+        if (tickCount < pinNextTry || !activity.mayRequest()) return true;
+        pinNextTry = tickCount + 20;
+        double moved = Math.hypot(px - pinSampleX, pz - pinSampleZ);
+        pinSampleX = px;
+        pinSampleZ = pz;
+        BlockPos minable = pinMinable(stuckIn, px, py, pz);
+        boolean hasJob = job != null || handle != null || anvilStep != null || placeWalk != null;
+        PinPolicy.Move move = PinPolicy.next(pinAttempt++, minable != null, moved, hasJob);
+        switch (move) {
+            case Break -> {
+                info("Pinned by a block in the bot's box: breaking it.");
+                requestBreak(minable);
+            }
+            case StepOut -> {
+                double dx = 1, dz = 0;
+                BlockPos from = minable != null ? minable : stuckIn;
+                if (from != null) {
+                    dx = px - (from.x() + 0.5);
+                    dz = pz - (from.z() + 0.5);
+                }
+                // No clear side (dead centre, or nothing of ours in the way): turn a quarter each time
+                if (from == null || (Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05)) {
+                    double a = Math.PI / 2 * (pinAttempt / 2);
+                    dx = Math.cos(a);
+                    dz = Math.sin(a);
+                }
+                BlockPos feet = playerFeet();
+                int[] d = PinPolicy.chooseStep(feet.x(), feet.y(), feet.z(), dx, dz, pinGround);
+                if (d == null) {
+                    debug("Pinned: no safe side to step to, waiting.");
+                    break;
+                }
+                pinYaw = (float) Math.toDegrees(Math.atan2(-d[0], d[1]));
+                pinStepLeft = 8;
+                debug("Pinned: stepping out.");
+            }
+            case Wait -> debug("Pinned: waiting a moment.");
+        }
+        return true;
+    }
+
+    private void beginPin(long now, double px, double pz) {
+        pinActive = true;
+        pinAlertAt = -1;
+        pinHelpSent = false;
+        pinStartMs = now;
+        pinAttempt = 0;
+        // The first try comes a second on, so there is a position to compare with
+        pinNextTry = tickCount + 20;
+        pinSampleX = px;
+        pinSampleZ = pz;
+        pinStepLeft = 0;
+        pinWaitTicks = 0;
+        activity.releaseOurPathing();
+        restoreRules();
+        // What was marked failed in the last minutes before it was noticed was the pin's doing
+        takeBackFailures(now - PIN_LOOKBACK_MS);
+        String text = "Pinned: " + pin.why() + ". Pausing the current job and trying to get free.";
+        MODULE_LOG.warn("{}{}", moduleLogPrefix, text);
+        com.porter.qwertestash.manager.ActivityFeed.INSTANCE.event("Stash Sorter", "warn", text);
+    }
+
+    private void endPin(long now) {
+        pinActive = false;
+        pinLastEndMs = now;
+        pinStepLeft = 0;
+        takeBackFailures(pinStartMs - PIN_LOOKBACK_MS);
+        // The walk starts afresh: the time spent pinned does not count against it
+        stepTicks = 0;
+        handleTicks = 0;
+        anvilStepTicks = 0;
+        walkAsked = false;
+        walkFails = 0;
+        walkBest = Double.MAX_VALUE;
+        walkProgressAt = 0;
+        activity.releaseOurPathing();
+        restoreRules();
+        String text = "Free again after " + (now - pinStartMs) / 1000 + " s pinned; going on.";
+        MODULE_LOG.info("{}{}", moduleLogPrefix, text);
+        com.porter.qwertestash.manager.ActivityFeed.INSTANCE.event("Stash Sorter", "info", text);
+    }
+
+    private void takeBackFailures(long sinceMs) {
+        if (deliveryFailure.forgetWalkSince(sinceMs)) MODULE_LOG.info("{}Delivery: the container could not be reached while pinned, trying again.", moduleLogPrefix);
+        int n = 0;
+        for (Box b : unreachableMarks.takeSince(sinceMs)) {
+            if (b.unreachable) {
+                b.unreachable = false;
+                n++;
+            }
+        }
+        if (n > 0) MODULE_LOG.info("{}{} containers marked unreachable while pinned are tried again.", moduleLogPrefix, n);
+    }
+
     private void onTick(ClientBotTick event) {
         try {
             // A dimension change starts the gone-container checks over, whatever the sorter is doing
@@ -1227,6 +1481,9 @@ public class StashSorter extends AbstractFieldModule {
         // Whatever the state (yielding, waiting, resting), the pathfinder's settings are ours only while a request of ours
         // is outstanding
         if (!activity.ownPathing()) restoreRules();
+
+        // Pinned (1.21.0): nothing else runs, so no walk times out, until the bot is free again
+        if (gate == Gate.Running && pinTick(foreign != null)) return;
 
         switch (gate) {
             case Yielding -> {
@@ -3924,7 +4181,7 @@ public class StashSorter extends AbstractFieldModule {
         // and again is given up on like any other container that can't be reached, and doesn't grow the back-off
         boolean failed = activity.superseded() && job != null && handle == null && target != null;
         if (failed && boxFailures.merge(target, 1, Integer::sum) >= MAX_BOX_FAILURES && !target.unreachable) {
-            target.unreachable = true;
+            markUnreachable(target);
             if (step == Step.Walking) reportUnreachable(target);
             else reportCantOpen(target);
         }
@@ -6108,7 +6365,7 @@ public class StashSorter extends AbstractFieldModule {
                 break;
             }
             if (!seen.add(spot)) break;
-            String why = unsafeBecause(spot);
+            String why = playerBoxIntersectsCell(spot.x(), spot.y(), spot.z()) ? "the bot's own body is there" : unsafeBecause(spot);
             if (why == null) return spot;
             debug("Not putting a shulker at {}: {}.", spot, why);
             rejected.merge(why, 1, Integer::sum);
@@ -6545,7 +6802,7 @@ public class StashSorter extends AbstractFieldModule {
                 endHandling();
                 return;
             }
-            PlaceSearch.Result found = placeSearches < MAX_PLACE_SEARCHES ? PlaceSearch.search(playerFeet(), placeView, placeSkip) : null;
+            PlaceSearch.Result found = placeSearches < MAX_PLACE_SEARCHES ? PlaceSearch.search(playerFeet(), playerBody(), placeView, placeSkip) : null;
             if (found != null && found.found() != null) {
                 placeSearches++;
                 PlaceSearch.Found f = found.found();
@@ -6579,7 +6836,11 @@ public class StashSorter extends AbstractFieldModule {
         pickupWatch.placing(countInInv(this::isShulkerBox));
         lastPlaceTick = tickCount;
         placedItem = ItemRegistry.REGISTRY.get(shulker.id);
-        requestPlace(placed, placedItem);
+        if (!requestPlace(placed, placedItem)) {
+            // Refused (the bot's own body is there): another spot next tick
+            placed = null;
+            return;
+        }
         handle = Handle.Place;
         handleTicks = 0;
         noteSpotAsked();
@@ -6621,7 +6882,12 @@ public class StashSorter extends AbstractFieldModule {
             }
             placed = next;
             lastPlaceTick = tickCount;
-            requestPlace(placed, placedItem);
+            if (!requestPlace(placed, placedItem)) {
+                placed = null;
+                handle = Handle.Hold;
+                handleTicks = 0;
+                return;
+            }
             handleTicks = 0;
             noteSpotAsked();
             return;
@@ -6716,8 +6982,16 @@ public class StashSorter extends AbstractFieldModule {
 
     /** The bot's own body is in this cell (it can't put a shulker where it stands). */
     private boolean playerBoxIntersectsCell(int x, int y, int z) {
+        // 1.21.0: the real hitbox at the real position (off the cell's centre, above the floor), not just the feet's cell: a
+        // block put down in the box pinned the bot
         BlockPos feet = playerFeet();
-        return feet.x() == x && feet.z() == z && (feet.y() == y || feet.y() + 1 == y);
+        if (feet.x() == x && feet.z() == z && (feet.y() == y || feet.y() + 1 == y)) return true;
+        return BotBox.overlapsCell(CACHE.getPlayerCache().getX(), CACHE.getPlayerCache().getY(), CACHE.getPlayerCache().getZ(), x, y, z);
+    }
+
+    /** The bot's real position, for the place search. */
+    private PlaceSearch.Body playerBody() {
+        return new PlaceSearch.Body(CACHE.getPlayerCache().getX(), CACHE.getPlayerCache().getY(), CACHE.getPlayerCache().getZ());
     }
 
     private long repackPausedUntil;
@@ -7369,7 +7643,7 @@ public class StashSorter extends AbstractFieldModule {
         }
         if (step == Step.Walking && target != null) {
             activity.releaseOurPathing();
-            target.unreachable = true;
+            markUnreachable(target);
             warn("Skipping the {} at {}: the way there leaves the stash area.", blockName(target), fmt(target.pos));
             finishJob();
             return true;
@@ -7872,6 +8146,11 @@ public class StashSorter extends AbstractFieldModule {
     private void giveUpWalk() {
         activity.releaseOurPathing();
         if (dropIfGone()) return;
+        if (pinCutShort()) {
+            debug("The walk got nowhere while the bot was pinned: not held against the container.");
+            finishJob();
+            return;
+        }
         if (job == Job.Survey && target != null) {
             target.stale = true;
             failSurvey(target);
@@ -7885,6 +8164,12 @@ public class StashSorter extends AbstractFieldModule {
         activity.releaseOurPathing();
         // A container a player broke is forgotten, not tried again (failedSurvey) or marked unreachable
         if (dropIfGone()) return;
+        // The bot was pinned meanwhile (1.21.0): nothing is marked unreachable or failed for it, the job is tried again
+        if (pinCutShort()) {
+            debug("The job got nowhere while the bot was pinned: not held against the container or the delivery.");
+            finishJob();
+            return;
+        }
         // A read that never opened goes to failedSurvey (marked stale, tried again within a minute while resting, or when a
         // container changes), never to unreachable. Other jobs, and walks, give the container up as before
         if (job == Job.Survey && opening && target != null) {
@@ -7907,12 +8192,12 @@ public class StashSorter extends AbstractFieldModule {
                 return;
             }
             // Only a delivery that failed makes the delivery container unusable (and it ends the order with this reason)
-            orders.failDelivery(opening ? "couldn't open the delivery container" : "couldn't reach the delivery container");
+            orders.failDelivery(opening ? "couldn't open the delivery container" : "couldn't reach the delivery container", !opening);
             alert("Couldn't {} the delivery container, nothing more can be delivered.", opening ? "open" : "reach");
             finishJob();
             return;
         }
-        target.unreachable = true;
+        markUnreachable(target);
         if (opening) reportCantOpen(target);
         else reportUnreachable(target);
         finishJob();
@@ -8609,11 +8894,25 @@ public class StashSorter extends AbstractFieldModule {
         traceRequest("open (right click) " + label, future);
     }
 
-    private void requestPlace(BlockPos pos, ItemData item) {
+    /**
+     * Bot tick thread. Asks the pathfinder to put the block down. Never into the bot's own box: then nothing is asked, the spot is
+     * skipped and remembered as failed, and false is returned so the caller takes the next spot at once.
+     */
+    private boolean requestPlace(BlockPos pos, ItemData item) {
+        double bx = CACHE.getPlayerCache().getX(), by = CACHE.getPlayerCache().getY(), bz = CACHE.getPlayerCache().getZ();
+        String refused = playerBoxIntersectsCell(pos.x(), pos.y(), pos.z()) ? PlaceSearch.BODY : PinPolicy.placeRefusal(bx, by, bz, pos.x(), pos.y(), pos.z());
+        if (refused != null) {
+            MODULE_LOG.warn("{}Not placing a block: {}.", moduleLogPrefix, refused);
+            placeSkip.add(pos);
+            failedSpots.add(pos);
+            return false;
+        }
+        rememberOwnPlaced(pos, item);
         rules(false, true);
         PathingRequestFuture future = BARITONE.placeBlock(pos.x(), pos.y(), pos.z(), item);
         activity.notePath(future, BARITONE.getInteractWithProcess(), null, tickCount);
         traceRequest("place " + item.name() + " at " + pos, future);
+        return true;
     }
 
     private void requestBreak(BlockPos pos) {
@@ -11969,7 +12268,7 @@ public class StashSorter extends AbstractFieldModule {
     };
 
     // ------------------------------------------------------------------------------------------------------------------
-    // Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0). An enchant item is a load of its bin that is made at the anvil before the bin is built
+    // Enchant orders (1.20.0, ENCHANT-CONTRACT v1.0). An enchant item is a load of its bin that is made at the anvil before the bin is built
     // (OrderFlow.EnchantLoads comes again until the item is finished or short). One EnchantRun is one item: the preflight (the anvil, the base,
     // the books, the anvil spare and all the bottles taken by the order's take keys only, the carry check, the plan made again with the real
     // items), the steps (Job.Enchant: EnchantTrip, with XpLeveler throwing and GearStow putting the gear away), a top-up of bottles when they ran
@@ -15238,7 +15537,7 @@ public class StashSorter extends AbstractFieldModule {
                 if (carriedAnvilSlot(r) < 0) return anvilGaveUp(r, r.kind == PlaceKind.Table ? "the crafting table is no longer carried" : "the anvil is no longer carried");
                 if (r.spots >= MAX_ANVIL_SPOTS) return anvilGaveUp(r, "it couldn't be put down at " + MAX_ANVIL_SPOTS + " spots");
                 if (r.kind == PlaceKind.Table && tickCount - r.startTick > TABLE_PLACE_TICKS) return anvilGaveUp(r, "it took more than 90 seconds");
-                PlaceSearch.Result found = PlaceSearch.search(playerFeet(), placeView, anvilSkip);
+                PlaceSearch.Result found = PlaceSearch.search(playerFeet(), playerBody(), placeView, anvilSkip);
                 if (found.found() == null) return anvilGaveUp(r, "no spot within " + PlaceSearch.RADIUS + " blocks: " + found.why());
                 r.spots++;
                 anvilSpot = found.found();
@@ -15355,7 +15654,11 @@ public class StashSorter extends AbstractFieldModule {
                     endAnvilPlace(false);
                     return;
                 }
-                requestPlace(at, data);
+                if (!requestPlace(at, data)) {
+                    anvilSkip.add(at);
+                    endAnvilPlace(false);
+                    return;
+                }
                 anvilStep = AnvilStep.Wait;
                 anvilStepTicks = 0;
             }
@@ -16393,11 +16696,12 @@ public class StashSorter extends AbstractFieldModule {
                 // The first half must be put up while the way the bot looks is the way the chest should face, and the cells must still be free
                 double[] at = chestAimPoint(plan);
                 BlockPos cell = bpos(chestHalf == 0 ? plan.first() : plan.second());
-                if (!World.getBlock(cell.x(), cell.y(), cell.z()).isAir()) {
+                if (!World.getBlock(cell.x(), cell.y(), cell.z()).isAir() || playerBoxIntersectsCell(cell.x(), cell.y(), cell.z())) {
                     r.stands.add(stand);
                     nextChestStand(r, "the cell is not free");
                     return;
                 }
+                rememberOwnPlaced(cell);
                 chestAimAt(at[0], at[1], at[2]);
                 if (chestHalf == 0) {
                     double px = CACHE.getPlayerCache().getX(), pz = CACHE.getPlayerCache().getZ();
@@ -16859,17 +17163,17 @@ public class StashSorter extends AbstractFieldModule {
             return DeliverySpot.isSet();
         }
 
-        // Why delivering failed, and for which delivery container: set by a failed Deliver job only
-        private @Nullable String deliveryFailure;
+        // Why delivering failed, and for which delivery container: set by a failed Deliver job only. A failed walk is sticky
+        // unless a pin was near it (1.21.0, StashSorter.deliveryFailure)
         private DeliverySpot.@Nullable Spot failedFor;
 
-        void failDelivery(String why) {
-            deliveryFailure = why;
+        void failDelivery(String why, boolean walk) {
+            deliveryFailure.fail(why, walk, System.currentTimeMillis());
             failedFor = DeliverySpot.get();
         }
 
         void clearDeliveryFailure() {
-            deliveryFailure = null;
+            deliveryFailure.clear();
             failedFor = null;
         }
 
@@ -16878,7 +17182,7 @@ public class StashSorter extends AbstractFieldModule {
             DeliverySpot.Spot spot = DeliverySpot.get();
             if (spot == null) return null;
             if (!DeliverySpot.here(spot)) return "the delivery container is in another dimension (" + spot.dimension() + ")";
-            return deliveryFailure != null && spot.equals(failedFor) ? deliveryFailure : null;
+            return deliveryFailure.reason() != null && spot.equals(failedFor) ? deliveryFailure.reason() : null;
         }
 
         @Override
@@ -17114,7 +17418,7 @@ public class StashSorter extends AbstractFieldModule {
             orderCraftHeld();
         }
 
-        // Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0)
+        // Enchant orders (1.20.0, ENCHANT-CONTRACT v1.0)
 
         @Override
         public @Nullable String enchantProblem(Order order) {

@@ -787,7 +787,7 @@ public class StashCommand extends Command {
      */
     private static final int MARK_EXCLUDE = 0, MARK_DROPOFF = 1, MARK_COMPACT_SKIP = 2;
 
-    // ---- the farmer role (1.20.0): stash farm ... runs only in the proxy terminal; stash tasks stop / resume see FarmCommandSupport ----
+    // ---- the farmer role (1.21.0): stash farm ... runs only in the proxy terminal; stash tasks stop / resume see FarmCommandSupport ----
 
     private static boolean farmOnly(com.mojang.brigadier.context.CommandContext<CommandContext> c) {
         if (com.porter.qwertestash.farm.FarmCommandSupport.farmAllowed(c.getSource().getSource())) return true;

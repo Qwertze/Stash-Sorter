@@ -57,11 +57,25 @@ public final class PlaceSearch {
     }
 
     public static final String ALL_BLOCKED = "all blocked", OUTSIDE = "outside the perimeter", UNREACHABLE = "unreachable",
-        GUARDED = "next to the delivery container, anvil or crafting table", FAILED = "placing there failed before";
+        GUARDED = "next to the delivery container, anvil or crafting table", FAILED = "placing there failed before",
+        BODY = "the bot's own body is there";
 
     private static final int[][] DIRS = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
 
+    /** The bot's real position: where its hitbox is (feet at x, y, z, which may be off the cell's centre and above the floor). */
+    public record Body(double x, double y, double z) {
+    }
+
+    /** With the bot taken as standing at the centre of its feet cell (the box of a bot that stands still in the middle of it). */
     public static Result search(BlockPos feet, View v, Set<BlockPos> skip) {
+        return search(feet, new Body(feet.x() + 0.5, feet.y(), feet.z() + 0.5), v, skip);
+    }
+
+    /**
+     * 1.21.0: no spot is picked that the bot's own hitbox overlaps (see {@link BotBox}). A shulker or anvil put down inside the
+     * box pins the bot, which the cell test on the feet alone missed when the bot stood off the cell's centre or above the floor.
+     */
+    public static Result search(BlockPos feet, Body body, View v, Set<BlockPos> skip) {
         // Walkable cells by steps from the bot
         Map<BlockPos, Integer> steps = new LinkedHashMap<>();
         ArrayDeque<BlockPos> todo = new ArrayDeque<>();
@@ -95,7 +109,7 @@ public final class PlaceSearch {
             }
             for (int[] d : DIRS) {
                 BlockPos spot = new BlockPos(stand.x() + d[0], stand.y(), stand.z() + d[1]);
-                String bad = reject(spot, feet, v, skip, steps);
+                String bad = reject(spot, feet, body, v, skip, steps);
                 if (bad != null) {
                     why.merge(bad, 1, Integer::sum);
                     continue;
@@ -111,7 +125,7 @@ public final class PlaceSearch {
             for (int dz = -RADIUS; dz <= RADIUS; dz++) {
                 for (int dy = -HEIGHT; dy <= HEIGHT; dy++) {
                     BlockPos spot = new BlockPos(feet.x() + dx, feet.y() + dy, feet.z() + dz);
-                    if (!within(feet, spot) || reject(spot, feet, v, skip, Map.of()) != null) continue;
+                    if (!within(feet, spot) || reject(spot, feet, body, v, skip, Map.of()) != null) continue;
                     why.merge(UNREACHABLE, 1, Integer::sum);
                 }
             }
@@ -127,12 +141,13 @@ public final class PlaceSearch {
         return why.equals(UNREACHABLE) ? 0 : why.equals(OUTSIDE) ? 1 : why.equals(GUARDED) ? 2 : why.equals(FAILED) ? 3 : why.equals(ALL_BLOCKED) ? 5 : 4;
     }
 
-    private static @Nullable String reject(BlockPos spot, BlockPos feet, View v, Set<BlockPos> skip, Map<BlockPos, Integer> walk) {
+    private static @Nullable String reject(BlockPos spot, BlockPos feet, Body body, View v, Set<BlockPos> skip, Map<BlockPos, Integer> walk) {
         if (!within(feet, spot)) return ALL_BLOCKED;
         // The shulker's cell: air, a floor, room above to open
         if (!v.open(spot.x(), spot.y(), spot.z()) || !v.floor(spot.x(), spot.y() - 1, spot.z()) || v.floor(spot.x(), spot.y() + 1, spot.z())) return ALL_BLOCKED;
         // Not where the bot stands now
         if (spot.equals(feet)) return ALL_BLOCKED;
+        if (BotBox.overlapsCell(body.x(), body.y(), body.z(), spot.x(), spot.y(), spot.z())) return BODY;
         if (skip.contains(spot)) return FAILED;
         if (!v.inArea(spot)) return OUTSIDE;
         if (v.guarded(spot)) return GUARDED;

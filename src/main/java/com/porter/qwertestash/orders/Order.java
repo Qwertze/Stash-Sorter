@@ -44,7 +44,7 @@ public final class Order {
         /** An ordinary load, taken from the stash; a load still to be crafted (not in the stash); a load that was crafted (in hand, not in the stash). */
         public static final int NONE = 0, PENDING = 1, CRAFTED = 2;
         /**
-         * An item still to be enchanted (1.19.0, ENCHANT-CONTRACT v1.0): not in the stash as such, made at the anvil before its bin is built. Its variant is
+         * An item still to be enchanted (1.20.0, ENCHANT-CONTRACT v1.0): not in the stash as such, made at the anvil before its bin is built. Its variant is
          * {@link #enchantVariant}, the number of the item in the order's enchant ledger; once it is finished the lot is the finished stack (state CRAFTED).
          */
         public static final int ENCHANT = 3;
@@ -88,7 +88,7 @@ public final class Order {
         }
 
         /**
-         * The variant text of a load that is a base for an enchant plan (1.19.0, ENCHANT-CONTRACT draft 3.4): made by the order's craft block, kept in hand for the enchant
+         * The variant text of a load that is a base for an enchant plan (1.20.0, ENCHANT-CONTRACT draft 3.4): made by the order's craft block, kept in hand for the enchant
          * run and never put in a shulker. It lives in the last bin that has enchant loads until that bin is built (then {@link OrderFlow} lets it go).
          */
         public static final String BASE_VARIANT = "enchantbase";
@@ -170,7 +170,7 @@ public final class Order {
     public final @Nullable Craft craft;
     /** The kit block (1.16.0, KIT-CONTRACT v2), or null when the order has no kit lines. */
     public final KitOrder.@Nullable Snapshot kit;
-    /** The enchant block (1.19.0, ENCHANT-CONTRACT v1.0), or null when the order has no enchant lines; {@link EnchantOrder.Block#unreadable()} when it is there but wrong. */
+    /** The enchant block (1.20.0, ENCHANT-CONTRACT v1.0), or null when the order has no enchant lines; {@link EnchantOrder.Block#unreadable()} when it is there but wrong. */
     public final EnchantOrder.@Nullable Block enchant;
     /** A kit restock job (1.16.0): never from the server, never reported; its kit is filed by the sorter instead of delivered. */
     public boolean restock;

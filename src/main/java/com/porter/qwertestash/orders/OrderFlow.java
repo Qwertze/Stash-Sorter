@@ -209,7 +209,7 @@ public final class OrderFlow {
         }
 
         /**
-         * Why this bot can't carry out the order's enchant lines (1.19.0, ENCHANT-CONTRACT v1.0), as a {@link Codes} reason, or null when it can: the option is off,
+         * Why this bot can't carry out the order's enchant lines (1.20.0, ENCHANT-CONTRACT v1.0), as a {@link Codes} reason, or null when it can: the option is off,
          * the order's Minecraft version is not this bot's ({@code mc_mismatch}), or the proxy's own Enchanter, KitMaker or OrderFiller is on ({@code module_conflict}).
          * Asked once, when the order is planned. A host that can't enchant says so, and every enchant item is short with the reason.
          */
@@ -218,7 +218,7 @@ public final class OrderFlow {
         }
 
         /**
-         * A plan was taken up again after a restart (1.19.0): finished enchant items that are still carried are set aside again (the host forgot which slots they
+         * A plan was taken up again after a restart (1.20.0): finished enchant items that are still carried are set aside again (the host forgot which slots they
          * were in). Items that are not carried any more are the host's to report: it returns the keys (finished lots) to drop.
          */
         default void enchantResumed(List<Unit> units) {
@@ -259,7 +259,7 @@ public final class OrderFlow {
     }
 
     /**
-     * Make the enchant items of this bin (1.19.0, ENCHANT-CONTRACT v1.0): the first load flagged {@link Order.Lot#enchant()} ({@link Unit#nextEnchantLot}) is
+     * Make the enchant items of this bin (1.20.0, ENCHANT-CONTRACT v1.0): the first load flagged {@link Order.Lot#enchant()} ({@link Unit#nextEnchantLot}) is
      * gathered, planned again with the real items and worked at the anvil before the bin is built. The intent comes again until the item is finished or short;
      * the host decides each time from the ledger whether to gather, to put an anvil down, to fetch bottles or to run the steps. It reports through
      * {@link #enchantItemDone}, {@link #enchantItemShort} and {@link #enchantChanged}, or {@link #enchantAbandon}.
@@ -370,7 +370,7 @@ public final class OrderFlow {
         public @Nullable String repair;
         /** The craft ledger so far (CraftLedger.toSaved as JSON text), or null for none / an older save (1.15.0). */
         public @Nullable String craft;
-        /** The enchant ledger and journal so far (EnchantLedger.toSaved as JSON text), or null for none / an older save (1.19.0). */
+        /** The enchant ledger and journal so far (EnchantLedger.toSaved as JSON text), or null for none / an older save (1.20.0). */
         public @Nullable String enchant;
 
         public static final class UnitSave {
@@ -494,7 +494,7 @@ public final class OrderFlow {
         return u.kitTemplate != null && kitResult != null && kitSettled.add(u);
     }
 
-    /** What the order's enchant lines have done (1.19.0, ENCHANT-CONTRACT v1.0), with the journal of the item in hand. Null when the order has none. */
+    /** What the order's enchant lines have done (1.20.0, ENCHANT-CONTRACT v1.0), with the journal of the item in hand. Null when the order has none. */
     private @Nullable EnchantLedger enchantLedger;
     private Map<String, Long> enchantReturnPlanned = Map.of();
     private long enchantReturnSince;
@@ -772,7 +772,7 @@ public final class OrderFlow {
                 else craftLots = made;
             }
         }
-        // Enchant lines (1.19.0): every item is a load of its bin that is made at the anvil first; an order the bot can't carry out has them all short
+        // Enchant lines (1.20.0): every item is a load of its bin that is made at the anvil first; an order the bot can't carry out has them all short
         List<Order.Lot> enchantLots = List.of();
         if (o.hasEnchant() && enchantLedger == null) {
             enchantLedger = startEnchant(o);
@@ -1194,7 +1194,7 @@ public final class OrderFlow {
         saveCraft(null);
     }
 
-    // Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0)
+    // Enchant orders (1.20.0, ENCHANT-CONTRACT v1.0)
 
     /**
      * The ledger of an enchant order. When the bot can't carry the order out (the block can't be read, the option is off, the version differs, a proxy module is
@@ -1888,7 +1888,7 @@ public final class OrderFlow {
                     skip("lost a finished shulker");
                     continue;
                 }
-                // Its enchant items (1.19.0) are made first, one at a time, before anything of the bin is built (the anvil work puts no shulker down, so a pause in
+                // Its enchant items (1.20.0) are made first, one at a time, before anything of the bin is built (the anvil work puts no shulker down, so a pause in
                 // shulker handling does not hold it). The intent comes again until the item is finished or short.
                 if (enchantLedger != null && u.nextEnchantLot() >= 0) {
                     int at = u.nextEnchantLot();

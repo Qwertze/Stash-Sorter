@@ -21,8 +21,8 @@ instead of your client.
   ask for it). See below.
 - **Repair passes** (new in 1.17.0): when idle, the bot repairs the low-durability items in the stash with bottles from the stash, and sends the items without Mending to a chest you pick on the Stash Manager website. See Repair mode below.
 - **Pearl travel** (new in 1.18.0, needs Stash Manager server 1.3.0, off by default, not tried in the game yet): the bot goes to a pearl station and back by whispering the station's loader bot, and a loader bot reports its approved travellers' pearls to the server. See Pearl travel below.
-- **Enchant orders** (new in 1.19.0, needs Stash Manager server 1.4.0, off by default, not tried in the game yet): the bot makes an enchanted item from a base item and enchanted books from the stash, with
-- **Farmer role** (new in 1.20.0, needs Stash Manager server 1.5.0 and the 2.6p proxy patches, off by default, not tried on a real CT yet): the bot replays a farm program recorded with the addon (modes custom and afk_still), corrects drift at the recorded anchors and stops on STOP, danger or time. No coordinate ever leaves the bot. See The farmer role below.
+- **Enchant orders** (new in 1.20.0, needs Stash Manager server 1.4.0, off by default, not tried in the game yet): the bot makes an enchanted item from a base item and enchanted books from the stash, with
+- **Farmer role** (new in 1.21.0, needs Stash Manager server 1.5.0 and the 2.6p proxy patches, off by default, not tried on a real CT yet): the bot replays a farm program recorded with the addon (modes custom and afk_still), corrects drift at the recorded anchors and stops on STOP, danger or time. No coordinate ever leaves the bot. See The farmer role below.
   Bottles o' Enchanting from the stash for the levels, and delivers it with the rest of the order. See Enchant orders below.
 - **Crafts what the stash can make for orders** (craft orders, new in 1.15.0): the website's build planner and the Printer can order items the stash does
   not hold but can make from what it holds; the bot crafts them at the crafting table set for the stash on the website. Needs a recipe table fetched
@@ -461,7 +461,7 @@ gives way to orders, players within 8 blocks and a stop, and puts everything bac
 
 It has not been tried in the game yet.
 
-## Enchant orders (1.19.0)
+## Enchant orders (1.20.0)
 Needs Stash Manager server 1.4.0 (contract `ENCHANT-CONTRACT-v1.0.md`). With an older server nothing changes: the server never hands this bot an enchant order. It has not been tried in the game yet.
 
 The orderer picks an item and the enchantments on the website. The server finds the order of anvil steps with the fewest XP points (no step above 39 levels) with the shared `qwerte-core` library and reserves the base item, the enchanted books, the anvils and the experience bottles. This bot
@@ -537,7 +537,7 @@ the queue or offline is `owner_offline`, never `empty`). A load is seen from the
 
 Nothing here has been run in game. The in-game spike (`PEARL-SPIKE.md`) was skipped, so these are unverified: pearls after a rejoin and in the queue (the plugin treats a pearl that is not seen as `unknown` until the grace period has passed, and a trip never starts from the queue), the whisper's sender identity, a pull across dimensions, the arrival and re-arm, and which chamber PearlDrop picks. The loader can't see PearlPlus's own queue, so it reports `loading` and `loaded` only. The owner's chamber positions are never sent, so the server shows them by id only. The Qwerte addon's pearl support is not part of this release.
 
-## The farmer role (1.20.0)
+## The farmer role (1.21.0)
 
 A bot with the farmer role replays a recorded farm program and keeps the farm running (FARM-CONTRACT v1.0). You record the loop once, in game, from the farmer's own proxy, with the Qwerte addon's recorder (0.12.0); the program goes to the proxy over the Bridge channel, is encrypted on the farmer's disk and never goes anywhere else. The owner starts and stops sessions on the Stash Manager website (server 1.5.0) or in the Stash Window. M2 runs the modes `custom` (the recorded loop) and `afk_still` (stand at an anchor); the others are refused with `mode_not_ready`.
 

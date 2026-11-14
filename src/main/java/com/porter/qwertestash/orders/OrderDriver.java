@@ -99,7 +99,7 @@ public final class OrderDriver {
     private volatile java.util.function.@Nullable BooleanSupplier enchantOrdersWhen;
 
     /**
-     * Whether the claim carries {@code enchantOrders: 1} (1.19.0, ENCHANT-CONTRACT v1.0): asked when the claim is made. Only a bot with the option on, a supported
+     * Whether the claim carries {@code enchantOrders: 1} (1.20.0, ENCHANT-CONTRACT v1.0): asked when the claim is made. Only a bot with the option on, a supported
      * Minecraft version and none of the proxy's Enchanter, KitMaker or OrderFiller on claims it, or one that holds an enchant order. The server also needs
      * {@code player} in the claim, which every claim carries.
      */
@@ -223,7 +223,7 @@ public final class OrderDriver {
             // 1.16.0 (KIT-CONTRACT v2 "Claim"): this bot can build kits (kit sorting and kit orders on, the type table loaded), or it holds a kit order
             java.util.function.BooleanSupplier kitAsk = kitOrdersWhen;
             if (kitAsk != null && kitAsk.getAsBoolean()) o.addProperty("kitOrders", 1);
-            // 1.19.0 (ENCHANT-CONTRACT v1.0 "Heartbeat, claim and capability"): this bot makes enchant items
+            // 1.20.0 (ENCHANT-CONTRACT v1.0 "Heartbeat, claim and capability"): this bot makes enchant items
             java.util.function.BooleanSupplier enchantAsk = enchantOrdersWhen;
             if (enchantAsk != null && enchantAsk.getAsBoolean()) o.addProperty("enchantOrders", 1);
             return new Request("/api/v1/orders/claim", bytes(o, player), (code, body) -> {

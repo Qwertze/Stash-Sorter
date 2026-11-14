@@ -62,7 +62,7 @@ import static com.porter.qwertestash.QwerteStashPlugin.CONFIG;
 import static com.porter.qwertestash.QwerteStashPlugin.LOG;
 
 /**
- * The farmer role (FARM-CONTRACT v1.0, plugin 1.20.0). On while {@code CONFIG.farmerEnabled}. It owns:
+ * The farmer role (FARM-CONTRACT v1.0, plugin 1.21.0). On while {@code CONFIG.farmerEnabled}. It owns:
  * <ul>
  *   <li>the Bridge handlers of {@code qwerte/farm/*} (netty thread: they copy bytes and answer; the heavy work is on {@code store worker}),</li>
  *   <li>the sealed stores, the sync client ({@code sync worker}) and the session, which runs on the {@code ClientBotTick} thread only.</li>

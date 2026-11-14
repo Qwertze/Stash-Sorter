@@ -5,7 +5,11 @@ All notable changes to Stash Sorter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.20.0] - Unreleased
+## [1.21.0] - Unreleased
+
+> Renumbered on 2026-11-14: main's 1.19.0 is 1.17.0 + enchant without pearl travel; 1.18.1 is the hotfix for 1.18.0.
+
+> The anvil/pinned fix (the pinned-bot items under Fixed and Review fixes below) also ships in 1.18.1 and in main's 1.19.0.
 
 ### Added
 - **The farmer role** (FARM-CONTRACT v1.0 draft 2.4, item 2.6; needs Stash Manager server 1.5.0 and the 2.6p proxy patches; not tried on a real farmer CT yet, see "Tested" below). A bot with the farmer role replays a recorded farm program (made with the addon's recorder, 0.12.0) and keeps the farm running: it walks the recorded loop, corrects drift at the recorded anchors and stops on STOP, danger or time. M2 runs the modes `custom` and `afk_still`; every other mode is refused with `mode_not_ready`.
@@ -22,7 +26,7 @@ All notable changes to Stash Sorter are documented here. The format follows
 - `qwerte-core` 1.1.0 (the `farm` package) is synced into the plugin.
 - Needs patch 08 of the 2.6p set: the patched proxy sends `hello(side="proxy")` on its own when a player logs in (Bridge on), so the addon can wait for it before it sends anything. The plugin now accepts the Bridge build id `2.6p-2` only (`BridgeProtocol.FARM_HARDENING`); the Discord id stays `2.6p-1`. A proxy built from patches 01 to 07 only (`2.6p-1`) refuses with `unsafe_bridge`.
 
-### Review fixes (code and security review of 1.20.0)
+### Review fixes (code and security review of 1.21.0)
 - **`unsafe_viewer`:** sessions, uploads and `stash farm accept` are refused while the proxy's viewer API is on (`server.viewer.enabled` or `control`, or unreadable); the `stash farm` and resume commands also refuse while viewer control is on. `stash farm selftest` shows both values, `server.verifyUsers` and the whisper search.
 - **Logging:** the log filter is checked on all three appenders at every session start and resume (a logback reconfigure drops it) and put back if missing; the cause chain and E-notation numbers are scanned.
 - **No position feeds:** whisper search and alerts are off while the role is on (and a whisper search on is a `module_conflict`); every feed gate is also wired at its real call site (map tiles, delivery contents, kit report, pearl heartbeat fields, viewer feed); `stash` subcommands that show positions are off and the stash status block is not printed.
@@ -38,7 +42,16 @@ All notable changes to Stash Sorter are documented here. The format follows
 ### Changed
 - Needs the 2.6p proxy patch set (Bridge hardening, the size cap, no coordinates in the Discord death and spawn-patrol embeds, no goal in the pathfinder log line, and the build ids the farmer checks). An unpatched proxy keeps the farm handlers off (`unsafe_bridge`, `unsafe_discord`).
 
-## [1.19.0] - Unreleased
+### Fixed
+- **Pinned by its own block (self-contained fix, also goes to the main-line release as 1.18.1).** On 2026-11-14 a bot put an anvil down inside its own hitbox, was teleported back about 10 times a second for 16 minutes, every walk failed ("taken too long"), a delivery failed with "couldn't reach the delivery container" and three ordinary chests were marked unreachable; the delivery failure then stuck and ended later orders at once.
+  - **No block inside the bot's box:** the place search (anvil, crafting table, shulker, spots found nearby), the spot beside the bot, the delivery chest stack and the final place request (which now refuses such a cell at once, skips it and takes the next) use the bot's real hitbox (0.3 half width plus a 0.02 margin, 1.8 high) at its real position, off the cell's centre and above the floor. Before, only the feet's own cell and the one above it were refused.
+  - **Pinned is detected:** 20 or more server position corrections (`PlayerSetbackEvent`, which the proxy posts for every server position packet: a teleport, a rubberband, a login or respawn sync) within 5 s, or a walk that has not moved the bot 0.5 blocks for 20 s while a block it put down overlaps its box. While pinned nothing else of the sorter runs, so no walk times out. A bot that is still being moved only pauses. One held in place (moved 0.2 blocks or less between tries, 1 s apart) first mines back an anvil or crafting table it put down (3 tries; after a restart, an anvil or crafting table in its box outside the stash area; never a chest, barrel or shulker box, and nothing inside the stash area), then steps out. It steps only if the cell ahead has a solid floor (a drop of one at most) and no fluid, fire or magma, trying the four directions in turn, and waits if none is safe; with no job (idle or resting) it only pauses. It goes on when the corrections have stopped for 3 s and nothing of its own is in the way. Log lines say "Pinned: ..." and "Free again after N s pinned" (no coordinates); an alert after a minute, again every 5 minutes, and a distinct "needs help" alert at 30 minutes; orders are never failed for it.
+  - **Nothing is held against a pin:** a walk or open cut short by a pin does not mark a container unreachable or fail the delivery; marks and a delivery walk failure made in the 2 minutes before it was noticed are taken back when the pin starts and ends. A delivery that fails on a walk with no pin near it is still sticky, as before.
+  - No new settings. The thresholds are constants in `PinWatch`.
+
+## [1.20.0] - Unreleased
+
+> Renumbered on 2026-11-14: main's 1.19.0 is 1.17.0 + enchant without pearl travel; 1.18.1 is the hotfix for 1.18.0.
 
 ### Added
 - **Enchant orders** (ENCHANT-CONTRACT v1.0 draft 3.3, needs Stash Manager server 1.4.0; not tried in the game yet). The bot makes an enchanted item from a base item and enchanted books taken from the stash, with experience bottles for the levels, and packs it into the order's shulker. Off by default
@@ -69,7 +82,7 @@ All notable changes to Stash Sorter are documented here. The format follows
   - **Known limit.** `CraftLedger` `made` and `wanted` are per item key: with an ordered craft line and a base of the same item, a short craft can't say which of the two it was.
   - **Journal and resume.** The base loads are saved with the order's plan (state PENDING, then CRAFTED) and the craft ledger with them, so a restart between crafting and enchanting does not craft again; `craftResumed` matches the carried stacks to the made base loads slot by slot, and the journal matches them by what they are.
 
-### Review fixes (1.19.0)
+### Review fixes (1.20.0)
 - **Guard (owner's decision).** `AutoMend` and `AutoArmor` now refuse enchant orders with `module_conflict` like `Enchanter`, `KitMaker` and `OrderFiller` (planning, each preflight, heartbeat `enabled:false`). `AutoTotem` may stay on: the bottles are thrown from the MAIN hand and `GearStow` no longer touches the off hand (it selects a hotbar slot for the bottles and selects the old one back).
 - **Trip.** The gear is always put back when the trip is aborted during stowing; a window that closes mid-step opens again (3 tries, then `NEED_ANVIL`, never `SHORT` for that); a result still in the anvil slot is taken again; the result is taken with one quick-move click when it lands in a carry slot; a force-cancel in a level pause or while throwing ends the trip at once with `FORCE_CANCELLED`; `specOf` can't recurse on a bad plan.
 - **Resume past step 1.** A running item is not failed by `enchantAbandon`: a proxy module on makes it wait ("waiting: turn off <module>"), another Minecraft version or the option off let it finish and refuse the items not started. `enchantBoundary` is reset on reset and on taking an order up.

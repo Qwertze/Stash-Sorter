@@ -1523,7 +1523,7 @@ public class StashManager extends Module {
         }
     }
 
-    // Enchant orders (1.19.0, ENCHANT-CONTRACT v1.0): the heartbeat's capability block
+    // Enchant orders (1.20.0, ENCHANT-CONTRACT v1.0): the heartbeat's capability block
 
     private boolean enchantAnnounced;
 
