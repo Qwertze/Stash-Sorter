@@ -293,4 +293,17 @@ public class StashConfig {
     public List<Long> craftTablePlacedAt = new ArrayList<>();
     public String craftTableOrder = "";
     public int craftTableOrderCount;
+
+    // Farmer role (1.20.0, FARM-CONTRACT v1.0). Local switches only: the farmer role is turned on and off in the proxy terminal; none of these is shown on the dashboard.
+
+    /** This bot may run farm sessions the Stash Manager server offers it (the server must give it the farmer role too). Turns off the dashboard link, the index and every position feed. */
+    public boolean farmerEnabled = false;
+    /** Priority of the farm player's input requests: above AntiAFK and AutoFish, below the pathfinder, KillAura, Click, AutoOmen, AutoEat and AutoTotem. */
+    public int farmInputPriority = 6500;
+    /** Seconds without a successful sync before a running farm parks as server_unreachable. */
+    public int farmOfflineGraceSeconds = 600;
+    /** Carry on by itself when the controlling player leaves. */
+    public boolean farmResumeAfterController = true;
+    /** Players whose connection may see farm names in the Bridge ready message. Empty: nobody. */
+    public List<String> farmOwners = new ArrayList<>();
 }

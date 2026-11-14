@@ -74,6 +74,7 @@ public final class DeliveryContents {
      * ({@code items} null, {@code readAt} 0) one by one until it fits.
      */
     public static @Nullable Built build(String server, String stash, String player, List<Chest> chests) {
+        if (!com.porter.qwertestash.farm.FarmerGuard.allowDeliveryContents()) return null; // the farmer role
         if (chests.isEmpty()) return null;
         int count = Math.min(MAX_CHESTS, chests.size());
         Built b = build(server, stash, player, chests, true, count);

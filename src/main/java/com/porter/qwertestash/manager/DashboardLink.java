@@ -145,7 +145,7 @@ public final class DashboardLink {
         this.host = host;
         apply.allowCoreThreadTimeOut(true);
         ViewerFeed.Game game = host.viewerGame();
-        if (game != null) viewer = new ViewerFeed(game, this::postViewer, host.botId(), () -> viewerWanted = null);
+        if (game != null && com.porter.qwertestash.farm.FarmerGuard.allowViewerFeed()) viewer = new ViewerFeed(game, this::postViewer, host.botId(), () -> viewerWanted = null);
     }
 
     /** The live viewer, or null when the host has none. */

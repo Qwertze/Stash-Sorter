@@ -194,7 +194,13 @@ public final class ViewerFeed {
     private static final Map<Integer, int[][]> OFFSETS = new ConcurrentHashMap<>();
 
     public ViewerFeed(Game game, Poster poster, String botId, @Nullable Runnable onStopped) {
-        this(game, poster, CHAT, System::currentTimeMillis, true, botId, onStopped);
+        this(farmerChecked(game), poster, CHAT, System::currentTimeMillis, true, botId, onStopped);
+    }
+
+    /** The farmer role never has a viewer feed (FARM P5a). */
+    private static Game farmerChecked(Game game) {
+        if (!com.porter.qwertestash.farm.FarmerGuard.allowViewerFeed()) throw new IllegalStateException("farmer role");
+        return game;
     }
 
     ViewerFeed(Game game, Poster poster, ChatRing chat, LongSupplier clock, boolean threaded, String botId, @Nullable Runnable onStopped) {

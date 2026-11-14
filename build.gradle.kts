@@ -99,6 +99,7 @@ tasks.test {
     providers.gradleProperty("stashManagerJar").orNull?.let { systemProperty("stashManagerJar", it) }
     providers.gradleProperty("stashManagerPort").orNull?.let { systemProperty("stashManagerPort", it) }
     providers.gradleProperty("stashManagerData").orNull?.let { systemProperty("stashManagerData", it) }
+    providers.gradleProperty("patchedProxyJar").orNull?.let { systemProperty("patchedProxyJar", it) }
     testLogging {
         events("failed", "skipped")
         showStandardStreams = false

@@ -170,6 +170,8 @@ public final class ConfigSchema {
         for (Field f : type.getDeclaredFields()) {
             int m = f.getModifiers();
             if (!Modifier.isPublic(m) || Modifier.isStatic(m) || Modifier.isTransient(m) || f.isSynthetic()) continue;
+            // The farmer role (FARM-CONTRACT P5a): no farm setting is ever shown or changed from the dashboard
+            if (type == com.porter.qwertestash.StashConfig.class && f.getName().startsWith("farm")) continue;
             out.add(f);
         }
         return out;

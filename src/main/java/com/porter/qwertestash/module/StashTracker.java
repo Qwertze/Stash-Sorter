@@ -409,6 +409,7 @@ public class StashTracker extends Module {
     // Whisper search
 
     private void onWhisper(WhisperChatEvent event) {
+        if (com.porter.qwertestash.farm.FarmerGuard.active()) return; // the farmer role: a whisper search answers with positions, so it never runs
         if (event.outgoing() || !CONFIG.whisperSearch || event.sender() == null) return;
 
         String sender = event.sender().getName();

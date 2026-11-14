@@ -187,6 +187,7 @@ public final class KitReport {
     /** As above, with the state of kit restock for {@code restock} (null: off). */
     public static Built buildV2(Stash stash, boolean includeExcluded, String player, List<Item> carried, KitScore.Scoring scoring, KitItems items, @Nullable KitSettings settings,
                                 com.porter.qwertestash.orders.KitRestock.@Nullable Decision restock) {
+        if (!com.porter.qwertestash.farm.FarmerGuard.allowKitReport()) throw new IllegalStateException("farmer role"); // no kit report leaves a farmer
         restockNow = restock;
         KitTypes table = KitTypes.shared();
         KitSettings.Types types = settings == null ? null : settings.types();

@@ -379,7 +379,7 @@ public class StashManager extends Module {
      */
     public synchronized void updateDashboard() {
         try {
-            boolean want = isEnabled() && CONFIG.manager && CONFIG.dashboard;
+            boolean want = isEnabled() && CONFIG.manager && CONFIG.dashboard && com.porter.qwertestash.farm.FarmerGuard.allowDashboardLink();
             if (want) {
                 if (link != null && link.isRunning()) return;
                 link = new DashboardLink(new LinkHost());
@@ -661,6 +661,11 @@ public class StashManager extends Module {
                 LOG.warn("{}couldn't handle a reply: {}", PREFIX, e.toString());
             }
         }
+        // The farmer role (FARM P5a): no index, no heartbeat, no pearl, delivery or kit report, no map tiles, no viewer: nothing of the stash leaves this bot
+        if (!com.porter.qwertestash.farm.FarmerGuard.allowIndexAndHeartbeat()) {
+            setStatus("off (farmer role)");
+            return;
+        }
         // Pearl travel runs before everything that needs the bot in the game: it is the part that notices a disconnect
         boolean inGame = Alerts.online() && !inQueueNow();
         if (inGame && joinedAt == 0) joinedAt = System.currentTimeMillis();
@@ -884,7 +889,7 @@ public class StashManager extends Module {
         craftSentOrders = craftNow.orders() != null;
         ManagerIndex.RepairHb repairNow = repairBody(built);
         PearlTripDriver.ManagerBody pearlBody = pearlDriver.body();
-        ManagerIndex.PearlHb pearlNow = new ManagerIndex.PearlHb(pearlBody.object(), pearlBody.clear());
+        ManagerIndex.PearlHb pearlNow = com.porter.qwertestash.farm.FarmerGuard.allowPearlHeartbeatFields() ? new ManagerIndex.PearlHb(pearlBody.object(), pearlBody.clear()) : new ManagerIndex.PearlHb(null, false);
         ManagerIndex.EnchantHb enchantNow = enchantBody();
         send(base, "/api/v1/heartbeat", ManagerIndex.heartbeat(built, done, rescanBlocked, blocker, delivery, naming, crafting, storage, deliveryReport == null ? null : deliveryReport.hash(), kitsBody(built), craftNow, areaNow, repairNow, pearlNow, enchantNow), key, (code, body) -> {
             if (ManagerIndex.craftShapeRefused(code, body, craftSentOrders, craftLegacy)) {

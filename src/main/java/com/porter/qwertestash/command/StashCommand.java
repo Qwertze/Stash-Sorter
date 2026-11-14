@@ -149,7 +149,9 @@ public class StashCommand extends Command {
                 "craftingtable <x> <y> <z> [dimension]",
                 "craftingtable clear",
                 "craftingtable",
-                "craftNeverUse add/remove <item id>/list"
+                "craftNeverUse add/remove <item id>/list",
+                "farm on/off | status | list | accept [minutes] | start <id> | stop | forget <id> | attach <id> | selftest | owner add/del <player> (proxy terminal only)",
+                "tasks stop | resume | list"
             )
             .build();
     }
@@ -189,7 +191,7 @@ public class StashCommand extends Command {
                 CONFIG.collectRange = getInteger(c, "blocks");
                 c.getSource().getEmbed().title("Collect Range Set");
             })))
-            .then(literal("search").then(argument("query", greedyString()).executes(c -> {
+            .then(literal("search").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active()).then(argument("query", greedyString()).executes(c -> {
                 search(c.getSource().getEmbed(), getString(c, "query"));
             })))
             .then(literal("name").then(argument("name", greedyString()).executes(c -> {
@@ -209,21 +211,21 @@ public class StashCommand extends Command {
                     case Debug -> "Debug: everything, with the reasons behind each decision, marked [debug].";
                 });
             })))
-            .then(literal("exclude")
+            .then(literal("exclude").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active())
                 .executes(c -> {
                     mark(c.getSource().getEmbed(), null, MARK_EXCLUDE);
                 })
                 .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer()).executes(c -> {
                     mark(c.getSource().getEmbed(), new BlockPos(getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z")), MARK_EXCLUDE);
                 })))))
-            .then(literal("dropoff")
+            .then(literal("dropoff").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active())
                 .executes(c -> {
                     mark(c.getSource().getEmbed(), null, MARK_DROPOFF);
                 })
                 .then(argument("x", integer()).then(argument("y", integer()).then(argument("z", integer()).executes(c -> {
                     mark(c.getSource().getEmbed(), new BlockPos(getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z")), MARK_DROPOFF);
                 })))))
-            .then(literal("compactSkip")
+            .then(literal("compactSkip").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active())
                 .executes(c -> {
                     mark(c.getSource().getEmbed(), null, MARK_COMPACT_SKIP);
                 })
@@ -258,7 +260,7 @@ public class StashCommand extends Command {
                 .then(literal("list").executes(c -> {
                     c.getSource().getEmbed().title("Never Compacted").description(CONFIG.compactExclude.isEmpty() ? "Nothing is excluded." : String.join(", ", CONFIG.compactExclude)).primaryColor();
                 })))
-            .then(literal("area")
+            .then(literal("area").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active())
                 .executes(c -> {
                     showArea(c.getSource().getEmbed());
                 })
@@ -388,6 +390,8 @@ public class StashCommand extends Command {
                             ? "Orders with enchant lines are taken: the bot takes the base, books, an anvil spare and bottles from the stash, levels up and uses an anvil. It moves its own Mending gear off while it throws bottles."
                             : "Orders with enchant lines are not taken.").primaryColor();
                 })))
+            .then(farmNode())
+            .then(tasksNode())
             .then(literal("pearl")
                 .then(literal("travel").then(argument("toggle", toggle()).executes(c -> {
                     if (c.getSource().getSource() instanceof com.porter.qwertestash.manager.DashboardCommandSource) {
@@ -439,7 +443,7 @@ public class StashCommand extends Command {
                 .then(literal("status").executes(c -> {
                     c.getSource().getEmbed().title("Pearl Travel").description(MODULE.get(StashManager.class).pearl().statusLine()).primaryColor();
                 })))
-            .then(literal("labels").executes(c -> {
+            .then(literal("labels").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active()).executes(c -> {
                 c.getSource().getEmbed().title("Labels").description(MODULE.get(StashSorter.class).labelsReport()).primaryColor();
             }))
             .then(literal("stayOn").then(argument("toggle", toggle()).executes(c -> {
@@ -481,7 +485,7 @@ public class StashCommand extends Command {
                     CONFIG.keepSlots = getString(c, "slots").trim();
                     c.getSource().getEmbed().title("Keep Slots Set");
                 })))
-            .then(literal("index").executes(c -> {
+            .then(literal("index").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active()).executes(c -> {
                 Stash stash = Stashes.current();
                 if (stash == null) {
                     c.getSource().getEmbed().title("No Stash Here Yet");
@@ -653,7 +657,7 @@ public class StashCommand extends Command {
                     c.getSource().getEmbed().title("Accepting Orders " + toggleStrCaps(CONFIG.acceptOrders))
                         .description(CONFIG.acceptOrders ? ordersHint() : "The bot takes no new orders; one in hand is parked and resumed when this is turned on again.").primaryColor();
                 })))
-            .then(literal("delivery")
+            .then(literal("delivery").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active())
                 .executes(c -> {
                     deliveryShow(c.getSource());
                 })
@@ -681,7 +685,7 @@ public class StashCommand extends Command {
                     .then(argument("dimension", word()).executes(c -> {
                         deliverySet(c.getSource(), getInteger(c, "x"), getInteger(c, "y"), getInteger(c, "z"), getString(c, "dimension"));
                     }))))))
-            .then(literal("anvil")
+            .then(literal("anvil").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active())
                 .executes(c -> {
                     anvilShow(c.getSource());
                 })
@@ -749,7 +753,7 @@ public class StashCommand extends Command {
                 .then(literal("list").executes(c -> {
                     c.getSource().getEmbed().title("Never Crafted With").description(CONFIG.craftNeverUse.isEmpty() ? "Nothing is on the list." : String.join(", ", CONFIG.craftNeverUse)).primaryColor();
                 })))
-            .then(literal("craftingtable")
+            .then(literal("craftingtable").requires(c -> !com.porter.qwertestash.farm.FarmerGuard.active())
                 .executes(c -> {
                     tableShow(c.getSource());
                 })
@@ -782,6 +786,153 @@ public class StashCommand extends Command {
      * while connected.
      */
     private static final int MARK_EXCLUDE = 0, MARK_DROPOFF = 1, MARK_COMPACT_SKIP = 2;
+
+    // ---- the farmer role (1.20.0): stash farm ... runs only in the proxy terminal; stash tasks stop / resume see FarmCommandSupport ----
+
+    private static boolean farmOnly(com.mojang.brigadier.context.CommandContext<CommandContext> c) {
+        if (com.porter.qwertestash.farm.FarmCommandSupport.farmAllowed(c.getSource().getSource())) return true;
+        c.getSource().getEmbed().title("Farmer").description("`stash farm` runs only in the proxy terminal.").errorColor();
+        return false;
+    }
+
+    private static com.porter.qwertestash.module.Farmer farmer() {
+        return MODULE.get(com.porter.qwertestash.module.Farmer.class);
+    }
+
+    private static void farmLines(Embed embed, String title, List<String> lines) {
+        embed.title(title).description(String.join("\n", lines)).primaryColor();
+    }
+
+    private static boolean farmId(com.mojang.brigadier.context.CommandContext<CommandContext> c, String id) {
+        if (id.matches("^f-[0-9a-f]{8}$")) return true;
+        c.getSource().getEmbed().title("Farm").description("That is not a farm id (f- and 8 hex characters).").errorColor();
+        return false;
+    }
+
+    private LiteralArgumentBuilder<CommandContext> farmNode() {
+        return literal("farm")
+            .then(literal("on").executes(c -> {
+                if (!farmOnly(c)) return;
+                CONFIG.farmerEnabled = true;
+                farmer().syncEnabledFromConfig();
+                MODULE.get(StashManager.class).updateDashboard();
+                c.getSource().getEmbed().title("Farmer On").description("This bot can run farm sessions the Stash Manager server offers it (the server must give it the farmer role). The dashboard link, the index and every position feed are off while it is on. Run `stash farm selftest`.").primaryColor();
+            }))
+            .then(literal("off").executes(c -> {
+                if (!farmOnly(c)) return;
+                farmer().stopForDisable(); // the session is ended by the bot tick first (it owns it), the end reported, then the role goes off
+                CONFIG.farmerEnabled = false;
+                farmer().syncEnabledFromConfig();
+                MODULE.get(StashManager.class).updateDashboard();
+                c.getSource().getEmbed().title("Farmer Off").primaryColor();
+            }))
+            .then(literal("status").executes(c -> {
+                if (!farmOnly(c)) return;
+                farmLines(c.getSource().getEmbed(), "Farmer", farmer().statusLines());
+            }))
+            .then(literal("selftest").executes(c -> {
+                if (!farmOnly(c)) return;
+                farmLines(c.getSource().getEmbed(), "Farmer Self Test", farmer().selftestLines());
+            }))
+            .then(literal("list").executes(c -> {
+                if (!farmOnly(c)) return;
+                List<String> out = new java.util.ArrayList<>();
+                for (var f : farmer().farms()) out.add(f.id() + "  " + f.mode() + (f.enabled() ? "" : "  (disabled)") + "  " + f.name());
+                c.getSource().getEmbed().title("Farms").description(out.isEmpty() ? "No farm is known yet (the first sync with the server brings them)." : String.join("\n", out)).primaryColor();
+            }))
+            .then(literal("accept")
+                .executes(c -> {
+                    accept(c, com.porter.qwertestash.farm.AcceptSwitch.DEFAULT_MINUTES);
+                })
+                .then(argument("minutes", integer(1, 10)).executes(c -> {
+                    accept(c, getInteger(c, "minutes"));
+                })))
+            .then(literal("start").then(argument("id", word()).executes(c -> {
+                if (!farmOnly(c) || !farmId(c, getString(c, "id"))) return;
+                String why = farmer().startLocal(getString(c, "id"));
+                if (why != null) c.getSource().getEmbed().title("Farm Not Started").description("Refused: " + why).errorColor();
+                else c.getSource().getEmbed().title("Farm Starting").description("A local session (no server task) starts on the next bot tick unless a check refuses it: see the terminal.").primaryColor();
+            })))
+            .then(literal("stop").executes(c -> {
+                if (!farmOnly(c)) return;
+                c.getSource().getEmbed().title(farmer().stopSession() ? "Farm Stopping" : "No Farm Session").primaryColor();
+            }))
+            .then(literal("forget").then(argument("id", word()).executes(c -> {
+                if (!farmOnly(c) || !farmId(c, getString(c, "id"))) return;
+                farmer().forgetLocal(getString(c, "id"));
+                c.getSource().getEmbed().title("Farm Forgotten").description("The program and its location are deleted here; the server is told with the next sync.").primaryColor();
+            })))
+            .then(literal("attach").then(argument("id", word()).executes(c -> {
+                if (!farmOnly(c) || !farmId(c, getString(c, "id"))) return;
+                farmer().attachLocal(getString(c, "id"));
+                c.getSource().getEmbed().title("Draft Attaching").description("The uploaded draft is bound to that farm; see the terminal.").primaryColor();
+            })))
+            .then(literal("owner")
+                .then(literal("add").then(argument("player", word()).executes(c -> {
+                    if (!farmOnly(c)) return;
+                    String p = getString(c, "player");
+                    if (!p.matches("[A-Za-z0-9_]{1,16}")) {
+                        c.getSource().getEmbed().title("Farm Owner").description("That is not a player name.").errorColor();
+                        return;
+                    }
+                    if (CONFIG.farmOwners.stream().noneMatch(p::equalsIgnoreCase)) CONFIG.farmOwners.add(p);
+                    c.getSource().getEmbed().title("Farm Owner Added").description("That player's connection sees farm names in the upload dialog.").primaryColor();
+                })))
+                .then(literal("del").then(argument("player", word()).executes(c -> {
+                    if (!farmOnly(c)) return;
+                    String p = getString(c, "player");
+                    CONFIG.farmOwners.removeIf(p::equalsIgnoreCase);
+                    c.getSource().getEmbed().title("Farm Owner Removed").primaryColor();
+                }))));
+    }
+
+    private static void accept(com.mojang.brigadier.context.CommandContext<CommandContext> c, int minutes) {
+        var kind = com.porter.qwertestash.farm.FarmCommandSupport.sourceOf(c.getSource().getSource());
+        if (com.porter.qwertestash.farm.ProxyFarmView.viewerOnNow()) {
+            c.getSource().getEmbed().title("Farm Upload Refused").description("unsafe_viewer: the proxy's viewer API is on (it serves positions and runs commands as the terminal). Turn `server.viewer.enabled` and `server.viewer.control` off first.").errorColor();
+            return;
+        }
+        String why = farmer().accept().enable(kind, minutes, System.currentTimeMillis());
+        if (why == null && !CONFIG.farmerEnabled) {
+            farmer().accept().disable();
+            why = "farmer_off";
+        }
+        if (why == null) {
+            c.getSource().getEmbed().title("Accepting A Farm Upload").description("One upload is accepted from the player connected through this proxy, for " + minutes
+                + " minutes. It turns itself off after the first upload or when the time runs out.").primaryColor();
+        } else if (why.equals("farmer_off")) {
+            c.getSource().getEmbed().title("Farm Upload Refused").description("The farmer role is off: `stash farm on` first.").errorColor();
+        } else {
+            c.getSource().getEmbed().title("Farm Upload Refused").description("`stash farm accept` runs only in the proxy terminal (not the dashboard, Discord, the console route or Bridge).").errorColor();
+        }
+    }
+
+    private LiteralArgumentBuilder<CommandContext> tasksNode() {
+        return literal("tasks")
+            .then(literal("stop").executes(c -> {
+                if (!com.porter.qwertestash.farm.FarmCommandSupport.stopAllowed(c.getSource().getSource())) {
+                    c.getSource().getEmbed().title("Tasks").description("STOP is not run from the dashboard console.").errorColor();
+                    return;
+                }
+                farmer().localStop();
+                c.getSource().getEmbed().title("Stopped").description("Farm sessions end now and none is started until `stash tasks resume` (terminal or Discord).").primaryColor();
+            }))
+            .then(literal("resume").executes(c -> {
+                if (!com.porter.qwertestash.farm.FarmCommandSupport.resumeAllowed(c.getSource().getSource())) {
+                    c.getSource().getEmbed().title("Tasks").description("Resume runs only in the proxy terminal or Discord, never from the dashboard.").errorColor();
+                    return;
+                }
+                String why = farmer().localResume();
+                c.getSource().getEmbed().title("Resumed").description(why == null ? "The local STOP is cleared." : "The local STOP is cleared, but the server still holds a STOP for this bot: lift it on the website.").primaryColor();
+            }))
+            .then(literal("list").executes(c -> {
+                if (!com.porter.qwertestash.farm.FarmCommandSupport.farmAllowed(c.getSource().getSource())) {
+                    c.getSource().getEmbed().title("Tasks").description("`stash tasks list` runs only in the proxy terminal.").errorColor();
+                    return;
+                }
+                farmLines(c.getSource().getEmbed(), "Tasks", farmer().statusLines());
+            }));
+    }
 
     private static void pearlAnswer(com.aquarius.discord.Embed embed, @Nullable String why, String ok) {
         if (why == null) embed.title("Pearl Travel").description(ok).primaryColor();
@@ -1395,6 +1546,12 @@ public class StashCommand extends Command {
 
     @Override
     public void defaultEmbed(Embed embed) {
+        // The farmer role: the stash block (Stash Area and the rest) can hold positions, so it is never printed (FARM P5, review item 14)
+        if (com.porter.qwertestash.farm.FarmerGuard.active()) {
+            // (this runs after the command has set its own title: only an embed with none gets the line)
+            if (embed.title() == null) embed.title("Stash Sorter").description("The farmer role is on: see `stash farm status`. Stash commands that show positions are off.").primaryColor();
+            return;
+        }
         Stash stash = Stashes.current();
         String stashLine;
         if (stash == null) stashLine = "None saved here yet";

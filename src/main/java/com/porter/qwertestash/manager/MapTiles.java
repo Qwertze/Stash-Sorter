@@ -55,6 +55,7 @@ public final class MapTiles {
     }
 
     public static Tile encode(ColumnSource src, int chunkX, int chunkZ) {
+        if (!com.porter.qwertestash.farm.FarmerGuard.allowMapTiles()) return new Tile(new byte[0], new byte[0], 0); // the farmer role: no map of the world
         byte[] c = new byte[256];
         byte[] h = new byte[512];
         int baseX = chunkX << 4, baseZ = chunkZ << 4;

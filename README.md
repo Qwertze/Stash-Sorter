@@ -22,6 +22,7 @@ instead of your client.
 - **Repair passes** (new in 1.17.0): when idle, the bot repairs the low-durability items in the stash with bottles from the stash, and sends the items without Mending to a chest you pick on the Stash Manager website. See Repair mode below.
 - **Pearl travel** (new in 1.18.0, needs Stash Manager server 1.3.0, off by default, not tried in the game yet): the bot goes to a pearl station and back by whispering the station's loader bot, and a loader bot reports its approved travellers' pearls to the server. See Pearl travel below.
 - **Enchant orders** (new in 1.19.0, needs Stash Manager server 1.4.0, off by default, not tried in the game yet): the bot makes an enchanted item from a base item and enchanted books from the stash, with
+- **Farmer role** (new in 1.20.0, needs Stash Manager server 1.5.0 and the 2.6p proxy patches, off by default, not tried on a real CT yet): the bot replays a farm program recorded with the addon (modes custom and afk_still), corrects drift at the recorded anchors and stops on STOP, danger or time. No coordinate ever leaves the bot. See The farmer role below.
   Bottles o' Enchanting from the stash for the levels, and delivers it with the rest of the order. See Enchant orders below.
 - **Crafts what the stash can make for orders** (craft orders, new in 1.15.0): the website's build planner and the Printer can order items the stash does
   not hold but can make from what it holds; the bot crafts them at the crafting table set for the stash on the website. Needs a recipe table fetched
@@ -535,6 +536,60 @@ the queue or offline is `owner_offline`, never `empty`). A load is seen from the
 ### Not tested in game
 
 Nothing here has been run in game. The in-game spike (`PEARL-SPIKE.md`) was skipped, so these are unverified: pearls after a rejoin and in the queue (the plugin treats a pearl that is not seen as `unknown` until the grace period has passed, and a trip never starts from the queue), the whisper's sender identity, a pull across dimensions, the arrival and re-arm, and which chamber PearlDrop picks. The loader can't see PearlPlus's own queue, so it reports `loading` and `loaded` only. The owner's chamber positions are never sent, so the server shows them by id only. The Qwerte addon's pearl support is not part of this release.
+
+## The farmer role (1.20.0)
+
+A bot with the farmer role replays a recorded farm program and keeps the farm running (FARM-CONTRACT v1.0). You record the loop once, in game, from the farmer's own proxy, with the Qwerte addon's recorder (0.12.0); the program goes to the proxy over the Bridge channel, is encrypted on the farmer's disk and never goes anywhere else. The owner starts and stops sessions on the Stash Manager website (server 1.5.0) or in the Stash Window. M2 runs the modes `custom` (the recorded loop) and `afk_still` (stand at an anchor); the others are refused with `mode_not_ready`.
+
+**No coordinate ever leaves the bot.** A program holds positions relative to a secret origin; the origin lives only in an encrypted location store. Nothing about a farm that could hold a position is sent to the server, the website, chat or Discord, and the proxy's own position-bearing log lines are dropped while the role is on. Do not name a farm after its coordinates.
+
+### Farmer CT setup
+
+The plugin checks these at every session start and refuses with the code in the last column.
+
+| Setting | Required | Code |
+| --- | --- | --- |
+| The proxy build | the 2.6p patched build, patches 01 to 08 (Bridge fixes, the size cap, the proxy hello on login, no coordinates in the death and spawn-patrol Discord embeds) | `unsafe_bridge` (Bridge build id exactly `2.6p-2`), `unsafe_discord` (Discord build id exactly `2.6p-1`) |
+| Bridge `stripRegisterChannel` | on | `unsafe_bridge` |
+| Bridge `invokeAllowList` | empty (the proxy's default is not) | `unsafe_bridge` |
+| Bridge module | on (the addon sends nothing otherwise) | none |
+| `debugLogs`, `terminalDebugLogs`, the packet log, ReplayMod | off | `unsafe_logging` |
+| VisualRange | off (it logs positions at WARN) | `unsafe_logging` |
+| `botRotateBeforeInteract` | on (the default) | `unsafe_rotation` |
+| AntiAFK | off (it is on by default) | `module_conflict` |
+| Click (holding a click, sneak or rotation, or a non-zero extra reach), KillAura, AutoFish, VillagerTrader, LitematicaBuilder, AquariusMiner, OrderFiller, KitMaker, Enchanter, and the sorter | off | `module_conflict` |
+| Discord `reportCoords` | off (it is on by default) | `unsafe_discord` |
+| `server.viewer.enabled` and `server.viewer.control` | both off (the viewer API serves the bot's position and map with no login, and `control` runs commands as the terminal, so it could run `stash farm accept`) | `unsafe_viewer` |
+| The plugin's whisper search (`stash whisper`) | off (it answers whispers with positions) | `module_conflict` |
+| `server.verifyUsers` | on (the proxy's default) when `farmOwners` names are used, so a name cannot be forged | `unsafe_bridge` |
+| AutoTotem, AutoEat, AutoDisconnect | on (AutoDisconnect is off by default) | `guard_off` |
+| CoordObfuscation for your connection | off | `origin_mismatch` at upload |
+| Friends list | filled (`stash friends add`, or the proxy's) | none |
+
+The plugin and the proxy are also checked for a farm key (below). The proxy's auto updater contacts GitHub at start; the plugin does not check it.
+
+### The key
+
+`plugins/qwerte-stash/farm/farm.key` is 32 random bytes, made on first use with mode 0600 (the folder 0700). If the file system cannot prove those modes (Windows, some mounts) the farmer stays off with `key_perms`; set the environment variable `QWERTE_FARM_KEY` (base64 of exactly 32 bytes) instead. The environment key never falls back to the file and is never printed. **A `farm.key` that is short or empty is `key_invalid` and is never deleted or replaced: remove or fix it by hand.** If sealed files exist and there is no key, the answer is `key_missing`: a new key is never made over them. There is no key rotation: a lost key means every stored program and origin is gone and each farm must be recorded again. Keep a backup of `farm.key` with the CT backup. The files protect a copied folder, not a root user on the CT.
+
+### Turning it on
+
+1. `stash farm on` (proxy terminal only), then `stash farm selftest`: it prints the key source and id, a seal round trip, the proxy build ids and the first start check that would refuse.
+2. On the website the owner gives the bot the `farmer` role (the bot says one minimal hello after its first sync so it can be found) and makes a farm.
+3. In game, connected through the farmer's proxy: `stash farm accept [minutes]` in the terminal, then record and upload from the Stash Window. It accepts one upload (or 10 minutes). `stash farm owner add <player>` lets that player's connection see farm names in the upload dialog. Without a farm id the program waits as the draft; `stash farm attach <f-id>` binds it.
+4. Start the session on the website. The bot claims it, checks its position and the anchors, and runs. `stash farm start <f-id>` runs one locally, without the server (for testing the CT).
+
+### Commands (proxy terminal only unless said)
+
+`stash farm on|off` (turning it off ends a running session first and reports it), `status`, `list`, `accept [minutes]`, `start <id>`, `stop`, `forget <id>`, `attach <id>`, `selftest`, `owner add|del <player>`; `stash tasks stop` (terminal, Discord or in game; works with the server down and is kept across a restart), `stash tasks resume` (terminal or Discord, never the dashboard), `stash tasks list`.
+
+### What stops a session
+
+STOP (website or `stash tasks stop`) within a tick; a non-friend within 8 blocks pauses the inputs, within the farm's radius for its seconds ends it `player_near`; health at or below the farm's `healthStop` and falling; no food with nothing to eat; no totem in the off hand for 2 seconds; no free slot for 30 seconds; three failed recoveries or more than six an hour (`drifted`); the farm's time limit (`time_up`). When you connect through the proxy the session parks and, when you leave, walks back to the last anchor and carries on. A recovery that cannot start because another pathfinder process is busy parks the session (`pathfinder_busy`); it is tried again every 5 seconds and ends `error` after 5 minutes. A recovery also pauses while a non-friend is within 8 blocks. The session journal (`farm/session.json`) is only a hint and a place for the STOP flag: nothing is ever resumed from it, a restart starts no session, and a journal that cannot be read counts as a STOP until `stash tasks resume`.
+
+### Not in this build, and not tried
+
+Container steps, `hold-use`, `attack` steps and `wait-until` in a program are refused with `mode_not_ready`. Travel to the farm, restock and hauling are later milestones. The farmer has been run only in a scratch setup (a patched proxy, an offline server, a headless client and the real server 1.5.0 build): not on a real CT, not on 2b2t. The bot ticks about 16 times a second on some machines, not 20. Movement keys and the look advance one track tick per bot tick, so the distance walked matches the recording at any tick rate; only the spacing between clicks (the use cadence, the attack cooldown) is kept in wall-clock time, so a slow bot makes the loop take longer, not walk shorter.
 
 ## Versioning
 Major breaking changes: a new x.0.0 version. New features, bug fixes and more: 1.x.0. Minor bug fixes, single one-off patches or hotfixes: x.y.z.
