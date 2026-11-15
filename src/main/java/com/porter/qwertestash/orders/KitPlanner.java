@@ -159,6 +159,16 @@ public final class KitPlanner {
         return out;
     }
 
+    /**
+     * The group keys of every incomplete copy a kit build may start from. They are not stock for any line: a base's own stacks are held by
+     * its kit (and the shulker must stay where it is until the kit is built), so surveys made for kit planning leave them out.
+     */
+    public static Set<String> baseKeys(Scan scan) {
+        Set<String> keys = new HashSet<>();
+        for (List<Copy> copies : scan.base().values()) for (Copy c : copies) if (c.group() != null) keys.add(c.group());
+        return keys;
+    }
+
     /** What the plan has drawn from the survey so far; copied before a kit or a slot and restored when it is given up. */
     private static final class Pool {
         final Map<String, Long> loose, inside;

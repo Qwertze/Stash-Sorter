@@ -54,7 +54,7 @@ class SourceRulesTest {
     }
 
     /** The sorter's runtime state, as sets of containers. */
-    static final class FakeLive implements SourceRules.Live {
+    static class FakeLive implements SourceRules.Live {
         final Set<Box> blockedGather = new HashSet<>(), blockedFetch = new HashSet<>(), signPending = new HashSet<>(), badUnpack = new HashSet<>(), skipped = new HashSet<>();
 
         @Override
@@ -81,6 +81,132 @@ class SourceRulesTest {
         public boolean badUnpack(Box box) {
             return badUnpack.contains(box);
         }
+
+        final Map<Item, String> shulkerWhy = new java.util.IdentityHashMap<>();
+
+        @Override
+        public @Nullable String shulkerWhy(Box box, Item shulker) {
+            return shulkerWhy.get(shulker);
+        }
+    }
+
+    private static Item arrowShulker() {
+        return shulker(stack(ARROW, 64, 64));
+    }
+
+    /** The sorter's rule in miniature: refused only when kit sorting is on and the shulker is a complete kit. */
+    private static SourceRules.Live kitLive(boolean kitSorting, Set<Item> completeKits) {
+        return new FakeLive() {
+            @Override
+            public @Nullable String shulkerWhy(Box box, Item shulker) {
+                return kitSorting && completeKits.contains(shulker) ? SourceRules.WHY_COMPLETE_KIT : null;
+            }
+        };
+    }
+
+    @Test
+    void aCompleteKitInAPlainChestIsRefusedWithItsReason() {
+        Item kit = arrowShulker();
+        Box plain = box(1, kit);
+        Set<Item> complete = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        complete.add(kit);
+        StockPlanner.Survey s = SourceRules.survey(List.of(plain), Set.of(ARROW), Set.of(), false, kitLive(true, complete));
+        assertNull(s.shulkerAvailable().get(ARROW));
+        assertEquals("only in a complete kit (kits are never unpacked)", s.why().get(ARROW));
+    }
+
+    @Test
+    void anIncompleteCopyOrAPlainShulkerInAKitOrRepairChestIsUsable() {
+        // The sorter says nothing about them (not a complete kit), whatever box they sit in
+        Box kitChest = box(1, arrowShulker());
+        Box repairChest = box(2, arrowShulker());
+        StockPlanner.Survey s = SourceRules.survey(List.of(kitChest, repairChest), Set.of(ARROW), Set.of(), false, kitLive(true, Set.of()));
+        assertEquals(128L, s.shulkerAvailable().get(ARROW));
+    }
+
+    @Test
+    void anIdenticalShulkerThatIsNotTheCompleteKitIsStillUsable() {
+        Item kit = arrowShulker();
+        Box kitBox = box(1, kit), other = box(2, arrowShulker());
+        Set<Item> complete = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        complete.add(kit);
+        SourceRules.Live live = kitLive(true, complete);
+        StockPlanner.Survey s = SourceRules.survey(List.of(kitBox, other), Set.of(ARROW), Set.of(), false, live);
+        assertEquals(64L, s.shulkerAvailable().get(ARROW));
+        assertEquals(Map.of(SourceRules.Reject.COMPLETE_KIT, 1), SourceRules.rejected(List.of(kitBox, other), ARROW, Set.of(), false, live), "only the kit copy is turned down");
+    }
+
+    @Test
+    void withKitSortingOffNothingIsRefused() {
+        Item kit = arrowShulker();
+        Box b = box(1, kit);
+        Set<Item> complete = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        complete.add(kit);
+        StockPlanner.Survey s = SourceRules.survey(List.of(b), Set.of(ARROW), Set.of(), false, kitLive(false, complete));
+        assertEquals(64L, s.shulkerAvailable().get(ARROW));
+    }
+
+    @Test
+    void precedenceIsNamedThenOwnLineThenCompleteKit() {
+        Item own = arrowShulker();
+        Set<Item> complete = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        complete.add(own);
+        SourceRules.Live live = kitLive(true, complete);
+        Set<String> reserved = Set.of(com.porter.qwertestash.manager.ManagerIndex.shulkerKey(own));
+        assertEquals("in a shulker the order asks for whole", SourceRules.survey(List.of(box(1, own)), Set.of(ARROW), reserved, false, live).why().get(ARROW));
+        Item named = arrowShulker();
+        named.customName = true;
+        complete.add(named);
+        assertEquals("in a named shulker (use-named-shulkers is off)", SourceRules.survey(List.of(box(2, named)), Set.of(ARROW), Set.of(), false, live).why().get(ARROW));
+    }
+
+    @Test
+    void craftSurveyRefusesACompleteKitButNotLooseStacksOrOthers() {
+        Item kit = arrowShulker();
+        Box a = box(1, kit, stack(ARROW, 5, 64)), b = box(2, arrowShulker());
+        Set<Item> complete = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        complete.add(kit);
+        CraftPool.Stock st = SourceRules.craftSurvey(List.of(a, b), Set.of(ARROW), Set.of(), false, Set.of(), kitLive(true, complete));
+        assertEquals(64L, st.inShulkers().get(ARROW));
+        assertEquals(5L, st.loose().get(ARROW));
+    }
+
+    @Test
+    void completenessIsTheTemplateMatchKitClassifierMakes() {
+        var t = new com.porter.qwertestash.stash.KitTemplate("t-abcdefgh", "Arrows", "pvp", null, null, 0, List.of(
+            new com.porter.qwertestash.stash.KitTemplate.Slot(ARROW, ARROW, 64), new com.porter.qwertestash.stash.KitTemplate.Slot(PEARL, PEARL, 16)));
+        assertTrue(SourceRules.isCompleteKit(List.of(t), shulker(stack(ARROW, 64, 64), stack(PEARL, 16, 16))));
+        assertTrue(!SourceRules.isCompleteKit(List.of(t), shulker(stack(ARROW, 64, 64), stack(PEARL, 8, 16))), "wrong count");
+        assertTrue(!SourceRules.isCompleteKit(List.of(t), shulker(stack(ARROW, 64, 64))), "missing item");
+        assertTrue(!SourceRules.isCompleteKit(List.of(t), shulker(stack(ARROW, 64, 64), stack(PEARL, 16, 16), stack("minecraft:stick", 1, 64))), "extra item");
+        assertTrue(!SourceRules.isCompleteKit(List.of(), shulker(stack(ARROW, 64, 64), stack(PEARL, 16, 16))));
+    }
+
+    @Test
+    void rejectedNamesACompleteKitWhenItIsTheOnlyStock() {
+        Item kit = arrowShulker();
+        Box b = box(1, kit);
+        Set<Item> complete = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        complete.add(kit);
+        var rej = SourceRules.rejected(List.of(b), ARROW, Set.of(), false, kitLive(true, complete));
+        assertEquals(Map.of(SourceRules.Reject.COMPLETE_KIT, 1), rej);
+        assertEquals("1 completeKit", SourceRules.describe(rej));
+        assertEquals("in a complete kit (kits are never unpacked)", SourceRules.note(SourceRules.Reject.COMPLETE_KIT));
+        // Another container turned down for another reason keeps that reason
+        FakeLive other = new FakeLive() {
+            @Override
+            public @Nullable String shulkerWhy(Box box, Item shulker) {
+                return SourceRules.WHY_COMPLETE_KIT;
+            }
+        };
+        other.blockedFetch.add(b);
+        assertEquals(Map.of(SourceRules.Reject.BLOCKED, 1), SourceRules.rejected(List.of(b), ARROW, Set.of(), false, other));
+    }
+
+    @Test
+    void ownShulkerKeysAreOnlyTheShulkerLines() {
+        Unit a = new Unit(Unit.Kind.Shulker, "k1", List.of()), b = new Unit(Unit.Kind.Bin, "", List.of()), c = new Unit(Unit.Kind.Empty, "k2", List.of());
+        assertEquals(Set.of("k1"), SourceRules.ownShulkerKeys(List.of(a, b, c)));
     }
 
     @Test

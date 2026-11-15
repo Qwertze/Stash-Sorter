@@ -9678,7 +9678,8 @@ public class StashSorter extends AbstractFieldModule {
 
     /** Kit sorting is on and a rule or the kits chest applies to this kit (found or missing): it is never unpacked or repacked. */
     private boolean kitWhole(Item shulker) {
-        return CONFIG.kitSorting && KitRouting.keptWhole(kitView(), shulker);
+        // A complete kit copy is kept whole too (never unpacked or repacked), whether or not a setting routes it
+        return CONFIG.kitSorting && (KitRouting.keptWhole(kitView(), shulker) || completeKitWhy(shulker) != null);
     }
 
     /** A kit shulker that has a say in where it goes (a chest, or none to take it). */
@@ -11197,7 +11198,48 @@ public class StashSorter extends AbstractFieldModule {
         public boolean badUnpack(Box box) {
             return badUnpack.contains(box.pos);
         }
+
+        @Override
+        public @Nullable String shulkerWhy(Box box, Item shulker) {
+            return completeKitWhy(shulker);
+        }
     };
+
+    // Complete-kit verdicts by shulker key, for the kit settings version and stash they were made with (matching a shulker against every
+    // template is not free and a survey asks about the same copies many times). Any thread. A holder is never changed in what it is for: a new
+    // settings version, another stash or too many entries start a new holder, and a verdict is only written into the holder it was made under.
+    private record CompleteKits(int store, Stash stash, java.util.concurrent.ConcurrentHashMap<String, Boolean> verdicts) {
+    }
+
+    private static final int COMPLETE_KIT_CACHE_MAX = 4096;
+    private volatile @Nullable CompleteKits completeKits;
+
+    /**
+     * Why a shulker is never unpacked for an order or crafting: it is a complete copy of a kit template (KitTemplates.find says COMPLETE,
+     * the test KitClassifier uses, against the templates in the kit settings the website edits), wherever it sits. Null for anything else
+     * and while kit sorting is off (the settings are then not used at all). Incomplete copies, plain shulkers and the needs-repair chest are
+     * ordinary sources.
+     */
+    private @Nullable String completeKitWhy(Item shulker) {
+        if (!CONFIG.kitSorting || !shulker.isShulker() || shulker.contents.isEmpty()) return null;
+        Stash st = stash;
+        if (st == null) return null;
+        int store = KitStore.shared().version();
+        CompleteKits h = completeKits;
+        if (h == null || h.store() != store || h.stash() != st || h.verdicts().size() > COMPLETE_KIT_CACHE_MAX) {
+            h = new CompleteKits(store, st, new java.util.concurrent.ConcurrentHashMap<>());
+            completeKits = h;
+        }
+        String key = ManagerIndex.shulkerKey(shulker);
+        Boolean hit = key == null ? null : h.verdicts().get(key);
+        if (hit == null) {
+            KitSettings settings = KitStore.shared().get(ManagerIndex.clamp(st.server, 256), ManagerIndex.clamp(st.name, 256));
+            if (settings == null || settings.types() == null || settings.types().templates().isEmpty()) return null;
+            hit = SourceRules.isCompleteKit(settings.types().templates(), shulker);
+            if (key != null) h.verdicts().put(key, hit);
+        }
+        return hit ? SourceRules.WHY_COMPLETE_KIT : null;
+    }
 
     /** A container an order may take loose stacks from now. */
     private boolean binSource(Box b) {
@@ -11448,7 +11490,7 @@ public class StashSorter extends AbstractFieldModule {
                 // A repair pass opens only the boxes it chose: unnamed, not a kit, not opened lately, within the box cap
                 Predicate<Item> only = unpackFilter;
                 if (only != null && !only.test(s)) continue;
-                if (reserved.contains(ManagerIndex.shulkerKey(s))) continue;
+                if (reserved.contains(ManagerIndex.shulkerKey(s)) || sourceLive.shulkerWhy(box, s) != null) continue;
                 int count = 0;
                 boolean same = false;
                 for (Item in : s.contents) {
@@ -17319,7 +17361,23 @@ public class StashSorter extends AbstractFieldModule {
          * and the run never disagree about a source.
          */
         StockPlanner.Survey survey(Stash s, Set<String> wanted) {
-            return SourceRules.survey(s.boxes, wanted, reservedShulkerKeys(), CONFIG.useNamedShulkers, sourceLive);
+            return survey(s, wanted, Set.of());
+        }
+
+        /** As {@link #survey(Stash, Set)}, and the shulkers with these group keys (the incomplete copies a kit build may start from) are no stock. */
+        StockPlanner.Survey survey(Stash s, Set<String> wanted, Set<String> alsoReserved) {
+            Set<String> reserved = reservedShulkerKeys();
+            reserved.addAll(alsoReserved);
+            return SourceRules.survey(s.boxes, wanted, reserved, CONFIG.useNamedShulkers, sourceLive);
+        }
+
+        /** The group keys of the incomplete copies the kit lines of this snapshot could start from (empty without kit orders). Tick thread. */
+        Set<String> kitBaseKeys(Stash s, com.porter.qwertestash.orders.KitOrder.@Nullable Snapshot snap) {
+            if (snap == null || !CONFIG.kitSorting || !CONFIG.kitOrders) return Set.of();
+            KitSettings settings = KitStore.shared().get(ManagerIndex.clamp(s.server, 256), ManagerIndex.clamp(s.name, 256));
+            java.util.function.Function<com.porter.qwertestash.stash.KitTemplate, @Nullable String> target = t -> settings == null ? null : KitRouting.templateTarget(t, settings);
+            java.util.function.Predicate<Box> pickable = b -> KitRouting.pickable(b) && !b.stale && !blocked(b, Job.Fetch);
+            return com.porter.qwertestash.orders.KitPlanner.baseKeys(com.porter.qwertestash.orders.KitPlanner.scan(snap, s.boxes, pickable, target));
         }
 
         @Override
@@ -17337,21 +17395,12 @@ public class StashSorter extends AbstractFieldModule {
             orderLeftoverTried = false;
         }
 
-        /** The group keys of the packed shulkers this order asks for whole: not to be unpacked for anything else. */
+        /** The group keys of the packed shulkers this order asks for whole: not to be unpacked for anything else (complete kits: see sourceLive.shulkerWhy). */
         Set<String> reservedShulkerKeys() {
-            Set<String> keys = new HashSet<>();
-            for (Unit u : flow.units()) if (u.kind == Unit.Kind.Shulker) keys.add(u.key);
-            // Routed kits (incomplete copies included) are never unpacked as sources (KIT-CONTRACT v2, kit orders)
-            Stash s = st();
-            if (s != null && CONFIG.kitSorting) {
-                for (Box box : s.boxes) {
-                    if (box.contents == null || !kitReserved(box)) continue;
-                    for (Item it : box.contents) {
-                        String k = it == null ? null : ManagerIndex.shulkerKey(it);
-                        if (k != null) keys.add(k);
-                    }
-                }
-            }
+            Set<String> keys = SourceRules.ownShulkerKeys(flow.units());
+            // The incomplete copy a kit build tops up is held by that kit, not stock for another line (moving it would abort the build)
+            for (Unit u : flow.units()) if (u.kitBase != null) keys.add(u.kitBase);
+            // Complete kit copies are protected per item (Live.shulkerWhy), not by key
             return keys;
         }
 
@@ -17528,9 +17577,11 @@ public class StashSorter extends AbstractFieldModule {
             java.util.function.Function<com.porter.qwertestash.stash.KitTemplate, @Nullable String> target = t -> settings == null ? null : KitRouting.templateTarget(t, settings);
             java.util.function.Predicate<Box> pickable = b -> KitRouting.pickable(b) && !b.stale && !blocked(b, Job.Fetch);
             com.porter.qwertestash.orders.KitPlanner.Scan scan = com.porter.qwertestash.orders.KitPlanner.scan(snap, s.boxes, pickable, target);
+            // The incomplete copies a build may start from are no stock for any line (taken before a new-copy restock drops them from the scan)
+            Set<String> baseKeys = com.porter.qwertestash.orders.KitPlanner.baseKeys(scan);
             // A restock job that builds a new copy never starts from an incomplete one
             if (order.restock && !order.restockTopUp) scan = scan.withoutBases();
-            StockPlanner.Survey survey = survey(s, scan.wanted());
+            StockPlanner.Survey survey = survey(s, scan.wanted(), baseKeys);
             int empties = -Math.max(0, emptiesTaken);
             for (int n : empties(s).values()) empties += n;
             return com.porter.qwertestash.orders.KitPlanner.plan(snap, scan, survey, StashSorter::stackOf, Math.max(0, empties), Set.of(), order.restock);
@@ -17547,7 +17598,7 @@ public class StashSorter extends AbstractFieldModule {
             java.util.function.Function<com.porter.qwertestash.stash.KitTemplate, @Nullable String> target = t -> settings == null ? null : KitRouting.templateTarget(t, settings);
             java.util.function.Predicate<Box> pickable = b -> KitRouting.pickable(b) && !b.stale && !blocked(b, Job.Fetch);
             com.porter.qwertestash.orders.KitPlanner.Scan scan = com.porter.qwertestash.orders.KitPlanner.scan(union, s.boxes, pickable, target);
-            return new RestockStock(scan, survey(s, scan.wanted()));
+            return new RestockStock(scan, survey(s, scan.wanted(), com.porter.qwertestash.orders.KitPlanner.baseKeys(scan)));
         }
 
         com.porter.qwertestash.orders.KitPlanner.Plan planWith(RestockStock rs, com.porter.qwertestash.orders.KitOrder.Snapshot snap, int emptiesAvailable, boolean noBases) {
@@ -17562,8 +17613,9 @@ public class StashSorter extends AbstractFieldModule {
             java.util.function.Function<com.porter.qwertestash.stash.KitTemplate, @Nullable String> target = t -> settings == null ? null : KitRouting.templateTarget(t, settings);
             java.util.function.Predicate<Box> pickable = b -> KitRouting.pickable(b) && !b.stale && !blocked(b, Job.Fetch);
             com.porter.qwertestash.orders.KitPlanner.Scan scan = com.porter.qwertestash.orders.KitPlanner.scan(snap, s.boxes, pickable, target);
+            Set<String> baseKeys = com.porter.qwertestash.orders.KitPlanner.baseKeys(scan);
             if (noBases) scan = new com.porter.qwertestash.orders.KitPlanner.Scan(scan.wanted(), scan.matchOf(), scan.damage(), scan.ready(), Map.of());
-            StockPlanner.Survey survey = survey(s, scan.wanted());
+            StockPlanner.Survey survey = survey(s, scan.wanted(), baseKeys);
             return com.porter.qwertestash.orders.KitPlanner.plan(snap, scan, survey, StashSorter::stackOf, Math.max(0, emptiesAvailable), Set.of());
         }
 
@@ -17593,7 +17645,8 @@ public class StashSorter extends AbstractFieldModule {
             if (s == null) return new StockPlanner.Plan(List.of(), List.of(), "no stash is loaded");
             Set<String> wanted = new HashSet<>();
             for (Order.Line l : order.lines) if (l.type().equals(Order.ITEM) && !StockPlanner.isShulkerKey(l.key())) wanted.add(l.key());
-            StockPlanner.Survey survey = survey(s, wanted);
+            // An order with kit lines keeps the incomplete copies its builds may start from out of its item lines' stock too
+            StockPlanner.Survey survey = survey(s, wanted, kitBaseKeys(s, order.kit));
             Map<String, Integer> empties = empties(s);
             StockPlanner.Plan plan = StockPlanner.plan(order, survey, empties, this::nameOf, craftLots);
             if (!craftingOn()) return plan;

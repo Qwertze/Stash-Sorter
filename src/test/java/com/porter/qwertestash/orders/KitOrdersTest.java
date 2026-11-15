@@ -260,6 +260,32 @@ class KitOrdersTest {
         assertNull(KitPlanner.fitBase(t, over), "a stack larger than any slot it could be in");
     }
 
+    @Test
+    void aBaseCopyIsNoStockForAnyLine() {
+        KitOrder.Snapshot snap = snapshot(1, 0, 1);
+        // An incomplete copy in the chain target: a totem and two of the six crystals
+        Item base = copy("Crystal Pack", stack("totem_of_undying", 1, 0), stack("end_crystal", 2, 0));
+        Box target = box(7, base);
+        Box loose = box(1, stack("end_crystal", 1, 0));
+        List<Box> boxes = List.of(target, loose);
+        KitPlanner.Scan scan = KitPlanner.scan(snap, boxes, p -> true, t -> com.porter.qwertestash.stash.KitRouting.canonicalId(target));
+        assertEquals(1, scan.base().get(T).size());
+        Set<String> baseKeys = KitPlanner.baseKeys(scan);
+        assertEquals(Set.of(ManagerIndex.shulkerKey(base)), baseKeys);
+        Set<String> wanted = Set.of("minecraft:end_crystal");
+        SourceRulesTest.FakeLive live = new SourceRulesTest.FakeLive();
+        // Without the base's key reserved its two crystals would be stock (the bug); with it they are not, for an item line or the kit's
+        assertEquals(2L, SourceRules.survey(boxes, wanted, Set.of(), true, live).shulkerAvailable().get("minecraft:end_crystal"));
+        StockPlanner.Survey sv = SourceRules.survey(boxes, wanted, baseKeys, true, live);
+        assertNull(sv.shulkerAvailable().get("minecraft:end_crystal"), "nothing is taken from the base");
+        KitPlanner.Plan plan = KitPlanner.plan(snap, scan, sv, id -> 64, 1, Set.of());
+        Unit u = plan.units().get(0);
+        assertEquals(ManagerIndex.shulkerKey(base), u.kitBase);
+        // The base holds 2 crystals, one loose crystal is all the stock: 3 of the 6 are there, 3 are missing
+        assertTrue(u.kitShort);
+        assertEquals(3, u.kitMissing.get(0).count());
+    }
+
     // The result and the flags
 
     @Test

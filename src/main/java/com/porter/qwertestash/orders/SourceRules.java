@@ -37,7 +37,9 @@ public final class SourceRules {
         /** Stalled, its sign held, or the same trip came back empty and nothing has changed since. */
         BLOCKED("blocked"),
         /** A shulker in it could not be taken out. */
-        BAD_UNPACK("badUnpack");
+        BAD_UNPACK("badUnpack"),
+        /** The only stock there is inside a complete kit copy, which is never unpacked. */
+        COMPLETE_KIT("completeKit");
 
         public final String label;
 
@@ -61,7 +63,19 @@ public final class SourceRules {
 
         /** A source shulker in it could not be taken this run. */
         boolean badUnpack(Box box);
+
+        /**
+         * Why this shulker (in this container) may never be unpacked for an order, or null: it is a complete kit copy, wherever it
+         * sits. Per item; loose stacks and other shulkers are not affected. Called only for a shulker that holds something.
+         */
+        default @Nullable String shulkerWhy(Box box, Item shulker) {
+            return null;
+        }
     }
+
+    public static final String WHY_OWN_LINE = "in a shulker the order asks for whole";
+    public static final String WHY_NAMED = "in a named shulker (use-named-shulkers is off)";
+    public static final String WHY_COMPLETE_KIT = "only in a complete kit (kits are never unpacked)";
 
     /** Why loose stacks can't be taken from this container now, or null when they can. */
     public static @Nullable Reject loose(Box box, Live live) {
@@ -90,6 +104,7 @@ public final class SourceRules {
             case SIGN_PENDING -> "in a container whose sign is being changed";
             case BLOCKED -> "in a container given up on for now";
             case BAD_UNPACK -> "in a shulker that couldn't be taken out";
+            case COMPLETE_KIT -> "in a complete kit (kits are never unpacked)";
         };
     }
 
@@ -99,7 +114,39 @@ public final class SourceRules {
 
     /** A shulker an order may unpack for another line: named ones only when allowed, never one the order asks for whole. */
     public static boolean usableShulker(Item it, boolean useNamedShulkers, Set<String> reserved) {
-        return it.isShulker() && (useNamedShulkers || !it.customName) && !reserved.contains(ManagerIndex.shulkerKey(it));
+        return it.isShulker() && !namedRefused(it, useNamedShulkers) && !reserved.contains(ManagerIndex.shulkerKey(it));
+    }
+
+    /** A named shulker while named shulkers may not be used. */
+    private static boolean namedRefused(Item it, boolean useNamedShulkers) {
+        return it.customName && !useNamedShulkers;
+    }
+
+    /** The group keys of the packed shulkers an order asks for whole (its Shulker units). Nothing else is reserved by key. */
+    public static Set<String> ownShulkerKeys(Iterable<Unit> units) {
+        Set<String> keys = new HashSet<>();
+        for (Unit u : units) if (u.kind == Unit.Kind.Shulker) keys.add(u.key);
+        return keys;
+    }
+
+    /**
+     * Whether a shulker is a complete copy of one of the templates: the match KitClassifier makes (KitTemplates.find, state COMPLETE; no
+     * missing item, no wrong count). A complete match does not depend on the name, so none is passed.
+     */
+    public static boolean isCompleteKit(List<com.porter.qwertestash.stash.KitTemplate> templates, Item shulker) {
+        if (templates.isEmpty() || !shulker.isShulker() || shulker.contents.isEmpty()) return false;
+        var found = com.porter.qwertestash.stash.KitTemplates.find(templates, KitPlanner.stacksOf(shulker), null);
+        return found != null && found.match().state() == com.porter.qwertestash.stash.KitTemplates.State.COMPLETE;
+    }
+
+    /**
+     * Why an order or crafting may not unpack this shulker, or null: named with use-named-shulkers off, the order's own shulker line,
+     * a complete kit copy (in that order).
+     */
+    static @Nullable String shulkerRefusal(Box box, Item it, boolean useNamedShulkers, Set<String> reserved, Live live) {
+        if (namedRefused(it, useNamedShulkers)) return WHY_NAMED;
+        if (reserved.contains(ManagerIndex.shulkerKey(it))) return WHY_OWN_LINE;
+        return live.shulkerWhy(box, it);
     }
 
     /**
@@ -143,7 +190,9 @@ public final class SourceRules {
                 // What lies inside shulkers is a second source (loose stacks come first). A packed shulker the order asks for whole
                 // is not unpacked for another line, and a named one only when named shulkers may be used
                 if (it.isShulker()) {
-                    boolean usable = skip == null && usableShulker(it, useNamedShulkers, reserved);
+                    // Worked out at the first wanted stack inside (kit matching is not free)
+                    boolean whyKnown = false;
+                    String shWhy = null;
                     for (Item in : it.contents) {
                         if (in == null || !wanted.contains(in.indexKey())) continue;
                         String k = in.indexKey();
@@ -151,8 +200,12 @@ public final class SourceRules {
                             unpackWhy = unpack(box, live);
                             unpackKnown = true;
                         }
+                        if (!whyKnown) {
+                            shWhy = skip != null ? null : shulkerRefusal(box, it, useNamedShulkers, reserved, live);
+                            whyKnown = true;
+                        }
                         if (skip != null) why.putIfAbsent(k, skip);
-                        else if (!usable) why.putIfAbsent(k, it.customName && !useNamedShulkers ? "in a named shulker (use-named-shulkers is off)" : "in a shulker the order asks for whole");
+                        else if (shWhy != null) why.putIfAbsent(k, shWhy);
                         else if (box.stale) seenHere.add(k);
                         else if (in.isFilledBundle() || !in.contents.isEmpty()) filled.add(k);
                         else if (unpackWhy != null) why.putIfAbsent(k, note(unpackWhy));
@@ -189,18 +242,29 @@ public final class SourceRules {
         Map<Reject, Integer> out = new EnumMap<>(Reject.class);
         for (Box box : boxes) {
             if (box.contents == null) continue;
-            boolean hasLoose = false, hasInside = false;
+            boolean hasLoose = false, hasInside = false, hasKit = false;
             for (Item it : box.contents) {
                 if (looseStack(it) && it.indexKey().equals(key)) hasLoose = true;
-                else if (it != null && usableShulker(it, useNamedShulkers, reserved)) {
-                    for (Item in : it.contents) if (looseStack(in) && in.indexKey().equals(key)) hasInside = true;
+                else if (it != null && usableShulker(it, useNamedShulkers, reserved) && holdsKey(it, key)) {
+                    if (live.shulkerWhy(box, it) == null) hasInside = true;
+                    else hasKit = true;
                 }
             }
-            Reject r = hasLoose ? loose(box, live) : hasInside ? unpack(box, live) : null;
+            Reject r = hasLoose ? loose(box, live) : hasInside ? unpack(box, live) : hasKit ? kitOr(unpack(box, live)) : null;
             // A container with loose stacks the run may take is no rejection, whatever its shulkers are
             if (r != null) out.merge(r, 1, Integer::sum);
         }
         return out;
+    }
+
+    /** A complete kit is the reason, unless the container is turned down for another one first. */
+    private static Reject kitOr(@Nullable Reject other) {
+        return other != null ? other : Reject.COMPLETE_KIT;
+    }
+
+    private static boolean holdsKey(Item shulker, String key) {
+        for (Item in : shulker.contents) if (looseStack(in) && in.indexKey().equals(key)) return true;
+        return false;
     }
 
     /** "2 stale, 1 blocked", or "none" when nothing was turned down. */
@@ -252,7 +316,7 @@ public final class SourceRules {
                         maxStack.putIfAbsent(it.indexKey(), Math.max(1, it.maxStack));
                     }
                 }
-                if (it.isShulker() && usableShulker(it, useNamedShulkers, reserved)) {
+                if (it.isShulker() && usableShulker(it, useNamedShulkers, reserved) && (it.contents.isEmpty() || live.shulkerWhy(box, it) == null)) {
                     for (Item in : it.contents) {
                         if (in == null || !baseIds.contains("minecraft:" + in.id) || craftRefusal(in, neverUse) != null) continue;
                         if (!unpackKnown) {
