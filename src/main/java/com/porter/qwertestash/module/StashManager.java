@@ -745,7 +745,8 @@ public class StashManager extends Module {
             return;
         }
 
-        String id = built.server() + "|" + built.stash() + "|" + built.hash() + "|" + built.known() + "/" + built.total() + "/" + built.stale();
+        // The kit stamp is in the id: the hash alone does not change when the kit rule is switched or a template edit flips nothing in this stash
+        String id = built.server() + "|" + built.stash() + "|" + built.hash() + "|" + built.known() + "/" + built.total() + "/" + built.stale() + "|" + builtKitStamp;
         // Away on a pearl trip the index is not pushed (the stash is not being kept up to date), only the heartbeat goes
         if (!AwayGuard.away() && (needIndex || !id.equals(lastPushedId))) {
             // Containers read during a rescan change the counts: those pushes are spaced out
@@ -1471,6 +1472,14 @@ public class StashManager extends Module {
 
     // Building the index
 
+    /** What the index said about kits when it was built: "off", or "on" with the kit settings version. Written on the tick thread. */
+    private String builtKitStamp = "off";
+
+    /** The kit state the next index is built for: the switch and the kit settings version. Tick thread. */
+    private static String kitStamp() {
+        return CONFIG.kitSorting ? "on" + KitStore.shared().version() : "off";
+    }
+
     private void scan(Stash stash, String player) {
         if (building.get()) return;
         long now = System.currentTimeMillis();
@@ -1485,18 +1494,25 @@ public class StashManager extends Module {
         fp = fp * 31 + stale;
         String dimension = Stash.currentDimension();
         fp = fp * 31 + (dimension == null ? 0 : dimension.hashCode());
+        // A template edit or the kit switch changes what the index says about kits (1.22.0)
+        String kitStampNow = kitStamp();
+        fp = fp * 31 + kitStampNow.hashCode();
         if (current != null && fp == fingerprint && now - lastBuild < REBUILD_MS) return;
 
         int gen = generation;
         String mcVersion = mcVersion();
         long fingerprintNow = fp;
+        // Built here on the tick thread against the stash being indexed (not the sorter's own field); null leaves out every kit field
+        StashSorter kitSorter = sorter();
+        java.util.function.Function<com.porter.qwertestash.stash.Item, String> kitLookup = kitSorter == null ? null : ManagerIndex.kitLookup(CONFIG.kitSorting,
+            KitStore.shared().get(ManagerIndex.clamp(stash.server, 256), ManagerIndex.clamp(stash.name, 256)), sh -> kitSorter.completeKitTemplate(stash, sh));
         building.set(true);
         try {
             builder.execute(() -> {
                 ManagerIndex.Built built = null;
                 Throwable failure = null;
                 try {
-                    built = ManagerIndex.build(stash, include, player, mcVersion, dimension, id -> null);
+                    built = ManagerIndex.build(stash, include, player, mcVersion, dimension, id -> null, kitLookup);
                 } catch (Throwable t) {
                     failure = t;
                 }
@@ -1514,6 +1530,7 @@ public class StashManager extends Module {
                     }
                     current = result;
                     fingerprint = fingerprintNow;
+                    builtKitStamp = kitStampNow;
                     lastBuild = System.currentTimeMillis();
                     if (status.equals("no stash") || status.equals("index error") || status.equals("no player name")) status = "idle";
                 });

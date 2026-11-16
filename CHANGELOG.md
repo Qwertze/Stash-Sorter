@@ -5,6 +5,12 @@ All notable changes to Stash Sorter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.22.0] - Unreleased
+
+### Added
+- **The index says which shulkers are complete kits** (CRAFT-KITVIEW plan, milestone A1; the server side is A2). While kit sorting is on, every `shulkers[]` group that is a complete copy of a kit template carries `completeKit` (the template id, the same verdict the sorter uses to never unpack a complete kit), and the index root carries `kitRule: {"v":1,"completeKitsKept":true}`. With kit sorting off neither is sent, so an older server and the old index look the same as before. `completeKit` is part of the index hash.
+- The index is sent again when the kit settings version changes (a template edit) or kit sorting is switched, not only when the stash contents change.
+
 ## [1.21.0] - Unreleased
 
 > Renumbered on 2026-11-14: main's 1.19.0 is 1.17.0 + enchant without pearl travel; 1.18.1 is the hotfix for 1.18.0.

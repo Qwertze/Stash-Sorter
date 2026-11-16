@@ -61,6 +61,7 @@ public final class ManagerIndex {
         final List<String> keys = new ArrayList<>();
         final List<String> matches = new ArrayList<>();
         int count;
+        @Nullable String completeKit;
 
         Shulker(Info info, String key) {
             this.info = info;
@@ -79,6 +80,28 @@ public final class ManagerIndex {
      */
     public static Built build(Stash stash, boolean includeExcluded, String player, String mcVersion, @Nullable String dimension,
                               Function<String, @Nullable String> englishName) {
+        return build(stash, includeExcluded, player, mcVersion, dimension, englishName, null);
+    }
+
+    /**
+     * The completeKit lookup to build the index with, or null (no {@code kitRule}, no {@code completeKit}) unless the verdict can really be
+     * made: kit sorting is on, kit settings are loaded for the stash and there is a lookup. Never a rule without the means to mark kits.
+     */
+    public static @Nullable Function<Item, @Nullable String> kitLookup(boolean kitSorting, @Nullable KitSettings settings,
+                                                                       @Nullable Function<Item, @Nullable String> verdict) {
+        return kitSorting && settings != null && settings.types() != null && verdict != null ? verdict : null;
+    }
+
+    /** A kit template id as the website writes it (KitTemplate.ID); anything else is not sent. */
+    private static final java.util.regex.Pattern TEMPLATE_ID = java.util.regex.Pattern.compile("^t-[0-9a-z]{8}$");
+
+    /**
+     * @param completeKit the template id of the kit a shulker is a complete copy of, or null for any other shulker; null itself means kit sorting
+     *                    is off: no {@code kitRule} and no {@code completeKit} is written (1.22.0, the old index). Called on the builder thread,
+     *                    once per shulker group.
+     */
+    public static Built build(Stash stash, boolean includeExcluded, String player, String mcVersion, @Nullable String dimension,
+                              Function<String, @Nullable String> englishName, @Nullable Function<Item, @Nullable String> completeKit) {
         Map<String, Info> infos = new LinkedHashMap<>();
         Map<String, Agg> groups = new LinkedHashMap<>();
         Map<String, Shulker> shulkers = new LinkedHashMap<>();
@@ -94,7 +117,7 @@ public final class ManagerIndex {
             for (Item item : contents) {
                 if (item == null) continue;
                 add(groups, infos, item, 0, englishName);
-                addShulker(shulkers, infos, item, englishName);
+                addShulker(shulkers, infos, item, englishName, completeKit);
             }
         }
 
@@ -142,6 +165,8 @@ public final class ManagerIndex {
             o.addProperty("id", sh.info.id());
             o.addProperty("name", sh.info.name());
             o.addProperty("count", sh.count);
+            // Part of the hashed shulker array: a template edit that flips a verdict changes the index hash
+            if (sh.completeKit != null) o.addProperty("completeKit", sh.completeKit);
             JsonArray contents = new JsonArray();
             for (int n = 0; n < sh.keys.size(); n++) {
                 JsonObject c = new JsonObject();
@@ -173,6 +198,13 @@ public final class ManagerIndex {
         root.add("containers", containers);
         root.add("items", items);
         root.add("shulkers", shulkerArray);
+        // Only while the complete-kit rule is live; absent, the server treats nothing as a kit
+        if (completeKit != null) {
+            JsonObject rule = new JsonObject();
+            rule.addProperty("v", 1);
+            rule.addProperty("completeKitsKept", true);
+            root.add("kitRule", rule);
+        }
 
         return new Built(clamp(stash.server, 256), clamp(stash.name, 256), who, hash, GSON.toJson(root).getBytes(StandardCharsets.UTF_8),
             known, total, stale, sorted.size());
@@ -826,7 +858,8 @@ public final class ManagerIndex {
     }
 
     /** A top-level shulker with something in it, grouped with identical ones. */
-    private static void addShulker(Map<String, Shulker> shulkers, Map<String, Info> infos, Item item, Function<String, @Nullable String> english) {
+    private static void addShulker(Map<String, Shulker> shulkers, Map<String, Info> infos, Item item, Function<String, @Nullable String> english,
+                                   @Nullable Function<Item, @Nullable String> completeKit) {
         if (!item.isShulker() || item.contents == null || item.contents.isEmpty()) return;
         List<int[]> slots = new ArrayList<>();
         List<String> keys = new ArrayList<>(), matches = new ArrayList<>();
@@ -855,6 +888,11 @@ public final class ManagerIndex {
             sh.slots.addAll(slots);
             sh.keys.addAll(keys);
             sh.matches.addAll(matches);
+            if (completeKit != null) {
+                // The group's first shulker stands for it: the verdict does not depend on the name or on which copy
+                String id = completeKit.apply(item);
+                if (id != null && TEMPLATE_ID.matcher(id).matches()) sh.completeKit = id;
+            }
             shulkers.put(key, sh);
         }
         sh.count++;

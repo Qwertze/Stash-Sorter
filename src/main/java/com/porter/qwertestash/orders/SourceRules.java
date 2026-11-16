@@ -134,9 +134,14 @@ public final class SourceRules {
      * missing item, no wrong count). A complete match does not depend on the name, so none is passed.
      */
     public static boolean isCompleteKit(List<com.porter.qwertestash.stash.KitTemplate> templates, Item shulker) {
-        if (templates.isEmpty() || !shulker.isShulker() || shulker.contents.isEmpty()) return false;
+        return completeTemplateId(templates, shulker) != null;
+    }
+
+    /** The id of the template a shulker is a complete copy of (the same test as {@link #isCompleteKit}), or null. */
+    public static @Nullable String completeTemplateId(List<com.porter.qwertestash.stash.KitTemplate> templates, Item shulker) {
+        if (templates.isEmpty() || !shulker.isShulker() || shulker.contents.isEmpty()) return null;
         var found = com.porter.qwertestash.stash.KitTemplates.find(templates, KitPlanner.stacksOf(shulker), null);
-        return found != null && found.match().state() == com.porter.qwertestash.stash.KitTemplates.State.COMPLETE;
+        return found != null && found.match().state() == com.porter.qwertestash.stash.KitTemplates.State.COMPLETE ? found.template().id() : null;
     }
 
     /**

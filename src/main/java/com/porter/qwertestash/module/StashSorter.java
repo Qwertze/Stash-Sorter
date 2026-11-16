@@ -11208,7 +11208,7 @@ public class StashSorter extends AbstractFieldModule {
     // Complete-kit verdicts by shulker key, for the kit settings version and stash they were made with (matching a shulker against every
     // template is not free and a survey asks about the same copies many times). Any thread. A holder is never changed in what it is for: a new
     // settings version, another stash or too many entries start a new holder, and a verdict is only written into the holder it was made under.
-    private record CompleteKits(int store, Stash stash, java.util.concurrent.ConcurrentHashMap<String, Boolean> verdicts) {
+    private record CompleteKits(int store, Stash stash, java.util.concurrent.ConcurrentHashMap<String, String> verdicts) {
     }
 
     private static final int COMPLETE_KIT_CACHE_MAX = 4096;
@@ -11221,9 +11221,21 @@ public class StashSorter extends AbstractFieldModule {
      * ordinary sources.
      */
     private @Nullable String completeKitWhy(Item shulker) {
-        if (!CONFIG.kitSorting || !shulker.isShulker() || shulker.contents.isEmpty()) return null;
+        return completeKitTemplate(shulker) == null ? null : SourceRules.WHY_COMPLETE_KIT;
+    }
+
+    /**
+     * The id of the kit template a shulker is a complete copy of, or null: the verdict completeKitWhy gives (same gate, same cache, same
+     * store version), for the index's {@code completeKit}. Any thread (the index is built off the tick thread).
+     */
+    public @Nullable String completeKitTemplate(Item shulker) {
         Stash st = stash;
-        if (st == null) return null;
+        return st == null ? null : completeKitTemplate(st, shulker);
+    }
+
+    /** The same verdict for a given stash (the one the index is built for), not the sorter's own field, which restart() clears. Any thread. */
+    public @Nullable String completeKitTemplate(Stash st, Item shulker) {
+        if (!CONFIG.kitSorting || !shulker.isShulker() || shulker.contents.isEmpty()) return null;
         int store = KitStore.shared().version();
         CompleteKits h = completeKits;
         if (h == null || h.store() != store || h.stash() != st || h.verdicts().size() > COMPLETE_KIT_CACHE_MAX) {
@@ -11231,14 +11243,16 @@ public class StashSorter extends AbstractFieldModule {
             completeKits = h;
         }
         String key = ManagerIndex.shulkerKey(shulker);
-        Boolean hit = key == null ? null : h.verdicts().get(key);
+        String hit = key == null ? null : h.verdicts().get(key);
         if (hit == null) {
             KitSettings settings = KitStore.shared().get(ManagerIndex.clamp(st.server, 256), ManagerIndex.clamp(st.name, 256));
             if (settings == null || settings.types() == null || settings.types().templates().isEmpty()) return null;
-            hit = SourceRules.isCompleteKit(settings.types().templates(), shulker);
+            String id = SourceRules.completeTemplateId(settings.types().templates(), shulker);
+            // "" is a cached "not complete" (a map takes no null)
+            hit = id == null ? "" : id;
             if (key != null) h.verdicts().put(key, hit);
         }
-        return hit ? SourceRules.WHY_COMPLETE_KIT : null;
+        return hit.isEmpty() ? null : hit;
     }
 
     /** A container an order may take loose stacks from now. */
