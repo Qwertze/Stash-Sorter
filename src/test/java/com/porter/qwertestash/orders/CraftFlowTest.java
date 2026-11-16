@@ -377,7 +377,7 @@ class CraftFlowTest {
         w.now += 70_000;
         d.craftOrders(true);
         OrderDriver.Request with = d.next(true, null, "s", "t", "Bot", true);
-        assertEquals(1, JsonParser.parseString(new String(with.body())).getAsJsonObject().get("craftOrders").getAsInt());
+        assertEquals(2, JsonParser.parseString(new String(with.body())).getAsJsonObject().get("craftOrders").getAsInt());
         assertEquals("/api/v1/orders/claim", with.path());
     }
 
@@ -392,7 +392,7 @@ class CraftFlowTest {
         for (int i = 0; i < 2; i++) {
             w.now += 70_000;
             OrderDriver.Request claim = d.next(true, null, "s", "t", "Bot", true);
-            assertEquals(1, JsonParser.parseString(new String(claim.body())).getAsJsonObject().get("craftOrders").getAsInt());
+            assertEquals(2, JsonParser.parseString(new String(claim.body())).getAsJsonObject().get("craftOrders").getAsInt());
             assertTrue(claim.reply().done(204, ""));
             assertNotNull(w.saved, "claim " + i);
         }

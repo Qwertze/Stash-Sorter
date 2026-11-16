@@ -23,6 +23,8 @@ public final class OrderDriver {
     public static final long CLAIM_MS = 5_000, STATUS_MS = 2_000;
     /** With nothing pending, a claim is still made this often: the server hands back an order the bot holds whose claim reply was lost. */
     public static final long IDLE_CLAIM_MS = 60_000;
+    /** The value of {@code craftOrders} in a claim: 2 since 1.22.0 (v2 craft blocks); 1 was v1 blocks only. */
+    public static final int CRAFT_ORDERS_FLAG = 2;
     public static final int PHASE_MAX = 100, MESSAGE_MAX = 300, MINIMAL_MESSAGE_MAX = 100;
 
     /** What to do with the answer. Returns false when the request failed and should be tried again later. */
@@ -77,7 +79,7 @@ public final class OrderDriver {
     }
 
     /**
-     * Whether the claim carries {@code craftOrders: 1}: only while this bot has a recipe table and craft orders are on. Without it the
+     * Whether the claim carries {@code craftOrders: 2} (1 before 1.22.0): only while this bot has a recipe table and craft orders are on. Without it the
      * server skips orders that have a craft line, and fails a held one that is claimed again without it.
      */
     public void craftOrders(boolean on) {
@@ -219,7 +221,8 @@ public final class OrderDriver {
             o.addProperty("server", server);
             o.addProperty("stash", stash);
             java.util.function.BooleanSupplier ask = craftOrdersWhen;
-            if (craftOrders || (ask != null && ask.getAsBoolean())) o.addProperty("craftOrders", 1);
+            // 2 (CRAFT-CONTRACT-v1.2.md 2.3): this bot runs v2 craft blocks. An older server reads any number from 1 up as "yes", so it is sent always
+            if (craftOrders || (ask != null && ask.getAsBoolean())) o.addProperty("craftOrders", CRAFT_ORDERS_FLAG);
             // 1.16.0 (KIT-CONTRACT v2 "Claim"): this bot can build kits (kit sorting and kit orders on, the type table loaded), or it holds a kit order
             java.util.function.BooleanSupplier kitAsk = kitOrdersWhen;
             if (kitAsk != null && kitAsk.getAsBoolean()) o.addProperty("kitOrders", 1);

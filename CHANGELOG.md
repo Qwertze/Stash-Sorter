@@ -10,6 +10,12 @@ All notable changes to Stash Sorter are documented here. The format follows
 ### Added
 - **The index says which shulkers are complete kits** (CRAFT-KITVIEW plan, milestone A1; the server side is A2). While kit sorting is on, every `shulkers[]` group that is a complete copy of a kit template carries `completeKit` (the template id, the same verdict the sorter uses to never unpack a complete kit), and the index root carries `kitRule: {"v":1,"completeKitsKept":true}`. With kit sorting off neither is sent, so an older server and the old index look the same as before. `completeKit` is part of the index hash.
 - The index is sent again when the kit settings version changes (a template edit) or kit sorting is switched, not only when the stash contents change.
+- **Craft blocks v2, milestone B1** (CRAFT-CONTRACT-v1.2; the server side is built separately; not tried against a live server yet).
+  - The heartbeat's `craftOrders` says `v: 2`, `extras` (the hash of the extras held, or null) and `can: []`; the claim carries `craftOrders: 2`. A server that refused the newer fields still gets the 1.15.0 shape (`v: 1`).
+  - The recipes are fetched with `?extras=1`. The extras block is checked (its hash is computed again from its content), cached beside the table and fetched again when the heartbeat reply's `extrasHash` changes. An older server sends none: `extras` is null.
+  - `CraftOrder.check` knows v2 blocks: `maxDepth` 1 to 12, every `needs` entry within `can`, `extras` null or the bot's hash, and any field reserved for a later milestone (furnace steps, fuel, specs, grids, remainders) is a `recipe_mismatch`. v1 blocks run by the v1 rules, unchanged.
+  - The sub-plan of a v2 block uses its `maxDepth`, 12 estimate rounds and 200,000 calls (v1: 4, 4, 50,000).
+  - Preflight, before anything is withdrawn: the stash (counted as the index counts it, complete kits left out) must cover the item lines and `craft.take`. Short: the order fails with "Not enough in the stash any more to make this order: ... Restock and retry.", nothing is taken, and `result.craft` has `preflight: "short"` and `restock`. Otherwise `preflight: "ok"`. Phase text "checking the stash".
 
 ## [1.21.0] - Unreleased
 

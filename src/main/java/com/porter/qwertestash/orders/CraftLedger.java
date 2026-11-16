@@ -37,6 +37,11 @@ public final class CraftLedger {
     private final Map<String, String> shortReason = new LinkedHashMap<>();
     private final int plannedFills;
     private boolean refused;
+    /** How a v2 block was planned: the depth, the estimate rounds and the calls the sub-plans may use (CRAFT-CONTRACT-v1.2.md 7). */
+    private final CraftSub.Limits limits;
+    /** The preflight of a v2 order (CRAFT-CONTRACT-v1.2.md 11.2): null for any other order, {@code "ok"} or {@code "short"}, and the restock list of a short one. */
+    private @Nullable String preflight;
+    private JsonArray restock = new JsonArray();
     /** Crafted items per key that did not reach a delivered shulker (set when the order ends), and the surplus the saved ledger said was carried. */
     private final Map<String, Long> lost = new LinkedHashMap<>(), savedSurplus = new LinkedHashMap<>();
     private long fills;
@@ -53,6 +58,7 @@ public final class CraftLedger {
     private CraftLedger(Order.Craft craft, List<Order.Line> craftLines, Recipes table, int maxFills, boolean restrict) {
         this.table = table;
         this.maxFills = maxFills;
+        this.limits = CraftSub.Limits.of(craft);
         if (restrict) {
             this.allowed = new java.util.LinkedHashSet<>();
             for (Order.CraftStep s : craft.steps()) allowed.add(s.recipe());
@@ -73,6 +79,34 @@ public final class CraftLedger {
         for (var e : new ArrayList<>(l.wanted.entrySet())) l.addShort(e.getKey(), e.getValue(), reason);
         l.refused = true;
         return l;
+    }
+
+    /**
+     * The ledger of a v2 order whose preflight found the stash short (CRAFT-CONTRACT-v1.2.md 11.2): nothing is withdrawn, every craft line is short with
+     * {@code ingredients_short}, and the report carries {@code preflight: "short"} and the {@code restock} list.
+     */
+    public static CraftLedger preflightShort(List<Order.Line> craftLines, Recipes table, int maxFills, JsonArray restock) {
+        CraftLedger l = refused(craftLines, table, maxFills, CraftOrder.INGREDIENTS_SHORT);
+        l.refused = false;
+        l.preflight = PREFLIGHT_SHORT;
+        l.restock = restock;
+        return l;
+    }
+
+    public static final String PREFLIGHT_OK = "ok", PREFLIGHT_SHORT = "short";
+
+    /** The preflight of a v2 order found the stash covers it. */
+    public void preflightOk() {
+        preflight = PREFLIGHT_OK;
+    }
+
+    public @Nullable String preflight() {
+        return preflight;
+    }
+
+    /** The limits this order's sub-plans use. */
+    public CraftSub.Limits limits() {
+        return limits;
     }
 
     /** The ledger was made for an order that can't be carried out here (no table, the check failed). */
@@ -129,7 +163,7 @@ public final class CraftLedger {
 
     /** A new sub-plan session from the budget left and the surplus carried. */
     public CraftSub.Session session() {
-        return new CraftSub.Session(table, allowed, take, budget, surplus);
+        return new CraftSub.Session(table, allowed, take, budget, surplus, limits);
     }
 
     /** Where the key's craft line comes in the order (0 first): the server plans the lines in this order, so the bot crafts them in it. */
@@ -243,6 +277,8 @@ public final class CraftLedger {
 
     /** "<n> item(s) not crafted: <reasons>", or null when everything asked for was made. */
     public @Nullable String note() {
+        // A failed preflight says it all in the order's message
+        if (PREFLIGHT_SHORT.equals(preflight)) return null;
         long n = shortTotal(), gone = 0;
         for (long l : lost.values()) gone += l;
         if (n <= 0 && gone <= 0) return null;
@@ -260,8 +296,10 @@ public final class CraftLedger {
     public JsonObject toResult() {
         JsonObject o = new JsonObject();
         o.addProperty("fills", fills);
+        if (preflight != null) o.addProperty("preflight", preflight);
         JsonArray m = new JsonArray();
-        for (var e : wanted.entrySet()) {
+        // Nothing was made when the preflight came out short: the list is empty (the contract's shape)
+        for (var e : PREFLIGHT_SHORT.equals(preflight) ? Map.<String, Long>of().entrySet() : wanted.entrySet()) {
             if (m.size() >= MAX_ENTRIES) break;
             JsonObject x = new JsonObject();
             x.addProperty("key", cut(e.getKey()));
@@ -282,6 +320,7 @@ public final class CraftLedger {
         o.add("short", s);
         o.add("used", qtys(used));
         o.add("returned", qtys(returned));
+        if (PREFLIGHT_SHORT.equals(preflight)) o.add("restock", restock);
         return o;
     }
 
@@ -314,6 +353,7 @@ public final class CraftLedger {
         JsonObject r = new JsonObject();
         for (var e : shortReason.entrySet()) r.addProperty(e.getKey(), e.getValue());
         o.add("reasons", r);
+        if (PREFLIGHT_OK.equals(preflight)) o.addProperty("preflight", PREFLIGHT_OK);
         return o;
     }
 
@@ -349,6 +389,7 @@ public final class CraftLedger {
             shortCount.putAll(s);
             shortReason.clear();
             shortReason.putAll(reasons);
+            if (o.has("preflight") && o.get("preflight").isJsonPrimitive() && PREFLIGHT_OK.equals(o.get("preflight").getAsString())) preflight = PREFLIGHT_OK;
         } catch (RuntimeException e) {
             // A broken record is a fresh ledger: the order goes on with its full budget
         }

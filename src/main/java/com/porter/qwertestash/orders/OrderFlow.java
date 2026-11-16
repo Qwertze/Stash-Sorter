@@ -82,6 +82,29 @@ public final class OrderFlow {
             return 0;
         }
 
+        /** The hash of the extras this bot holds (CRAFT-CONTRACT-v1.2.md 13), or null: a v2 craft block's {@code extras} must be null or this. */
+        default @Nullable String craftExtrasHash() {
+            return null;
+        }
+
+        /** The features beyond B1 this bot does ({@code craftOrders.can} of the heartbeat); empty in B1. A v2 block's {@code needs} must be within it. */
+        default java.util.Set<String> craftCan() {
+            return java.util.Set.of();
+        }
+
+        /**
+         * What the stash holds now per index key, counted as the index counts it with the contents of complete kits left out (CRAFT-CONTRACT-v1.2.md 11.2,
+         * the preflight of a v2 craft order), or null when the stash model can't be read (the order then fails; see {@link #preflights()}). Asked once, when the order is planned, on the tick thread.
+         */
+        default java.util.@Nullable Map<String, Long> preflightStock() {
+            return null;
+        }
+
+        /** This host makes the preflight (counts the stash). With it, a null {@link #preflightStock()} means the stash model can't be read now: the order fails. */
+        default boolean preflights() {
+            return false;
+        }
+
         /**
          * The units for the order's kit lines (1.16.0, KIT-CONTRACT v2): complete copies to fetch and kits to build, planned from what the stash
          * holds now; null when this host cannot build kits (every kit is then short with template_mismatch).
@@ -763,6 +786,8 @@ public final class OrderFlow {
         List<Order.Lot> craftLots = List.of();
         if (o.hasCraft() && craftLedger == null) {
             craftLedger = startCraft(o);
+            // A v2 order is checked against the stash before anything is withdrawn (CRAFT-CONTRACT-v1.2.md 11.2); a resumed one passed it when it began
+            if (!resumed && preflightFailed(o)) return null;
             if (!resumed) {
                 List<Order.Lot> made = craftLotsOf(o, craftLedger);
                 if (made == null) {
@@ -973,12 +998,42 @@ public final class OrderFlow {
             host.say("This order has craft lines but this bot has no recipe table or craft orders are off: they are not crafted.");
             return CraftLedger.refused(lines, Recipes.empty(), 0, CraftOrder.RECIPE_MISMATCH);
         }
-        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills());
+        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan());
         if (bad != null) {
             host.say("The order's craft lines are not crafted: " + bad + ".");
             return CraftLedger.refused(lines, table, host.craftMaxFills(), CraftOrder.RECIPE_MISMATCH);
         }
         return new CraftLedger(o.craft, lines, table, host.craftMaxFills());
+    }
+
+    /**
+     * The preflight of a v2 craft order (CRAFT-CONTRACT-v1.2.md 11.2), before any plan, withdrawal, unpacking or craft: what the stash holds now must cover
+     * the order's item lines and the block's take. Short: the order is failed here with the shortfalls in its message, every craft line short with
+     * ingredients_short, and {@code result.craft} saying {@code preflight: "short"} with the {@code restock} list; the order is finished, so it is reported
+     * and forgotten as any other. Otherwise the ledger notes {@code preflight: "ok"}. Not made for a v1 block, for a v2 block that failed its check (every
+     * craft line is short with recipe_mismatch then, as in v1) or when the host can't count the stash. Tick thread.
+     * @return true when the order was failed
+     */
+    private boolean preflightFailed(Order o) {
+        CraftLedger ledger = craftLedger;
+        if (ledger == null || ledger.refusedAtStart() || o.craft == null || o.craft.v() != 2) return false;
+        phase = "checking the stash";
+        if (!host.preflights()) return false;
+        java.util.Map<String, Long> stock = host.preflightStock();
+        if (stock == null) {
+            // The stash can't be read now: failing is safer than withdrawing against a stash that may not cover the order
+            craftLedger = CraftLedger.preflightShort(o.craftWanted(), ledger.table(), ledger.maxFills(), new com.google.gson.JsonArray());
+            finish(State.Failed, "can't read the stash right now; retry");
+            return true;
+        }
+        List<Preflight.Shortfall> shorts = Preflight.check(Preflight.needs(o, o.craft), stock);
+        if (shorts.isEmpty()) {
+            ledger.preflightOk();
+            return false;
+        }
+        craftLedger = CraftLedger.preflightShort(o.craftWanted(), ledger.table(), ledger.maxFills(), Preflight.restock(shorts));
+        finish(State.Failed, Preflight.message(shorts));
+        return true;
     }
 
     /** The loads of the craft lines (merged per key, cut into stacks), none when the ledger has every line short already. */
@@ -1735,6 +1790,8 @@ public final class OrderFlow {
                 finish(shulkersDelivered > 0 ? State.Delivered : State.Failed, why);
                 return new Idle();
             }
+            // The preflight of a v2 craft order ended it
+            if (!running()) return new Idle();
         }
 
         skips = 0;

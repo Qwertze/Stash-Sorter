@@ -62,9 +62,31 @@ public final class CraftOrder {
      * @return null when the order can be carried out, else a short description of what is wrong (the reason is {@link #RECIPE_MISMATCH})
      */
     public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills) {
+        return check(craft, table, maxFills, null, Set.of());
+    }
+
+    /** The deepest craft chain a v2 block may name (CRAFT-CONTRACT-v1.2.md 7 and 9). */
+    public static final int V2_MAX_DEPTH = 12;
+
+    /**
+     * As above, for a bot that also runs v2 blocks (CRAFT-CONTRACT-v1.2.md 11.1). A v1 block is checked by the v1 rules, nothing changed. A v2 block
+     * passes when, besides the v1 checks of its steps: {@code maxDepth} is 1 to 12; every entry of {@code needs} is one of the bot's {@code can}; its
+     * {@code extras} is null or the hash of the bot's own extras (and the latter when {@code needs} is not empty); and it has no field reserved for a
+     * later milestone that this bot doesn't carry out ({@link Order#reservedField}). Any failure is {@link #RECIPE_MISMATCH} for every craft line.
+     * @param extrasHash the hash of the extras the bot holds, or null
+     * @param can        the features beyond B1 the bot does (empty in B1)
+     */
+    public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can) {
         if (craft == null) return "the order has craft lines but no craft block";
         if (craft.malformed()) return "the craft block can't be read";
-        if (craft.v() != 1) return "craft version " + craft.v() + " is not 1";
+        if (craft.v() != 1 && craft.v() != 2) return "craft version " + craft.v() + " is not 1 or 2";
+        if (craft.v() == 2) {
+            if (craft.maxDepth() < 1 || craft.maxDepth() > V2_MAX_DEPTH) return "craft depth " + craft.maxDepth() + " is not 1 to " + V2_MAX_DEPTH;
+            for (String need : craft.needs()) if (!can.contains(need)) return "the order needs " + need + ", which this bot can't do";
+            if (craft.extras() != null && !craft.extras().equals(extrasHash)) return "the order was planned with other extras";
+            if (!craft.needs().isEmpty() && craft.extras() == null) return "the order needs extras it doesn't name";
+            if (craft.reserved() != null) return "the craft block uses " + craft.reserved() + ", which this bot doesn't carry out";
+        }
         if (!craft.recipes().equals(table.hash())) return "the order was planned with another recipe table";
         if (craft.steps().size() > Order.MAX_CRAFT_STEPS || craft.take().size() > Order.MAX_CRAFT_TAKE) return "too many steps or ingredients";
         long fills = 0;

@@ -26,6 +26,7 @@ import com.porter.qwertestash.orders.OrderDriver;
 import com.porter.qwertestash.orders.OrderFlow;
 import com.porter.qwertestash.stash.AnvilSpot;
 import com.porter.qwertestash.stash.DeliverySpot;
+import com.porter.qwertestash.manager.Extras;
 import com.porter.qwertestash.manager.RecipeStore;
 import com.porter.qwertestash.manager.RecipeSync;
 import com.porter.qwertestash.orders.Recipes;
@@ -994,14 +995,16 @@ public class StashManager extends Module {
         if (!RecipeStore.validMc(mc)) return;
         loadRecipeCache();
         Recipes held = Recipes.current();
-        if (!recipeSync.due(now, held == null ? null : held.hash())) return;
+        String heldExtras = Extras.currentHash();
+        if (!recipeSync.due(now, held == null ? null : held.hash(), heldExtras)) return;
         recipeSync.started();
         String heldHash = held == null ? null : held.hash();
         String botId = new LinkHost().botId();
         int gen = generation;
         URI url;
         try {
-            url = URI.create(base + "/api/v1/bot/recipes?mc=" + java.net.URLEncoder.encode(mc, java.nio.charset.StandardCharsets.UTF_8));
+            // &extras=1 (CRAFT-CONTRACT-v1.2.md 2.4): the table plus the extras block. An older server reads only mc and sends the table as before
+            url = URI.create(base + "/api/v1/bot/recipes?mc=" + java.net.URLEncoder.encode(mc, java.nio.charset.StandardCharsets.UTF_8) + "&extras=1");
         } catch (IllegalArgumentException e) {
             recipeSync.failed(now, -1);
             return;
@@ -1010,7 +1013,8 @@ public class StashManager extends Module {
             recipeIo.execute(() -> {
                 ManagerHttp.Response response;
                 try {
-                    response = ManagerHttp.call("GET", url, null, key, botId, 5_000, 20_000, 30_000, null, heldHash == null ? null : RecipeStore.quote(heldHash));
+                    response = ManagerHttp.call("GET", url, null, key, botId, 5_000, 20_000, 30_000, null,
+                        heldHash == null ? null : RecipeStore.quote(heldHash, heldExtras));
                 } catch (Throwable t) {
                     response = new ManagerHttp.Response(-1, "", t.getClass().getSimpleName());
                 }
@@ -1034,10 +1038,13 @@ public class StashManager extends Module {
         String mc = mcVersion();
         if (!RecipeStore.validMc(mc)) return;
         recipeCacheTried = true;
-        Recipes cached = RecipeStore.shared().load(mc);
-        if (cached != null) {
+        RecipeStore.Loaded loaded = RecipeStore.shared().loadAll(mc);
+        if (loaded != null) {
+            Recipes cached = loaded.table();
             Recipes.setCurrent(cached);
-            LOG.info("{}recipe table for {} loaded from the cache ({} recipes, hash {}).", PREFIX, mc, cached.size(), cached.hash().substring(0, 8));
+            Extras.setCurrent(loaded.extras());
+            LOG.info("{}recipe table for {} loaded from the cache ({} recipes, hash {}, extras {}).", PREFIX, mc, cached.size(), cached.hash().substring(0, 8),
+                loaded.extras() == null ? "none" : loaded.extras().hash().substring(0, 8));
         }
     }
 
@@ -1049,11 +1056,17 @@ public class StashManager extends Module {
         }
         if (r.code() == 200) {
             try {
-                Recipes table = RecipeStore.shared().accept(mc, r.body(), r.etag());
+                RecipeStore.Loaded loaded = RecipeStore.shared().acceptAll(mc, r.body(), r.etag());
+                Recipes table = loaded.table();
                 Recipes.setCurrent(table);
+                // No extras (an older server) or refused ones: none are held, and the heartbeat says null. A refused block is not asked for again while the server's hash stays
+                Extras.setCurrent(loaded.extras());
+                if (loaded.extras() == null && loaded.extrasHash() != null) recipeSync.extrasRefused(loaded.extrasHash());
+                if (loaded.extrasRefused() != null) LOG.warn("{}the extras from the server were refused: {}.", PREFIX, loaded.extrasRefused());
                 recipeSync.succeeded(now);
                 recipeSaid = false;
-                LOG.info("{}recipe table for {} fetched ({} recipes, hash {}). Craft orders and shulker box crafting use it.", PREFIX, mc, table.size(), table.hash().substring(0, 8));
+                LOG.info("{}recipe table for {} fetched ({} recipes, hash {}, extras {}). Craft orders and shulker box crafting use it.", PREFIX, mc, table.size(),
+                    table.hash().substring(0, 8), loaded.extras() == null ? "none" : loaded.extras().hash().substring(0, 8));
                 return;
             } catch (RecipeStore.Invalid e) {
                 LOG.warn("{}the recipe table from the server was refused: {}.", PREFIX, e.getMessage());
@@ -1078,7 +1091,8 @@ public class StashManager extends Module {
         String kit = caps == null ? "" : "/k" + caps.enabled() + caps.restock() + caps.craft();
         if (table == null) return "-" + kit;
         StashSorter s = sorter();
-        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + kit;
+        // The extras hash is part of it: new extras (or none) send a heartbeat of their own (CRAFT-CONTRACT-v1.2.md 2.1)
+        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/x" + Extras.currentHash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + kit;
     }
 
     /**
@@ -1099,6 +1113,8 @@ public class StashManager extends Module {
         }
         CraftSettings cached = CraftStore.shared().get(built.server(), built.stash());
         ManagerIndex.CraftOrders orders = new ManagerIndex.CraftOrders(on, table.hash(), mcVersion(), status, Math.max(1, CONFIG.craftOrderMaxFills), craftSeen, s.craftTableWhy(), s.botTable());
+        // v 2 with the extras hash and the features (none in B1); an older server that refused the newer fields gets the 1.15.0 shape
+        orders = orders.withV2(Extras.currentHash(), ManagerIndex.craftCan());
         if (craftLegacy) orders = orders.asLegacy();
         return new ManagerIndex.Craft(orders, cached == null ? null : cached.hash());
     }
@@ -1107,6 +1123,7 @@ public class StashManager extends Module {
     private void craftReplied(ManagerIndex.Built built, String body) {
         ManagerIndex.CraftReply reply = ManagerIndex.craftReply(body);
         recipeSync.serverHash(reply.recipesHash());
+        recipeSync.serverExtras(reply.extrasHash());
         if (reply.invalid() != null) {
             if (!reply.invalid().equals(craftInvalidSaid)) LOG.warn("{}ignoring craft settings from the server: {}.", PREFIX, reply.invalid());
             craftInvalidSaid = reply.invalid();

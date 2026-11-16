@@ -14511,7 +14511,7 @@ public class StashSorter extends AbstractFieldModule {
                     CraftLedger ledger = r.oc == null ? null : orders.flow.craftLedger();
                     if (ledger != null && recipes != null && r.made < r.wanted) {
                         // An order's chunk is planned again from what is carried, with the order's recipes only
-                        again = new CraftSub.Session(ledger.table(), ledger.allowed(), pool, pool, Map.of()).plan(r.plan.item(), r.wanted - r.made).plan();
+                        again = new CraftSub.Session(ledger.table(), ledger.allowed(), pool, pool, Map.of(), ledger.limits()).plan(r.plan.item(), r.wanted - r.made).plan();
                     }
                     else again = recipes == null || r.made >= r.wanted ? null
                         : CraftPlanner.plan(recipes, r.plan.item(), r.wanted - r.made, pool, CraftPlanner.Limits.open());
@@ -17436,6 +17436,33 @@ public class StashSorter extends AbstractFieldModule {
         @Override
         public int craftMaxFills() {
             return Math.max(1, CONFIG.craftOrderMaxFills);
+        }
+
+        @Override
+        public @Nullable String craftExtrasHash() {
+            return com.porter.qwertestash.manager.Extras.currentHash();
+        }
+
+        @Override
+        public Set<String> craftCan() {
+            return Set.copyOf(ManagerIndex.craftCan());
+        }
+
+        /** The stash as the index counts it, complete kits' contents left out (CRAFT-CONTRACT-v1.2.md 11.2). Tick thread, at planning. */
+        @Override
+        public @Nullable Map<String, Long> preflightStock() {
+            Stash st = stash;
+            if (st == null) return null;
+            try {
+                return ManagerIndex.stockCounts(st, CONFIG.managerIncludeExcluded, sh -> completeKitTemplate(st, sh));
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+
+        @Override
+        public boolean preflights() {
+            return true;
         }
 
         @Override

@@ -31,11 +31,13 @@ import java.util.regex.Pattern;
 public final class RecipeStore {
     public static final int FORMAT = 1;
     public static final long MAX_BYTES = 4L * 1024 * 1024;
+    /** The cache file may be bigger than the body it was made from (the wrapper, the extras kept beside the table): a body that was taken is always loadable. */
+    public static final long MAX_FILE_BYTES = MAX_BYTES + 1024 * 1024;
     private static final int MAX_RECIPES = 4096, MAX_OTHER = 16384, MAX_ALTERNATIVES = 1024;
     private static final Pattern ID = Pattern.compile("^[a-z0-9_.-]+:[a-z0-9_./-]{1,128}$");
     private static final Pattern MC = Pattern.compile("^[0-9A-Za-z._+-]{1,32}$");
     private static final Pattern HASH = Pattern.compile("^[0-9a-f]{40}$");
-    private static final Gson GSON = new Gson();
+    private static final Gson GSON = new com.google.gson.GsonBuilder().disableHtmlEscaping().create();
 
     /** Why a table was refused, for the log. */
     public static final class Invalid extends Exception {
@@ -78,13 +80,32 @@ public final class RecipeStore {
         return "\"" + hash + "\"";
     }
 
-    /** The hash inside an ETag header value (quotes and a weak marker taken off), or null when it is not a 40 digit hex hash. */
+    /**
+     * The table hash inside an ETag header value (quotes and a weak marker taken off), or null when it is not a 40 digit hex hash. An ETag of
+     * the {@code ?extras=1} form, {@code "<tableHash>+<extrasHash>"} (CRAFT-CONTRACT-v1.2.md 2.4), gives the part before the {@code +}.
+     */
     public static @Nullable String hashOfEtag(@Nullable String etag) {
         if (etag == null) return null;
         String e = etag.trim();
         if (e.startsWith("W/")) e = e.substring(2);
         if (e.length() >= 2 && e.startsWith("\"") && e.endsWith("\"")) e = e.substring(1, e.length() - 1);
+        int plus = e.indexOf('+');
+        if (plus >= 0) e = e.substring(0, plus);
         return HASH.matcher(e).matches() ? e : null;
+    }
+
+    /** The value of If-None-Match for a table and the extras held with it: {@code "<t>"}, or {@code "<t>+<e>"} when extras are held (the {@code ?extras=1} form). */
+    public static String quote(String tableHash, @Nullable String extrasHash) {
+        return extrasHash == null ? quote(tableHash) : "\"" + tableHash + "+" + extrasHash + "\"";
+    }
+
+    /**
+     * A table and the extras served with it (CRAFT-CONTRACT-v1.2.md 2.4).
+     * @param extras        the validated extras, or null: an older server sent none, or the block was refused
+     * @param extrasRefused why a block that was sent was refused (its hash didn't match, ...), else null
+     * @param extrasHash    the hash the answer's ETag or the block itself said the extras have, whether or not the block was usable (else null)
+     */
+    public record Loaded(Recipes table, @Nullable Extras extras, @Nullable String extrasRefused, @Nullable String extrasHash) {
     }
 
     /**
@@ -92,11 +113,17 @@ public final class RecipeStore {
      * should be, or its hash computed now is not the one stored with it (the file is deleted then).
      */
     public @Nullable Recipes load(String mc) {
+        Loaded l = loadAll(mc);
+        return l == null ? null : l.table();
+    }
+
+    /** As {@link #load}, with the extras cached beside the table (null when there are none, or they are not trusted: their hash is computed again). */
+    public @Nullable Loaded loadAll(String mc) {
         if (!validMc(mc)) return null;
         Path file = file(mc);
         try {
             if (!Files.isRegularFile(file)) return null;
-            if (Files.size(file) > MAX_BYTES) throw new Invalid("file too big");
+            if (Files.size(file) > MAX_FILE_BYTES) throw new Invalid("file too big");
             JsonElement root = SafeJson.parse(Files.readString(file, StandardCharsets.UTF_8));
             if (!root.isJsonObject()) throw new Invalid("not an object");
             JsonObject o = root.getAsJsonObject();
@@ -104,7 +131,18 @@ public final class RecipeStore {
             if (!o.has("table") || !o.get("table").isJsonObject()) throw new Invalid("no table");
             Recipes table = check(mc, o.getAsJsonObject("table"));
             if (!table.hash().equals(o.get("hash").getAsString())) throw new Invalid("the hash doesn't match the table");
-            return table;
+            Extras extras = null;
+            String refused = null;
+            if (o.has("extras") && o.get("extras").isJsonObject()) {
+                // A damaged extras block loses only the extras; the table stays
+                try {
+                    extras = Extras.parse(o.getAsJsonObject("extras"));
+                } catch (Invalid bad) {
+                    refused = bad.getMessage();
+                    warn("Qwerte Stash: ignoring the cached extras for {} ({})", mc, refused);
+                }
+            }
+            return new Loaded(table, extras, refused, extras == null ? null : extras.hash());
         } catch (IOException e) {
             // Could not be read now (locked, a disk hiccup): the file is not known to be bad, so it is left alone
             warn("Qwerte Stash: couldn't read the cached recipe table for {} ({})", mc, e.getClass().getSimpleName());
@@ -126,6 +164,14 @@ public final class RecipeStore {
      * @return the table
      */
     public Recipes accept(String mc, String body, @Nullable String etag) throws Invalid {
+        return acceptAll(mc, body, etag).table();
+    }
+
+    /**
+     * As {@link #accept}, for an answer to {@code ?extras=1}: the top-level {@code extras} object is checked (its hash computed again, and compared with the
+     * stated one and with the ETag's second half) and cached with the table. A bad block loses only the extras: the table is still taken.
+     */
+    public Loaded acceptAll(String mc, String body, @Nullable String etag) throws Invalid {
         if (!validMc(mc)) throw new Invalid("bad Minecraft version");
         if (body.length() > MAX_BYTES) throw new Invalid("table too big");
         JsonObject root;
@@ -136,19 +182,38 @@ public final class RecipeStore {
         } catch (RuntimeException ex) {
             throw new Invalid("not JSON");
         }
+        // The extras are kept beside the table, not inside it
+        JsonElement extrasElement = root.remove("extras");
         Recipes table = check(mc, root);
         String expected = hashOfEtag(etag);
         if (expected != null && !expected.equals(table.hash())) throw new Invalid("the table's hash " + table.hash() + " is not the ETag's");
-        save(mc, root, table.hash());
-        return table;
+        Extras extras = null;
+        String refused = null, said = Extras.hashOfEtag(etag);
+        if (extrasElement != null && !extrasElement.isJsonNull()) {
+            try {
+                if (!extrasElement.isJsonObject()) throw new Invalid("extras are not an object");
+                extras = Extras.parse(extrasElement.getAsJsonObject());
+                if (said != null && !said.equals(extras.hash())) {
+                    refused = "the extras' hash " + extras.hash() + " is not the ETag's";
+                    extras = null;
+                }
+            } catch (Invalid bad) {
+                refused = bad.getMessage();
+                extras = null;
+            }
+        }
+        else if (said != null) refused = "the answer names extras but carries none";
+        save(mc, root, table.hash(), extras);
+        return new Loaded(table, extras, refused, extras != null ? extras.hash() : said);
     }
 
-    private void save(String mc, JsonObject table, String hash) throws Invalid {
+    private void save(String mc, JsonObject table, String hash, @Nullable Extras extras) throws Invalid {
         JsonObject file = new JsonObject();
         file.addProperty("format", FORMAT);
         file.addProperty("mc", mc);
         file.addProperty("hash", hash);
         file.add("table", table);
+        if (extras != null) file.add("extras", extras.json());
         try {
             Files.createDirectories(dir.toAbsolutePath());
             // Written beside the file and moved over it, so a crash or a stop in the middle never leaves half a file

@@ -210,6 +210,29 @@ public final class ManagerIndex {
             known, total, stale, sorted.size());
     }
 
+    /**
+     * What the stash holds per index key, counted the way {@link #build} counts {@code items[].count} (the same containers, the same recursion into
+     * shulkers) but without what lies inside a complete kit copy: the server's {@code orderable} leaves that out (CRAFT-CONTRACT-v1.2.md 11.2, the
+     * preflight). Only stash containers; the bot's own inventory is not part of a {@link Stash}. A shulker that is a complete kit still counts as an item itself.
+     * @param completeKit the verdict the sorter uses to never unpack a copy ({@code SourceRules.completeTemplateId}); null: nothing is a kit
+     */
+    public static Map<String, Long> stockCounts(Stash stash, boolean includeExcluded, @Nullable Function<Item, @Nullable String> completeKit) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (Box box : stash.boxes) {
+            if (box.delivery || !stash.inScope(box) || (box.excluded && !includeExcluded)) continue;
+            if (box.contents == null) continue;
+            for (Item item : box.contents) if (item != null) count(counts, item, 0, completeKit);
+        }
+        return counts;
+    }
+
+    private static void count(Map<String, Long> counts, Item item, int depth, @Nullable Function<Item, @Nullable String> completeKit) {
+        counts.merge(clamp(item.indexKey(), MAX_TEXT), (long) item.count, Long::sum);
+        if (depth >= MAX_DEPTH || item.contents == null) return;
+        if (completeKit != null && item.isShulker() && !item.contents.isEmpty() && completeKit.apply(item) != null) return;
+        for (Item inner : item.contents) if (inner != null) count(counts, inner, depth + 1, completeKit);
+    }
+
     /** {damage, maxDamage} to send for an item, or {0, 0} to send neither: only damageable (maxDamage > 0) and damaged (damage > 0). */
     static int[] durability(int damage, int maxDamage) {
         return maxDamage > 0 && damage > 0 ? new int[] {damage, maxDamage} : new int[] {0, 0};
@@ -329,13 +352,29 @@ public final class ManagerIndex {
     /** The most crafting tables the heartbeat lists as seen in the stash area. */
     public static final int MAX_SEEN = 8;
 
+    /** The most features {@code craftOrders.can} lists (CRAFT-CONTRACT-v1.2.md 2.1). */
+    public static final int MAX_CAN = 16;
+
+    /**
+     * The features beyond B1 this build carries out, as {@code craftOrders.can} says them: smelt (B2), firework (B3), tipped, stew and copy (B4), dyed (B5).
+     * None yet (milestone B1): a v2 block that needs one is refused with recipe_mismatch, and the server never hands one out.
+     */
+    public static List<String> craftCan() {
+        return List.of();
+    }
+
     /**
      * What the heartbeat says about craft orders (1.15.0, CRAFT-CONTRACT.md "Heartbeat"): {@code v} 1, whether this bot takes them,
      * the tableHash of the recipe table it holds, its Minecraft version, the state of the website's crafting table, the most grid
      * fills it makes for one order, and up to 8 tables seen in the stash area ("x,y,z").
      */
     public record CraftOrders(boolean enabled, String recipes, String mc, String table, int maxFills, List<String> seen, @Nullable String tableWhy, @Nullable BotTable botTable,
-                              boolean legacy) {
+                              boolean legacy, boolean v2, @Nullable String extras, List<String> can) {
+        public CraftOrders(boolean enabled, String recipes, String mc, String table, int maxFills, List<String> seen, @Nullable String tableWhy, @Nullable BotTable botTable,
+                           boolean legacy) {
+            this(enabled, recipes, mc, table, maxFills, seen, tableWhy, botTable, legacy, false, null, List.of());
+        }
+
         public CraftOrders(boolean enabled, String recipes, String mc, String table, int maxFills, List<String> seen, @Nullable String tableWhy, @Nullable BotTable botTable) {
             this(enabled, recipes, mc, table, maxFills, seen, tableWhy, botTable, false);
         }
@@ -344,9 +383,17 @@ public final class ManagerIndex {
             this(enabled, recipes, mc, table, maxFills, seen, null, null, false);
         }
 
-        /** The 1.15.0 shape, for a server that answers 400 to the newer fields: "auto" is "unset", and there is no tableWhy and no botTable. */
+        /**
+         * The 1.22.0 shape (CRAFT-CONTRACT-v1.2.md 2.1): {@code v: 2}, the hash of the extras the bot holds (null: none) and the features beyond B1 it
+         * can do ({@code can}, closed set, empty in B1).
+         */
+        public CraftOrders withV2(@Nullable String extrasHash, List<String> features) {
+            return new CraftOrders(enabled, recipes, mc, table, maxFills, seen, tableWhy, botTable, legacy, true, extrasHash, features);
+        }
+
+        /** The 1.15.0 shape, for a server that answers 400 to the newer fields: "auto" is "unset", and there is no tableWhy and no botTable (and it is v 1). */
         public CraftOrders asLegacy() {
-            return new CraftOrders(enabled, recipes, mc, "auto".equals(table) ? TABLE_UNSET : table, maxFills, seen, null, null, true);
+            return new CraftOrders(enabled, recipes, mc, "auto".equals(table) ? TABLE_UNSET : table, maxFills, seen, null, null, true, false, null, List.of());
         }
     }
 
@@ -481,7 +528,8 @@ public final class ManagerIndex {
             if (c == null) o.add("craftOrders", JsonNull.INSTANCE);
             else {
                 JsonObject co = new JsonObject();
-                co.addProperty("v", 1);
+                // v 2 (CRAFT-CONTRACT-v1.2.md 2.1): this bot runs v2 craft blocks. Never with the legacy shape: an older server gets the 1.15.0 object
+                co.addProperty("v", c.v2() && !c.legacy() ? 2 : 1);
                 co.addProperty("enabled", c.enabled());
                 co.addProperty("recipes", clamp(c.recipes(), 40));
                 co.addProperty("mc", clamp(c.mc(), 32));
@@ -501,6 +549,14 @@ public final class ManagerIndex {
                     bt.addProperty("pos", c.botTable().pos());
                     bt.addProperty("source", c.botTable().source());
                     co.add("botTable", bt);
+                }
+                if (c.v2() && !c.legacy()) {
+                    // Required when v >= 2: the hash of the extras held (40 hex) or an explicit null; can: features beyond B1 (at most 16 words of a-z and _), none yet
+                    if (c.extras() == null) co.add("extras", JsonNull.INSTANCE);
+                    else co.addProperty("extras", clamp(c.extras(), 40));
+                    JsonArray can = new JsonArray();
+                    for (String f : c.can()) if (can.size() < MAX_CAN && f != null && f.matches("^[a-z_]{1,24}$")) can.add(f);
+                    co.add("can", can);
                 }
                 if (c.seen() != null && !c.seen().isEmpty()) {
                     JsonArray seen = new JsonArray();
@@ -671,12 +727,16 @@ public final class ManagerIndex {
      * What a heartbeat reply says about craft orders. {@code hash}: the server's hash of the stash's craft settings (null when the
      * reply has none: an older server, or its settings file couldn't be read). {@code settings}: a valid {@code craft} object, else
      * null. {@code invalid}: why a {@code craft} object was refused (null when there was none or it was fine). {@code recipesHash}:
-     * the server's tableHash for the stash's version (null when not said).
+     * the server's tableHash for the stash's version (null when not said). {@code extrasHash}: the server's extras hash for it (CRAFT-CONTRACT-v1.2.md 2.2;
+     * null when not said, e.g. an older server).
      */
-    public record CraftReply(@Nullable String hash, @Nullable CraftSettings settings, @Nullable String invalid, @Nullable String recipesHash) {
+    public record CraftReply(@Nullable String hash, @Nullable CraftSettings settings, @Nullable String invalid, @Nullable String recipesHash, @Nullable String extrasHash) {
+        public CraftReply(@Nullable String hash, @Nullable CraftSettings settings, @Nullable String invalid, @Nullable String recipesHash) {
+            this(hash, settings, invalid, recipesHash, null);
+        }
     }
 
-    private static final CraftReply NO_CRAFT = new CraftReply(null, null, null, null);
+    private static final CraftReply NO_CRAFT = new CraftReply(null, null, null, null, null);
 
     /** Reads the craft fields of a heartbeat reply. Missing or broken fields mean nothing was said; a bad {@code craft} object is refused whole. */
     public static CraftReply craftReply(String body) {
@@ -684,7 +744,7 @@ public final class ManagerIndex {
             JsonElement e = SafeJson.parse(body);
             if (!e.isJsonObject()) return NO_CRAFT;
             JsonObject o = e.getAsJsonObject();
-            String hash = hex40(o.get("craftHash")), recipes = hex40(o.get("recipesHash"));
+            String hash = hex40(o.get("craftHash")), recipes = hex40(o.get("recipesHash")), extras = hex40(o.get("extrasHash"));
             CraftSettings settings = null;
             String invalid = null;
             JsonElement c = o.get("craft");
@@ -695,7 +755,7 @@ public final class ManagerIndex {
                     invalid = ex.getMessage();
                 }
             }
-            return new CraftReply(hash, settings, invalid, recipes);
+            return new CraftReply(hash, settings, invalid, recipes, extras);
         } catch (RuntimeException ex) {
             return NO_CRAFT;
         }

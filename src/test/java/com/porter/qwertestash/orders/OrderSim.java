@@ -279,6 +279,37 @@ final class OrderSim implements OrderFlow.Host {
         return craftMaxFills;
     }
 
+    /** CRAFT-CONTRACT-v1.2.md: the hash of the bot's extras, its features, and whether the host counts the stash for the preflight of a v2 order. */
+    @Nullable String extrasHash;
+    Set<String> can = Set.of();
+    boolean preflight, preflightUnreadable;
+
+    @Override
+    public boolean preflights() {
+        return preflight || preflightUnreadable;
+    }
+
+    @Override
+    public @Nullable String craftExtrasHash() {
+        return extrasHash;
+    }
+
+    @Override
+    public Set<String> craftCan() {
+        return can;
+    }
+
+    /** What the stash holds per key: loose stacks, what lies in shulkers and the plain stock craft orders take from. */
+    @Override
+    public @Nullable Map<String, Long> preflightStock() {
+        if (!preflight || preflightUnreadable) return null;
+        Map<String, Long> out = new HashMap<>();
+        for (var e : loose.entrySet()) for (int n : e.getValue().values()) out.merge(e.getKey(), (long) n, Long::sum);
+        for (var e : shulkerStock.entrySet()) for (int n : e.getValue().values()) out.merge(e.getKey(), (long) n, Long::sum);
+        for (var e : craftStash.entrySet()) out.merge(e.getKey(), e.getValue(), Long::sum);
+        return out;
+    }
+
     @Override
     public int maxStack(String id) {
         return craftStack.getOrDefault(id, 64);

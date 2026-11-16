@@ -97,7 +97,7 @@ class RecipeFetchTest {
         // The cached table loaded after the driver was made: the next claim says so
         capable[0] = true;
         now[0] += 70_000;
-        assertEquals(1, JsonParser.parseString(new String(d.next(true, null, "s", "t", "Bot", true).body())).getAsJsonObject().get("craftOrders").getAsInt());
+        assertEquals(2, JsonParser.parseString(new String(d.next(true, null, "s", "t", "Bot", true).body())).getAsJsonObject().get("craftOrders").getAsInt());
     }
 
     @Test

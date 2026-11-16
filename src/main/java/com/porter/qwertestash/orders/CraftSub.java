@@ -36,6 +36,25 @@ public final class CraftSub {
     /** Calls of need() one session may make: past it a plan fails with {@link #TOO_LARGE}. */
     public static final int MAX_NODES = 50_000;
     public static final String TOO_LARGE = "plan too large";
+
+    /**
+     * The constants of a plan: the crafting levels below the item asked for, the rounds of estimates, and the calls of need() allowed.
+     * {@link #V1} is what every craft block before 1.22.0 is planned with; a v2 block ({@code craft.v: 2}, CRAFT-CONTRACT-v1.2.md 7) uses its own
+     * {@code maxDepth} (12, or 1 when the order doesn't craft ingredients), 12 rounds and 200,000 calls.
+     */
+    public record Limits(int maxDepth, int rounds, int maxNodes) {
+        public static final Limits V1 = new Limits(MAX_DEPTH, 4, MAX_NODES);
+
+        /** The limits of a v2 block that says {@code maxDepth}. */
+        public static Limits v2(int maxDepth) {
+            return new Limits(Math.max(1, Math.min(CraftOrder.V2_MAX_DEPTH, maxDepth)), 12, 200_000);
+        }
+
+        /** The limits the bot plans an order's craft block with. */
+        public static Limits of(Order.@Nullable Craft craft) {
+            return craft != null && craft.v() == 2 ? v2(craft.maxDepth()) : V1;
+        }
+    }
     private static final double EPS = 1e-9;
 
     /** Never used as an ingredient or made (CRAFT-CONTRACT.md "Eligibility"): shulker boxes and bundles. */
@@ -98,6 +117,7 @@ public final class CraftSub {
     public static final class Session {
         final Recipes table;
         final Set<String> allowed;
+        final Limits limits;
         Map<String, Long> pool, surplus, taken = new LinkedHashMap<>();
         final List<Raw> steps = new ArrayList<>();
         Set<Lock> locks = new HashSet<>();
@@ -112,6 +132,12 @@ public final class CraftSub {
          * @param surplus  what the bot carries of crafted items not used yet, by id
          */
         public Session(Recipes table, @Nullable Set<String> allowed, Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus) {
+            this(table, allowed, estPool, pool, surplus, Limits.V1);
+        }
+
+        /** As above, planned with the limits of a v1 or a v2 craft block. */
+        public Session(Recipes table, @Nullable Set<String> allowed, Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus, Limits limits) {
+            this.limits = limits;
             this.table = table;
             this.allowed = allowed;
             this.pool = positive(pool);
@@ -143,7 +169,7 @@ public final class CraftSub {
             return making.getOrDefault(id, List.of());
         }
 
-        /** est0 = 1 for an id the pool holds; four rounds of est(id) = min over recipes of (sum over cells of the cheapest alternative) / count. */
+        /** est0 = 1 for an id the pool holds; {@code limits.rounds()} (4, or 12 for a v2 block) rounds of est(id) = min over recipes of (sum over cells of the cheapest alternative) / count. */
         private void estimate(Map<String, Long> estPool) {
             for (var e : estPool.entrySet()) if (e.getValue() != null && e.getValue() > 0) est.put(Recipes.ns(e.getKey()), 1.0);
             List<Recipes.Recipe> all = new ArrayList<>();
@@ -154,7 +180,7 @@ public final class CraftSub {
                 Recipes.Recipe r = table.byId(id);
                 if (r != null) all.add(r);
             }
-            for (int round = 0; round < 4; round++) {
+            for (int round = 0; round < limits.rounds(); round++) {
                 for (Recipes.Recipe r : all) {
                     double c = cost(r);
                     if (c < est.getOrDefault(r.result(), Double.POSITIVE_INFINITY)) est.put(r.result(), c);
@@ -283,7 +309,7 @@ public final class CraftSub {
 
         /** Makes {@code qty} of {@code id} available: null when it can, else the reason it can't. */
         @Nullable String need(String id, long qty, int depth, List<String> path) {
-            if (++nodes > MAX_NODES) return TOO_LARGE;
+            if (++nodes > limits.maxNodes()) return TOO_LARGE;
             long fromS = Math.min(inS(id), qty);
             if (fromS > 0) surplus.merge(id, -fromS, Long::sum);
             qty -= fromS;
@@ -295,7 +321,7 @@ public final class CraftSub {
             qty -= fromP;
             if (qty <= 0) return null;
 
-            if (depth >= CraftSub.MAX_DEPTH) return CraftPlanner.TOO_DEEP + " (" + Recipes.pretty(id) + ")";
+            if (depth >= limits.maxDepth()) return CraftPlanner.TOO_DEEP + " (" + Recipes.pretty(id) + ")";
             if (path.contains(id)) return "a recipe loop (" + Recipes.pretty(id) + ")";
             List<Recipes.Recipe> rs = ranked(id);
             if (rs.isEmpty()) return noRecipe(id, qty);
@@ -306,7 +332,7 @@ public final class CraftSub {
                 if (why == null) return null;
                 restore(before);
                 if (first == null) first = why;
-                if (nodes > MAX_NODES) return TOO_LARGE;
+                if (nodes > limits.maxNodes()) return TOO_LARGE;
             }
             return first;
         }
@@ -402,7 +428,7 @@ public final class CraftSub {
                 long mid = (lo + hi + 1) >>> 1;
                 if (tries(alt, mid, depth, path)) lo = mid;
                 else hi = mid - 1;
-                if (nodes > MAX_NODES) return 0;
+                if (nodes > limits.maxNodes()) return 0;
             }
             return lo;
         }

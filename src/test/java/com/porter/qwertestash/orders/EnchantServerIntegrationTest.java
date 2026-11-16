@@ -475,7 +475,7 @@ class EnchantServerIntegrationTest {
         assertNotNull(claim);
         JsonObject claimBody = JsonParser.parseString(new String(claim.body(), StandardCharsets.UTF_8)).getAsJsonObject();
         assertEquals(1, claimBody.get("enchantOrders").getAsInt());
-        assertEquals(1, claimBody.get("craftOrders").getAsInt());
+        assertEquals(2, claimBody.get("craftOrders").getAsInt());
         ManagerHttp.Response answer = call(claim.path(), claim.body());
         assertEquals(200, answer.code(), answer.body());
         assertTrue(claim.reply().done(answer.code(), answer.body()));

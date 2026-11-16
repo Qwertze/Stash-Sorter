@@ -142,7 +142,16 @@ public final class Order {
      * craft line is then short ({@code recipe_mismatch}).
      */
     public record Craft(int v, String mc, String recipes, List<Qty> lines, List<CraftStep> steps, List<Qty> take, List<Qty> leftovers, int fills, boolean malformed,
-                        List<Qty> forEnchant) {
+                        List<Qty> forEnchant, int maxDepth, @Nullable String extras, List<String> needs, @Nullable String reserved) {
+        /**
+         * A v1 block, with bases for enchant plans. {@code maxDepth} is 0 (a v1 block has none: the planner's own 4 levels), no extras, no needs and
+         * nothing reserved.
+         */
+        public Craft(int v, String mc, String recipes, List<Qty> lines, List<CraftStep> steps, List<Qty> take, List<Qty> leftovers, int fills, boolean malformed,
+                     List<Qty> forEnchant) {
+            this(v, mc, recipes, lines, steps, take, leftovers, fills, malformed, forEnchant, 0, null, List.of(), null);
+        }
+
         /** A block without bases for enchant plans (every block before ENCHANT-CONTRACT draft 3.4). */
         public Craft(int v, String mc, String recipes, List<Qty> lines, List<CraftStep> steps, List<Qty> take, List<Qty> leftovers, int fills, boolean malformed) {
             this(v, mc, recipes, lines, steps, take, leftovers, fills, malformed, List.of());
@@ -358,6 +367,30 @@ public final class Order {
                     qtys(so.get("inputs"), "id", 64)));
             }
             int fills = c.get("fills").getAsInt();
+            // v 2 (CRAFT-CONTRACT-v1.2.md 9): the depth, the extras hash and the features the plan needs are required; anything this bot does not carry out (a
+            // furnace step, a spec, a grid, a remainder, ...) is noted in `reserved` and makes the block fail its check with recipe_mismatch
+            int maxDepth = 0;
+            String extras = null, reserved = null;
+            List<String> needs = List.of();
+            if (v == 2) {
+                JsonElement md = c.get("maxDepth");
+                if (md == null || !md.isJsonPrimitive() || !md.getAsJsonPrimitive().isNumber()) return Craft.unreadable();
+                maxDepth = md.getAsInt();
+                if (!c.has("extras")) return Craft.unreadable();
+                JsonElement ex = c.get("extras");
+                if (!ex.isJsonNull()) {
+                    if (!ex.isJsonPrimitive() || !ex.getAsJsonPrimitive().isString()) return Craft.unreadable();
+                    extras = ex.getAsString();
+                }
+                JsonElement ne = c.get("needs");
+                if (ne == null || !ne.isJsonArray() || ne.getAsJsonArray().size() > 16) return Craft.unreadable();
+                needs = new ArrayList<>();
+                for (JsonElement n : ne.getAsJsonArray()) {
+                    if (!n.isJsonPrimitive() || !n.getAsJsonPrimitive().isString()) return Craft.unreadable();
+                    needs.add(n.getAsString());
+                }
+                reserved = reservedField(c);
+            }
             // ENCHANT-CONTRACT draft 3.4: how many of each craft line are bases for enchant plans. Optional; there but wrong makes the whole block unreadable
             List<Qty> forEnchant = List.of();
             JsonElement fe = c.get("forEnchant");
@@ -370,10 +403,56 @@ public final class Order {
                 }
                 if (total > EnchantOrder.MAX_ITEMS) return Craft.unreadable();
             }
-            return new Craft(v, mc, recipes, lines, steps, take, leftovers, fills, false, forEnchant);
+            return new Craft(v, mc, recipes, lines, steps, take, leftovers, fills, false, forEnchant, maxDepth, extras, needs, reserved);
         } catch (RuntimeException ex) {
             return Craft.unreadable();
         }
+    }
+
+    /**
+     * The first field of a v2 craft block that is reserved for a later milestone (CRAFT-CONTRACT-v1.2.md 9), as text, or null. B2: a furnace
+     * station, {@code fuel}, a {@code smelt} count above 0. B3: a {@code spec} on a line, step or leftover, a {@code grid}, a {@code spec} or
+     * {@code key} on an input or a take entry. B4: a {@code remainder}. A field that is absent, null or (for a list) empty is not there.
+     */
+    static @Nullable String reservedField(JsonObject c) {
+        JsonElement smelt = c.get("smelt");
+        if (smelt != null && smelt.isJsonPrimitive() && (!smelt.getAsJsonPrimitive().isNumber() || smelt.getAsLong() != 0)) return "smelt";
+        for (JsonElement l : arrayOf(c, "lines")) if (set(l, "spec")) return "lines[].spec";
+        for (JsonElement t : arrayOf(c, "take")) {
+            if (set(t, "key")) return "take[].key";
+            if (set(t, "spec")) return "take[].spec";
+        }
+        for (JsonElement l : arrayOf(c, "leftovers")) if (set(l, "spec")) return "leftovers[].spec";
+        for (JsonElement s : arrayOf(c, "steps")) {
+            if (set(s, "station") && !"table".equals(field(s, "station").getAsString())) return "steps[].station";
+            for (String name : new String[] {"fuel", "spec", "grid", "remainder"}) if (set(s, name)) return "steps[]." + name;
+            for (JsonElement in : arrayOf(s.getAsJsonObject(), "inputs")) {
+                if (set(in, "spec")) return "inputs[].spec";
+                if (set(in, "key")) return "inputs[].key";
+            }
+        }
+        return null;
+    }
+
+    private static List<JsonElement> arrayOf(JsonObject o, String name) {
+        JsonElement e = o.get(name);
+        if (e == null || !e.isJsonArray()) return List.of();
+        List<JsonElement> out = new ArrayList<>();
+        for (JsonElement x : e.getAsJsonArray()) if (x.isJsonObject()) out.add(x);
+        return out;
+    }
+
+    private static @Nullable JsonElement field(JsonElement o, String name) {
+        return o.isJsonObject() ? o.getAsJsonObject().get(name) : null;
+    }
+
+    /** A field that is present and not null, and not an empty list or an empty string. */
+    private static boolean set(JsonElement o, String name) {
+        JsonElement f = field(o, name);
+        if (f == null || f.isJsonNull()) return false;
+        if (f.isJsonArray()) return !f.getAsJsonArray().isEmpty();
+        if (f.isJsonPrimitive() && f.getAsJsonPrimitive().isString()) return !f.getAsString().isEmpty();
+        return true;
     }
 
     private static List<Qty> qtys(@Nullable JsonElement e, String idName, int max) {
