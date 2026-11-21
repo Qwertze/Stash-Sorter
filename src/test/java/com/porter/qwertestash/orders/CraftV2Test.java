@@ -189,7 +189,7 @@ class CraftV2Test {
     @Test
     void everyReservedFieldMakesTheBlockFailItsCheck() {
         String[][] cases = {
-            {"station", "\"furnace\""}, {"fuel", "[ { \"id\": \"minecraft:coal\", \"count\": 1 } ]"}, {"spec", "\"rocket:1\""}, {"grid", "[null,null,null,null,null,null,null,null,null]"},
+            {"spec", "\"rocket:1\""}, {"grid", "[null,null,null,null,null,null,null,null,null]"},
             {"remainder", "[ { \"id\": \"minecraft:bowl\", \"count\": 1 } ]"}};
         for (String[] f : cases) {
             JsonObject b = blockJson();
@@ -198,7 +198,6 @@ class CraftV2Test {
             assertNotNull(c.reserved(), "step " + f[0]);
             assertNotNull(CraftOrder.check(c, R, 2048, null, Set.of()), "step " + f[0]);
         }
-        mutate(b -> b.addProperty("smelt", 3), "smelt");
         mutate(b -> b.getAsJsonArray("lines").get(0).getAsJsonObject().addProperty("spec", "rocket:1"), "lines spec");
         mutate(b -> b.getAsJsonArray("take").get(0).getAsJsonObject().addProperty("key", "minecraft:spruce_log#ab12cd34"), "take key");
         mutate(b -> b.getAsJsonArray("take").get(0).getAsJsonObject().addProperty("spec", "dyed:000000"), "take spec");

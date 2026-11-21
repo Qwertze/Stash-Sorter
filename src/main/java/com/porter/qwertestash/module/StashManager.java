@@ -1092,7 +1092,7 @@ public class StashManager extends Module {
         if (table == null) return "-" + kit;
         StashSorter s = sorter();
         // The extras hash is part of it: new extras (or none) send a heartbeat of their own (CRAFT-CONTRACT-v1.2.md 2.1)
-        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/x" + Extras.currentHash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + kit;
+        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/x" + Extras.currentHash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + "/s" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt) + CONFIG.craftOrderMaxSmelt + s.botFurnace() + kit;
     }
 
     /**
@@ -1114,7 +1114,9 @@ public class StashManager extends Module {
         CraftSettings cached = CraftStore.shared().get(built.server(), built.stash());
         ManagerIndex.CraftOrders orders = new ManagerIndex.CraftOrders(on, table.hash(), mcVersion(), status, Math.max(1, CONFIG.craftOrderMaxFills), craftSeen, s.craftTableWhy(), s.botTable());
         // v 2 with the extras hash and the features (none in B1); an older server that refused the newer fields gets the 1.15.0 shape
-        orders = orders.withV2(Extras.currentHash(), ManagerIndex.craftCan());
+        // B2: smelt in can when the setting is on and the extras hold the smelt and fuel tables; then maxSmelt, and the bot's own furnace in use
+        orders = orders.withV2(Extras.currentHash(), ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt));
+        orders = orders.withSmelt(ManagerIndex.clampMaxSmelt(CONFIG.craftOrderMaxSmelt), s.botFurnace());
         if (craftLegacy) orders = orders.asLegacy();
         return new ManagerIndex.Craft(orders, cached == null ? null : cached.hash());
     }

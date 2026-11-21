@@ -360,7 +360,21 @@ public final class ManagerIndex {
      * None yet (milestone B1): a v2 block that needs one is refused with recipe_mismatch, and the server never hands one out.
      */
     public static List<String> craftCan() {
+        return craftCan(Extras.current(), true);
+    }
+
+    /**
+     * The features this build carries out for these extras: {@code smelt} (B2) when {@code smeltOn} (the setting {@code craftSmelt}) and the extras hold both the
+     * smelt and the fuel tables (CRAFT-CONTRACT-v1.2.md 13.3 and 14), none otherwise. A bot with no extras says none.
+     */
+    public static List<String> craftCan(@Nullable Extras extras, boolean smeltOn) {
+        if (smeltOn && com.porter.qwertestash.orders.Smelting.of(extras) != null) return List.of("smelt");
         return List.of();
+    }
+
+    /** The most items one order may smelt, as {@code craftOrders.maxSmelt} says it: 1 to 256 (the setting, clamped). */
+    public static int clampMaxSmelt(int configured) {
+        return Math.max(1, Math.min(com.porter.qwertestash.orders.Smelting.MAX_SMELT, configured));
     }
 
     /**
@@ -369,7 +383,13 @@ public final class ManagerIndex {
      * fills it makes for one order, and up to 8 tables seen in the stash area ("x,y,z").
      */
     public record CraftOrders(boolean enabled, String recipes, String mc, String table, int maxFills, List<String> seen, @Nullable String tableWhy, @Nullable BotTable botTable,
-                              boolean legacy, boolean v2, @Nullable String extras, List<String> can) {
+                              boolean legacy, boolean v2, @Nullable String extras, List<String> can, int maxSmelt, @Nullable BotTable botFurnace) {
+        /** As of 1.22.0 milestone B1: nothing smelted, no furnace. */
+        public CraftOrders(boolean enabled, String recipes, String mc, String table, int maxFills, List<String> seen, @Nullable String tableWhy, @Nullable BotTable botTable,
+                           boolean legacy, boolean v2, @Nullable String extras, List<String> can) {
+            this(enabled, recipes, mc, table, maxFills, seen, tableWhy, botTable, legacy, v2, extras, can, 0, null);
+        }
+
         public CraftOrders(boolean enabled, String recipes, String mc, String table, int maxFills, List<String> seen, @Nullable String tableWhy, @Nullable BotTable botTable,
                            boolean legacy) {
             this(enabled, recipes, mc, table, maxFills, seen, tableWhy, botTable, legacy, false, null, List.of());
@@ -388,12 +408,20 @@ public final class ManagerIndex {
          * can do ({@code can}, closed set, empty in B1).
          */
         public CraftOrders withV2(@Nullable String extrasHash, List<String> features) {
-            return new CraftOrders(enabled, recipes, mc, table, maxFills, seen, tableWhy, botTable, legacy, true, extrasHash, features);
+            return new CraftOrders(enabled, recipes, mc, table, maxFills, seen, tableWhy, botTable, legacy, true, extrasHash, features, 0, null);
+        }
+
+        /**
+         * Milestone B2: the most items one order may smelt (said only with {@code smelt} in {@code can}) and the bot's own furnace in use, or null
+         * ({@code botFurnace: {pos, source}}; a position, so the server hides it from a forced streamer).
+         */
+        public CraftOrders withSmelt(int maxSmelt, @Nullable BotTable furnace) {
+            return new CraftOrders(enabled, recipes, mc, table, maxFills, seen, tableWhy, botTable, legacy, v2, extras, can, maxSmelt, furnace);
         }
 
         /** The 1.15.0 shape, for a server that answers 400 to the newer fields: "auto" is "unset", and there is no tableWhy and no botTable (and it is v 1). */
         public CraftOrders asLegacy() {
-            return new CraftOrders(enabled, recipes, mc, "auto".equals(table) ? TABLE_UNSET : table, maxFills, seen, null, null, true, false, null, List.of());
+            return new CraftOrders(enabled, recipes, mc, "auto".equals(table) ? TABLE_UNSET : table, maxFills, seen, null, null, true, false, null, List.of(), 0, null);
         }
     }
 
@@ -557,6 +585,15 @@ public final class ManagerIndex {
                     JsonArray can = new JsonArray();
                     for (String f : c.can()) if (can.size() < MAX_CAN && f != null && f.matches("^[a-z_]{1,24}$")) can.add(f);
                     co.add("can", can);
+                    // B2: maxSmelt (1 to 256) only with smelt in can (absent means 0); botFurnace is the bot's own furnace in use, or an explicit null to clear what the server kept
+                    if (can.contains(new com.google.gson.JsonPrimitive("smelt"))) co.addProperty("maxSmelt", clampMaxSmelt(c.maxSmelt()));
+                    if (c.botFurnace() == null) co.add("botFurnace", JsonNull.INSTANCE);
+                    else {
+                        JsonObject bf = new JsonObject();
+                        bf.addProperty("pos", c.botFurnace().pos());
+                        bf.addProperty("source", c.botFurnace().source());
+                        co.add("botFurnace", bf);
+                    }
                 }
                 if (c.seen() != null && !c.seen().isEmpty()) {
                     JsonArray seen = new JsonArray();

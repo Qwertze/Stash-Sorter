@@ -34,11 +34,38 @@ public final class CraftPlanner {
     public static final String SHELLS = "shulker shells can't be crafted";
     public static final String TOO_DEEP = "too deep";
 
-    /** One recipe made {@code fills} times; {@code uses} is what goes into the grid in all, by item id. */
-    public record Step(Recipes.Recipe recipe, int fills, int depth, Map<String, Long> uses) {
+    /**
+     * One recipe made {@code fills} times; {@code uses} is what goes into the grid in all, by item id. A furnace step (B2: a smelt recipe of the extras)
+     * has {@code fuel} (never null: possibly empty), what burns for its items, by item id; its {@code fills} are the items smelted and {@code uses}
+     * what goes into the input slot. A step at the crafting table has {@code fuel} null.
+     */
+    public record Step(Recipes.Recipe recipe, int fills, int depth, Map<String, Long> uses, @Nullable Map<String, Long> fuel) {
+        public Step(Recipes.Recipe recipe, int fills, int depth, Map<String, Long> uses) {
+            this(recipe, fills, depth, uses, null);
+        }
+
         public long made() {
             return (long) fills * recipe.count();
         }
+
+        /** Made in a furnace. */
+        public boolean furnace() {
+            return fuel != null;
+        }
+    }
+
+    /** Grid fills of the steps at the crafting table. */
+    public static int gridFills(List<Step> steps) {
+        int n = 0;
+        for (Step s : steps) if (!s.furnace()) n += s.fills();
+        return n;
+    }
+
+    /** Items the furnace steps smelt. */
+    public static int smeltItems(List<Step> steps) {
+        long n = 0;
+        for (Step s : steps) if (s.furnace()) n += s.fills();
+        return (int) Math.min(Integer.MAX_VALUE, n);
     }
 
     /**
@@ -110,7 +137,13 @@ public final class CraftPlanner {
             Step st = p.steps().get(i);
             List<String> uses = new ArrayList<>();
             for (var e : st.uses().entrySet()) uses.add(e.getValue() + " " + Recipes.pretty(e.getKey()));
-            parts.add(st.made() + " " + Recipes.pretty(st.recipe().result()) + " from " + String.join(" + ", uses));
+            String fuel = "";
+            if (st.furnace() && st.fuel() != null && !st.fuel().isEmpty()) {
+                List<String> burns = new ArrayList<>();
+                for (var e : st.fuel().entrySet()) burns.add(e.getValue() + " " + Recipes.pretty(e.getKey()));
+                fuel = ", smelted with " + String.join(" + ", burns);
+            }
+            parts.add(st.made() + " " + Recipes.pretty(st.recipe().result()) + " from " + String.join(" + ", uses) + fuel);
         }
         return String.join("; ", parts);
     }

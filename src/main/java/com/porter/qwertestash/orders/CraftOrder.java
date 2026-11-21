@@ -25,8 +25,11 @@ public final class CraftOrder {
         INGREDIENTS_SHORT = "ingredients_short", INVENTORY_FULL = "inventory_full", RECIPE_MISMATCH = "recipe_mismatch", GRID_STUCK = "grid_stuck",
         TIMEOUT = "timeout", INTERRUPTED = "interrupted", CAP = "cap", CANCELLED = "cancelled";
 
+    /** B2 (CRAFT-CONTRACT-v1.2.md 12): no furnace could be had, it could not be reached or opened, something of someone else's is in it, the output took too long. */
+    public static final String NO_FURNACE = "no_furnace", FURNACE_BLOCKED = "furnace_blocked", FURNACE_BUSY = "furnace_busy", SMELT_TIMEOUT = "smelt_timeout";
+
     public static final Set<String> REASONS = Set.of(NO_TABLE, TABLE_MISSING, TABLE_BLOCKED, INGREDIENTS_SHORT, INVENTORY_FULL, RECIPE_MISMATCH,
-        GRID_STUCK, TIMEOUT, INTERRUPTED, CAP, CANCELLED);
+        GRID_STUCK, TIMEOUT, INTERRUPTED, CAP, CANCELLED, NO_FURNACE, FURNACE_BLOCKED, FURNACE_BUSY, SMELT_TIMEOUT);
 
     /** A plain item id: namespaced, no component patch. */
     private static final Pattern PLAIN = Pattern.compile("^[a-z0-9_.-]+:[a-z0-9_./-]{1,128}$");
@@ -52,6 +55,10 @@ public final class CraftOrder {
             case INTERRUPTED -> "interrupted";
             case CAP -> "a crafting cap was reached";
             case CANCELLED -> "cancelled";
+            case NO_FURNACE -> "no furnace is available for smelting";
+            case FURNACE_BLOCKED -> "the furnace could not be reached or opened";
+            case FURNACE_BUSY -> "the furnace is in use by something else";
+            case SMELT_TIMEOUT -> "smelting took too long";
             default -> reason;
         };
     }
@@ -77,6 +84,20 @@ public final class CraftOrder {
      * @param can        the features beyond B1 the bot does (empty in B1)
      */
     public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can) {
+        return check(craft, table, maxFills, extrasHash, can, null, 0);
+    }
+
+    /**
+     * As above, for a bot that can smelt (B2, CRAFT-CONTRACT-v1.2.md 9, 11.1 and 14). A furnace step ({@code station: "furnace"}) passes when the bot's
+     * {@code can} has {@code smelt}, {@code smelting} is the bot's own smelt and fuel tables, its recipe is one of the smelt recipes with the same result
+     * and count, every input is an alternative of the recipe's input slot and they add up to its {@code fills} (items smelted), and its {@code fuel}
+     * names only fuels whose burn time covers {@code fills * cookTicks}. The items smelted in all are at most {@code min(256, maxSmelt)} and within the
+     * block's {@code smelt}. A furnace step's {@code fills} are items, not grid fills: only the table steps count against {@code maxFills}.
+     * @param smelting the bot's smelting (from its extras), or null when it holds none
+     * @param maxSmelt the most items the bot smelts for one order (what its heartbeat says)
+     */
+    public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
+                                         int maxSmelt) {
         if (craft == null) return "the order has craft lines but no craft block";
         if (craft.malformed()) return "the craft block can't be read";
         if (craft.v() != 1 && craft.v() != 2) return "craft version " + craft.v() + " is not 1 or 2";
@@ -89,8 +110,15 @@ public final class CraftOrder {
         }
         if (!craft.recipes().equals(table.hash())) return "the order was planned with another recipe table";
         if (craft.steps().size() > Order.MAX_CRAFT_STEPS || craft.take().size() > Order.MAX_CRAFT_TAKE) return "too many steps or ingredients";
-        long fills = 0;
+        long fills = 0, smelted = 0;
         for (Order.CraftStep s : craft.steps()) {
+            if (s.furnace()) {
+                // Only a v2 block has furnace steps (parseCraft reads the station of a v2 block only)
+                String bad = checkFurnaceStep(s, can, smelting);
+                if (bad != null) return bad;
+                smelted += s.fills();
+                continue;
+            }
             Recipes.Recipe r = table.byId(s.recipe());
             if (r == null) return "recipe " + s.recipe() + " is not in the table";
             if (!r.result().equals(s.result()) || r.count() != s.count()) return "recipe " + s.recipe() + " makes something else here";
@@ -102,6 +130,11 @@ public final class CraftOrder {
             }
         }
         if (fills > maxFills) return fills + " grid fills are more than the " + maxFills + " this bot makes";
+        if (smelted > 0 || craft.smelt() > 0) {
+            if (smelted > Math.min(Smelting.MAX_SMELT, maxSmelt)) return smelted + " items to smelt are more than the " + Math.min(Smelting.MAX_SMELT, maxSmelt) + " this bot smelts";
+            if (craft.smelt() < smelted) return "the block says " + craft.smelt() + " items smelted but its furnace steps smelt " + smelted;
+            if (smelted == 0) return "the block says " + craft.smelt() + " items smelted but has no furnace step";
+        }
         for (Order.Qty t : craft.take()) if (t.count() < 1 || !plain(t.id())) return "a take id is not a plain item id";
         long total = 0;
         java.util.Map<String, Long> made = new java.util.HashMap<>(), taken = new java.util.HashMap<>();
@@ -142,6 +175,36 @@ public final class CraftOrder {
         if (failure.equals(CraftTrip.GRID)) return GRID_STUCK;
         if (failure.equals(CraftTrip.NO_RESULT) || failure.equals(CraftTrip.NOT_TAKEN) || failure.equals(CraftTrip.TOO_LONG) || failure.contains("too many trips")) return TIMEOUT;
         return INTERRUPTED;
+    }
+
+    /** The check of one furnace step (see the {@code check} above); null when it passes. */
+    private static @Nullable String checkFurnaceStep(Order.CraftStep s, Set<String> can, @Nullable Smelting smelting) {
+        if (!can.contains("smelt") || smelting == null) return "recipe " + s.recipe() + " smelts, which this bot can't do";
+        Smelting.Recipe r = smelting.byId(s.recipe());
+        if (r == null) return "smelt recipe " + s.recipe() + " is not in the extras";
+        if (!r.out().equals(s.result()) || r.count() != s.count()) return "smelt recipe " + s.recipe() + " makes something else here";
+        if (s.fills() < 1 || s.fills() > Smelting.MAX_BATCH) return "smelt recipe " + s.recipe() + " smelts " + s.fills() + " items in one step (at most " + Smelting.MAX_BATCH + ")";
+        // One input kind and one fuel kind per step (mixed kinds are separate steps): a bot loads a step's whole input in one go after its fuel
+        if (s.inputs().size() != 1) return "smelt recipe " + s.recipe() + " has " + s.inputs().size() + " input kinds in one step";
+        if (s.fuel().size() > 1) return "smelt recipe " + s.recipe() + " names more than one fuel kind";
+        long in = 0;
+        for (Order.Qty q : s.inputs()) {
+            if (q.count() < 1 || !plain(q.id())) return "smelt recipe " + s.recipe() + " has a bad input";
+            if (!r.in().contains(q.id())) return "smelt recipe " + s.recipe() + " takes no " + q.id();
+            in += q.count();
+        }
+        if (in != s.fills()) return "smelt recipe " + s.recipe() + " has " + in + " inputs for " + s.fills() + " items";
+        if (s.fuel().isEmpty()) return "smelt recipe " + s.recipe() + " names no fuel";
+        long ticks = 0;
+        for (Order.Qty f : s.fuel()) {
+            if (f.count() < 1 || !plain(f.id())) return "smelt recipe " + s.recipe() + " has a bad fuel";
+            int t = smelting.ticks(f.id());
+            if (t <= 0) return f.id() + " is not a fuel";
+            if (f.count() > smelting.fuelStack(f.id())) return "the fuel of smelt recipe " + s.recipe() + " is more than a stack of " + f.id();
+            ticks += (long) t * f.count();
+        }
+        if (ticks < smelting.ticksFor(s.fills())) return "the fuel of smelt recipe " + s.recipe() + " doesn't burn long enough";
+        return null;
     }
 
     /** Some cell of the recipe accepts this item id. */

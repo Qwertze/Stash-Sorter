@@ -144,6 +144,8 @@ public class StashCommand extends Command {
                 "craftorders on/off",
                 "craftorders maxfills <n>",
                 "craftorders maxperhour <n>",
+                "craftorders smelt on/off",
+                "craftorders maxsmelt <n>",
                 "craftorders",
                 "craftingtable here",
                 "craftingtable <x> <y> <z> [dimension]",
@@ -728,6 +730,17 @@ public class StashCommand extends Command {
                     CONFIG.craftOrderMaxFills = getInteger(c, "fills");
                     c.getSource().getEmbed().title("Craft Order Fills").description("One craft order may make at most " + CONFIG.craftOrderMaxFills + " grid fills.").primaryColor();
                 })))
+                .then(literal("smelt").then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.craftSmelt = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Craft Order Smelting " + toggleStrCaps(CONFIG.craftSmelt))
+                        .description(CONFIG.craftSmelt
+                            ? "Craft orders that need a furnace are taken when the server's extras hold the smelting tables."
+                            : "Craft orders that need a furnace are not taken: the server will not give this bot one.").primaryColor();
+                })))
+                .then(literal("maxsmelt").then(argument("items", integer(1, 256)).executes(c -> {
+                    CONFIG.craftOrderMaxSmelt = getInteger(c, "items");
+                    c.getSource().getEmbed().title("Craft Order Smelting Cap").description("One craft order may smelt at most " + CONFIG.craftOrderMaxSmelt + " items.").primaryColor();
+                })))
                 .then(literal("maxperhour").then(argument("fills", integer(0, 100000)).executes(c -> {
                     CONFIG.craftOrderMaxPerHour = getInteger(c, "fills");
                     c.getSource().getEmbed().title("Craft Order Fills Per Hour").description("At most " + CONFIG.craftOrderMaxPerHour + " grid fills for craft orders in any one hour.").primaryColor();
@@ -1229,6 +1242,7 @@ public class StashCommand extends Command {
             .addField("Crafting Table", MODULE.get(StashSorter.class).craftOrderTableLine())
             .addField("Tables Put Down", MODULE.get(StashSorter.class).craftTablePlacementsLine())
             .addField("Bot's Own Table", MODULE.get(StashSorter.class).botTable() == null ? "none in use" : MODULE.get(StashSorter.class).botTable().source() + " (position hidden)")
+            .addField("Smelting", MODULE.get(StashSorter.class).craftSmeltLine())
             .addField("Caps", CONFIG.craftOrderMaxFills + " grid fills per order, " + CONFIG.craftOrderMaxPerHour + " per hour (" + MODULE.get(StashSorter.class).craftOrderFillsLastHour() + " used this hour)")
             .addField("What", "items the website's planner says the stash can make; crafted at the crafting table set on the website (not `stash craftingtable`)");
     }

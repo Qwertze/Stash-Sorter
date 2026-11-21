@@ -51,7 +51,12 @@ import com.porter.qwertestash.orders.CraftOrder;
 import com.porter.qwertestash.orders.CraftPlanner;
 import com.porter.qwertestash.orders.CraftPool;
 import com.porter.qwertestash.orders.CraftSlots;
+import com.porter.qwertestash.orders.CraftSegments;
 import com.porter.qwertestash.orders.CraftSub;
+import com.porter.qwertestash.orders.FurnaceDebt;
+import com.porter.qwertestash.orders.FurnaceTrip;
+import com.porter.qwertestash.orders.SmeltJournal;
+import com.porter.qwertestash.orders.Smelting;
 import com.porter.qwertestash.orders.ChestStack;
 import com.porter.qwertestash.orders.CraftTrip;
 import com.porter.qwertestash.orders.Codes;
@@ -97,6 +102,8 @@ import com.porter.qwertestash.stash.CraftTableState;
 import com.porter.qwertestash.stash.CraftStore;
 import com.porter.qwertestash.stash.CraftingTableFinder;
 import com.porter.qwertestash.stash.CraftingTableSpot;
+import com.porter.qwertestash.stash.FurnaceFinder;
+import com.porter.qwertestash.stash.FurnaceSpot;
 import com.porter.qwertestash.stash.DeliverySpot;
 import com.porter.qwertestash.stash.GoneBoxes;
 import com.porter.qwertestash.stash.GoneWatch;
@@ -728,6 +735,7 @@ public class StashSorter extends AbstractFieldModule {
         namingUnit = null;
         craft = null;
         crafter = null;
+        furnacer = null;
         tableGoal = null;
         inventoryGridRescue();
         inventoryTrip = false;
@@ -1008,6 +1016,7 @@ public class StashSorter extends AbstractFieldModule {
         namingUnit = null;
         craft = null;
         crafter = null;
+        furnacer = null;
         tableGoal = null;
         inventoryGridRescue();
         inventoryTrip = false;
@@ -4436,7 +4445,9 @@ public class StashSorter extends AbstractFieldModule {
         if (job == Job.Craft) {
             // The table window was let go of: the trip empties the grid (if it is still open) and is made again
             CraftTrip t = crafter;
-            if (t != null) t.abort("gave way to another module");
+            FurnaceTrip f = furnacer;
+            if (f != null) f.abort("gave way to another module");
+            else if (t != null) t.abort("gave way to another module");
             else endCraftTrip(new CraftTrip.Outcome(CraftTrip.CLOSED, true, false, false, 0));
             return;
         }
@@ -4830,6 +4841,8 @@ public class StashSorter extends AbstractFieldModule {
         areaWaitLogAt = 0;
         // What a repair cut short by a restart moved is put back before anything else is read, explored or resumed
         if (repair == null && repairTrip == null && startGearUndo()) return true;
+        // What a smelt left in the furnace when its order ended is taken up as soon as the bot is free
+        if (!CONFIG.craftFurnaceDebt.isEmpty() && craft == null && anvilRun == null && chestRun == null && !orders.flow.holdsOrder() && startDebtRecovery(null)) return true;
         // The delivery container is kept out of the sort (flagged and excluded) from the moment it is set
         syncDeliveryBox();
         checkOrphans();
@@ -9221,7 +9234,7 @@ public class StashSorter extends AbstractFieldModule {
         if (c == null) return;
 
         boolean ours = false;
-        if (openedAt >= openRequestedAt) ours = handle != null ? isShulkerWindow(c) : job == Job.Name || job == Job.Enchant ? c.getType() == ContainerType.ANVIL : job == Job.Craft ? c.getType() == ContainerType.CRAFTING : target != null && openRejection(c) == null;
+        if (openedAt >= openRequestedAt) ours = handle != null ? isShulkerWindow(c) : job == Job.Name || job == Job.Enchant ? c.getType() == ContainerType.ANVIL : job == Job.Craft ? c.getType() == (furnacer != null ? ContainerType.FURNACE : ContainerType.CRAFTING) : target != null && openRejection(c) == null;
         if (!ours && lastOpenClickAt != 0 && openedAt >= lastOpenClickAt && openedAt - lastOpenClickAt <= OPEN_ANSWER_MS && !foreignSinceClick) ours = true;
         if (ours) activity.claimWindow(id, openedAt);
     }
@@ -13577,8 +13590,31 @@ public class StashSorter extends AbstractFieldModule {
         boolean forTable;
         /** The table is for a craft order: its placement counts against the caps. */
         boolean forOrderCraft;
-        /** The carry slot the crafted table went into (only a slot the table's own result went to), or -1. */
+        /** The carry slot the crafted table (or furnace) went into (only a slot the item's own result went to), or -1. */
         int tableSlot = -1;
+
+        /** A furnace is being crafted at the crafting table (8 cobblestone, B2) to be put down for smelting. */
+        boolean forFurnace;
+        /** Takes up what a stopped smelt left in the furnace (the ledger's journal, B2): no plan, nothing is crafted. */
+        boolean recovery;
+        /** A recovery run for the bot-level furnace debt (the order that left it is over): its journal, in place of the ledger's. */
+        @Nullable SmeltJournal debt;
+        /** The plan cut into runs made at the same station (B2), the run under way, and whether the next run follows one that was made (no replanning). */
+        @Nullable List<CraftSegments.Segment> segs;
+        int seg;
+        boolean advance;
+
+        /** The run under way: a run of table steps or of furnace steps; the whole plan when it has no furnace step. */
+        CraftSegments.Segment current() {
+            List<CraftSegments.Segment> s = segs;
+            return s == null || seg >= s.size() ? new CraftSegments.Segment(false, plan) : s.get(seg);
+        }
+
+        /** The plan was replaced: it is cut into runs again, from the first. */
+        void resegment() {
+            segs = CraftSegments.split(plan);
+            seg = 0;
+        }
 
         /** Chests are being crafted for the delivery storage (1.9.0), not shulker boxes. */
         boolean forChests() {
@@ -13591,6 +13627,7 @@ public class StashSorter extends AbstractFieldModule {
             this.plan = plan;
             this.wanted = plan.count();
             this.bin = new Bin(new Unit(Unit.Kind.Bin, "", new ArrayList<>(lots)));
+            resegment();
         }
     }
 
@@ -13603,6 +13640,8 @@ public class StashSorter extends AbstractFieldModule {
 
     private @Nullable CraftRun craft;
     private @Nullable CraftTrip crafter;
+    /** The trip to the furnace under way (B2), in place of {@link #crafter}. */
+    private @Nullable FurnaceTrip furnacer;
     private @Nullable GoalNear tableGoal;
     // Carry slots holding a crafted shulker box not used yet, and until when (ticks) it is kept from being put away
     private final Map<Integer, Long> craftKeep = new ConcurrentHashMap<>();
@@ -13815,6 +13854,8 @@ public class StashSorter extends AbstractFieldModule {
         final String key;
         final int target, stack;
         long fillsMade;
+        /** Items taken out of the furnace for this chunk (B2): a smelt counts like a grid fill for what the chunk was charged and kept as surplus. */
+        long smelted;
         /** Carry slots the table's result went into on the chunk's trips (one slot: a chunk is never more than a stack). */
         final LinkedHashSet<Integer> resultSlots = new LinkedHashSet<>();
         boolean settled, splitSent;
@@ -14136,10 +14177,15 @@ public class StashSorter extends AbstractFieldModule {
         CraftLedger ledger = flow.craftLedger();
         int idx = flow.nextCraftLot(u);
         if (ledger == null || idx < 0) return false;
+        // A smelt that was stopped (a restart, a trip cut short) left something in the furnace: it is taken up before anything else is planned
+        if (ledger.journal().isOpen()) return startSmeltRecovery(u, ledger);
+        // What an earlier order left in the furnace (its ledger is gone) is taken up before any furnace is used
+        if (!CONFIG.craftFurnaceDebt.isEmpty() && startDebtRecovery(u)) return true;
         Order.Lot lot = u.lots.get(idx);
         String key = Recipes.ns(lot.key());
         String task = String.valueOf(flow.orderId());
         String here = "order: shulker " + (flow.index() + 1) + "/" + flow.units().size();
+        furnaceOrderBegins(task);
 
         // The website's table: none set, not a crafting table, or given up on: every craft line still to make is short, the order goes on
         CraftSettings cs = craftSettings();
@@ -14230,6 +14276,28 @@ public class StashSorter extends AbstractFieldModule {
             return false;
         }
         CraftPlanner.Plan plan = choice.plan();
+        // A plan with furnace steps needs a furnace (CRAFT-CONTRACT-v1.2.md 14): the one remembered, one standing in the stash area, one from the stash, or one crafted
+        boolean smelts = CraftSegments.smelts(plan);
+        if (smelts) {
+            String[] furnaceWhy = new String[1];
+            switch (ensureFurnace(task, furnaceWhy)) {
+                case Wait -> {
+                    return false;
+                }
+                case Started -> {
+                    // A furnace is being put down or crafted: that is the order's time, not the host's silence (the flow gives up on a host that never starts)
+                    flow.craftLoadsStarted(u);
+                    return anvilRun != null || craft != null || job != null;
+                }
+                case Failed -> {
+                    step(here + ": " + lot.count() + " " + Recipes.pretty(key) + " can't be crafted: " + furnaceWhy[0] + ".");
+                    flow.craftLotShort(u, idx, orderFurnaceBusy ? CraftOrder.FURNACE_BUSY : CraftOrder.NO_FURNACE);
+                    return false;
+                }
+                case Ready -> {
+                }
+            }
+        }
         List<Order.Lot> gather = CraftPool.lots(stock, plan.fromStock(), others);
         // The stash must really give what the plan takes (the budget is the server's count, the stash is what is here now)
         Map<String, Long> got = new HashMap<>();
@@ -14249,6 +14317,8 @@ public class StashSorter extends AbstractFieldModule {
         for (int slot : orderCraftSurplus.keySet()) if (inventoryItem(slot) != null) run.owned.add(slot);
         // The saved ledger no longer lists surplus this chunk may consume: a restart before the chunk is recorded refunds nothing it used
         ledger.chunkStarted();
+        // The smelt journal begins with the chunk's furnace work (saved with the ledger below): a restart in the middle of it finds it open
+        if (smelts) ledger.journal().open();
         flow.craftLedgerChanged();
         if (website) CraftingTableSpot.useWebsite(websiteSpot(cs.table()));
         try {
@@ -14320,7 +14390,7 @@ public class StashSorter extends AbstractFieldModule {
         oc.settled = true;
         // Kept: the load's stack until its bin is built, and (when anything was crafted) every other stack of the craft as surplus
         if (oc.lotSlot >= 0) orderCraftLots.put(oc.lotSlot, oc.id());
-        if (oc.fillsMade > 0) {
+        if (oc.fillsMade > 0 || oc.smelted > 0) {
             for (int s : new ArrayList<>(r.owned)) {
                 Item it = inventoryItem(s);
                 if (it == null || s == oc.lotSlot || it.isShulker() || sourceShulkers.containsKey(s)) continue;
@@ -14343,6 +14413,22 @@ public class StashSorter extends AbstractFieldModule {
         Unit u = r.unit;
         CraftingTableSpot.useWebsite(null);
         if (oc == null || u == null) return;
+        // The chunk's furnace work is over and accounted for here: what came out of the furnace is counted, and the journal is closed (saved with the report below)
+        long smeltedNow = oc.smelted;
+        CraftLedger smeltLedger = flow.craftLedger();
+        if (smeltLedger != null && smeltLedger.journal().isOpen() && r.stuck) {
+            // Items may still be in the furnace (it could not be emptied): the journal stays open, the next chunk takes the furnace up first, and what went in
+            // is charged then (not here: it would be charged twice)
+            smeltedNow = 0;
+        }
+        else if (smeltLedger != null && smeltLedger.journal().isOpen()) {
+            long produced = 0;
+            for (long n : smeltLedger.journal().produced().values()) produced += n;
+            smeltedNow = Math.max(smeltedNow, produced);
+            smeltLedger.addSmelted(smeltLedger.journal().produced());
+            smeltLedger.journal().close();
+            writeFurnaceDebt(smeltLedger.journal());
+        }
         long now = System.currentTimeMillis();
         if (oc.fillsMade > 0) orderFills.crafted(now, (int) Math.min(Integer.MAX_VALUE, oc.fillsMade));
         int idx = u.lots.indexOf(oc.lot);
@@ -14359,7 +14445,13 @@ public class StashSorter extends AbstractFieldModule {
             orderInterrupts = 0;
         }
         // Charged from what was gathered, whatever a replan after an interrupted trip says it takes
-        Map<String, Long> charged = CraftCharge.charge(oc.gathered, oc.fillsMade, Map.of());
+        // (a smelt counts like a grid fill: what the furnace took was gathered from the stash and is gone)
+        Map<String, Long> charged = CraftCharge.charge(oc.gathered, oc.fillsMade + smeltedNow, Map.of());
+        if (r.stuck && smeltLedger != null && smeltLedger.journal().isOpen()) {
+            // The journal stays open: what went into the furnace is charged when it is taken up, so not here too
+            charged = new HashMap<>(charged);
+            for (var e : smeltLedger.journal().placed().entrySet()) charged.computeIfPresent(e.getKey(), (k, v) -> v - e.getValue() > 0 ? v - e.getValue() : null);
+        }
         String here = "order: shulker " + (flow.index() + 1) + "/" + flow.units().size();
         if (idx < 0) return;
         if (code == null) {
@@ -14371,6 +14463,13 @@ public class StashSorter extends AbstractFieldModule {
             return;
         }
         step(here + ": crafting " + Recipes.pretty(oc.key) + " stopped short (" + CraftOrder.describe(code) + "), " + oc.made + " of " + oc.target + " made.");
+        if (CraftOrder.FURNACE_BLOCKED.equals(code) || CraftOrder.FURNACE_BUSY.equals(code) || CraftOrder.NO_FURNACE.equals(code)) {
+            // The furnace is given up on (endFurnaceTrip): another is looked for, up to twice more, before the load is short with the reason
+            if (oc.made > 0) flow.craftChunk(u, idx, oc.made, oc.fillsMade, charged, code);
+            else if (++orderFurnaceFails < 3 && !cancelled && flow.running()) flow.craftChunk(u, idx, 0, oc.fillsMade, charged, null);
+            else flow.craftLotShort(u, idx, code);
+            return;
+        }
         if (CraftOrder.TABLE_BLOCKED.equals(code) || CraftOrder.TABLE_MISSING.equals(code) || CraftOrder.NO_TABLE.equals(code)) {
             CraftSettings cs = craftSettings();
             if (cs != null && cs.table() != null && CraftOrder.TABLE_BLOCKED.equals(code)) {
@@ -14503,7 +14602,11 @@ public class StashSorter extends AbstractFieldModule {
             }
             case Craft -> {
                 // Cut short before (the bot gave way): what is left is planned again from what is carried now
-                if (r.trips > 0) {
+                if (r.advance) {
+                    // The run before this one was made (a furnace run, then a table run, ...): what it made is carried, nothing is planned again
+                    r.advance = false;
+                }
+                else if (r.trips > 0) {
                     Recipes recipes = recipesOrNull();
                     Map<String, Long> pool = new HashMap<>();
                     for (var e : craftPort.carried().entrySet()) pool.merge(CraftSlots.baseOf(e.getKey()), (long) e.getValue(), Long::sum);
@@ -14511,12 +14614,13 @@ public class StashSorter extends AbstractFieldModule {
                     CraftLedger ledger = r.oc == null ? null : orders.flow.craftLedger();
                     if (ledger != null && recipes != null && r.made < r.wanted) {
                         // An order's chunk is planned again from what is carried, with the order's recipes only
-                        again = new CraftSub.Session(ledger.table(), ledger.allowed(), pool, pool, Map.of(), ledger.limits()).plan(r.plan.item(), r.wanted - r.made).plan();
+                        again = new CraftSub.Session(ledger.table(), ledger.allowed(), pool, pool, Map.of(), ledger.limits(), ledger.smelting()).plan(r.plan.item(), r.wanted - r.made).plan();
                     }
                     else again = recipes == null || r.made >= r.wanted ? null
                         : CraftPlanner.plan(recipes, r.plan.item(), r.wanted - r.made, pool, CraftPlanner.Limits.open());
                     if (again == null || !again.ok()) return craftGaveUp(r, r.failure == null ? "what was gathered no longer makes one" : r.failure, true);
                     r.plan = again;
+                    r.resegment();
                 }
                 return startCraftTrip(r);
             }
@@ -14559,12 +14663,20 @@ public class StashSorter extends AbstractFieldModule {
         craft = null;
         craftCard = null;
         craftCardDetail = null;
+        if (r.recovery) {
+            finishSmeltRecovery(r);
+            return;
+        }
         if (r.oc != null) {
             finishOrderChunk(r);
             return;
         }
         if (r.forTable) {
             finishTableCraft(r);
+            return;
+        }
+        if (r.forFurnace) {
+            finishFurnaceCraft(r);
             return;
         }
         if (r.forChests()) {
@@ -14639,6 +14751,8 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     private boolean startCraftTrip(CraftRun r) {
+        // A run of furnace steps (B2) is a trip to the furnace; the runs at the crafting table are as before
+        if (r.recovery || r.current().furnace()) return startFurnaceTrip(r);
         boolean inv = r.forTable;
         CraftingTableSpot.Spot spot = CraftingTableSpot.get();
         if (!inv && r.oc != null && spot != null && CraftingTableSpot.here(spot) && Containers.isLoaded(spot.pos()) && !CraftingTableSpot.isTable(spot.pos())) {
@@ -14675,13 +14789,17 @@ public class StashSorter extends AbstractFieldModule {
         jobStartedInside = false;
         tableGoal = inv || spot == null ? null : new GoalNear(spot.pos(), REACH_RANGE_SQ);
         inventoryTrip = inv;
-        crafter = new CraftTrip(craftPort, r.plan, inv ? CraftTrip.INVENTORY_GRID : CraftTrip.TABLE_GRID);
+        crafter = new CraftTrip(craftPort, r.current().plan(), inv ? CraftTrip.INVENTORY_GRID : CraftTrip.TABLE_GRID);
         step(inv ? "crafting table: crafting one in the inventory's 2x2 grid (" + CraftPlanner.describe(r.plan) + "); next: put it down."
             : "crafting: " + r.plan.count() + " " + Recipes.pretty(r.plan.item()) + " at the crafting table (" + CraftPlanner.describe(r.plan) + "); next: put back what is left.");
         return true;
     }
 
     private void tickCraft() {
+        if (furnacer != null) {
+            tickFurnace();
+            return;
+        }
         CraftTrip t = crafter;
         CraftRun r = craft;
         if (t == null || r == null) {
@@ -14756,12 +14874,19 @@ public class StashSorter extends AbstractFieldModule {
         r.resultSlots.clear();
         // The table crafted is kept from being put away until it is put down; only the slot its own result went to
         if (r.forTable && r.tableSlot >= 0 && tableItem(inventoryItem(r.tableSlot))) craftKeep.put(r.tableSlot, until);
+        if (r.forFurnace && r.tableSlot >= 0 && furnaceItem(inventoryItem(r.tableSlot))) craftKeep.put(r.tableSlot, until);
         r.phase = CraftPhase.PutBack;
         if (!outcome.done()) {
             r.failure = outcome.failure();
             r.retry = outcome.retry() && !outcome.stuck();
             // Cut short (the bot gave way, the window closed): the trip is made again with what is carried, a few times
             if (r.retry && r.trips < 3 && r.made < r.wanted && (r.unit == null || orders.flow.running())) r.phase = CraftPhase.Craft;
+        }
+        else if (r.segs != null && r.seg + 1 < r.segs.size() && (r.unit == null || orders.flow.running())) {
+            // The next run of the plan (a furnace run after this one, say) is made with what this one made
+            r.seg++;
+            r.advance = true;
+            r.phase = CraftPhase.Craft;
         }
         if (r.forTable) {
             if (!outcome.done()) warn("Crafting a crafting table stopped short ({}).", outcome.failure());
@@ -14776,7 +14901,7 @@ public class StashSorter extends AbstractFieldModule {
         craftKeep.entrySet().removeIf(e -> {
             Item it = inventoryItem(e.getKey());
             // Kept for as long as an order is in hand; otherwise for a few minutes
-            return (e.getValue() < tickCount && !orders.flow.holdsOrder() && chestRun == null && anvilRun == null) || !(emptyShulker(it) || plainChest(it) || tableItem(it));
+            return (e.getValue() < tickCount && !orders.flow.holdsOrder() && chestRun == null && anvilRun == null) || !(emptyShulker(it) || plainChest(it) || tableItem(it) || furnaceItem(it));
         });
         return new HashSet<>(craftKeep.keySet());
     }
@@ -15279,6 +15404,7 @@ public class StashSorter extends AbstractFieldModule {
                 if (tableSlot == CraftGrid.RESULT && what.id.equals("shulker_box")) r.resultSlots.add(into);
                 if (tableSlot == CraftGrid.RESULT && r.oc != null && what.id.equals(r.oc.id())) r.oc.resultSlots.add(into);
                 if (tableSlot == CraftGrid.RESULT && r.forTable && what.id.equals("crafting_table")) r.tableSlot = into;
+                if (tableSlot == CraftGrid.RESULT && r.forFurnace && what.id.equals("furnace")) r.tableSlot = into;
             }
             actions++;
             wait = CONFIG.delayTicks;
@@ -15316,8 +15442,8 @@ public class StashSorter extends AbstractFieldModule {
 
     private enum AnvilPhase { Gather, Place, PutBack }
 
-    /** What the run puts down: an anvil (naming), or a crafting table (1.10.0, for crafting). */
-    private enum PlaceKind { Anvil, Table }
+    /** What the run puts down: an anvil (naming), a crafting table (1.10.0, for crafting) or a furnace (1.22.0, for smelting). */
+    private enum PlaceKind { Anvil, Table, Furnace }
 
     private enum AnvilStep { Walk, Hotbar, Place, Wait }
 
@@ -15495,7 +15621,15 @@ public class StashSorter extends AbstractFieldModule {
 
     private static boolean placeItem(PlaceKind kind, @Nullable Item it) {
         if (it == null) return false;
-        return kind == PlaceKind.Table ? it.id.equals("crafting_table") : AnvilFinder.ITEMS.contains("minecraft:" + it.id);
+        return switch (kind) {
+            case Table -> it.id.equals("crafting_table");
+            case Furnace -> it.id.equals("furnace");
+            case Anvil -> AnvilFinder.ITEMS.contains("minecraft:" + it.id);
+        };
+    }
+
+    private static boolean furnaceItem(@Nullable Item it) {
+        return placeItem(PlaceKind.Furnace, it);
     }
 
     private static boolean tableItem(@Nullable Item it) {
@@ -15503,11 +15637,11 @@ public class StashSorter extends AbstractFieldModule {
     }
 
     private static String placeLead(AnvilRun r) {
-        return r.kind == PlaceKind.Table ? "crafting table: " : "naming: ";
+        return r.kind == PlaceKind.Table ? "crafting table: " : r.kind == PlaceKind.Furnace ? "furnace: " : "naming: ";
     }
 
     private static String placeWhat(AnvilRun r) {
-        return r.kind == PlaceKind.Table ? "a crafting table" : "an anvil";
+        return r.kind == PlaceKind.Table ? "a crafting table" : r.kind == PlaceKind.Furnace ? "a furnace" : "an anvil";
     }
 
     /** An anvil item is carried by the run now: the slot, or -1. */
@@ -15544,9 +15678,14 @@ public class StashSorter extends AbstractFieldModule {
     private boolean anvilGaveUp(AnvilRun r, String why) {
         r.failure = why;
         r.phase = AnvilPhase.PutBack;
-        if (r.kind == PlaceKind.Table) {
+        if (r.kind != PlaceKind.Anvil) {
             // Whatever was gathered goes back (the table too, it is no longer kept from being put away)
-            craftKeep.keySet().removeIf(slot -> tableItem(inventoryItem(slot)));
+            craftKeep.keySet().removeIf(slot -> tableItem(inventoryItem(slot)) || furnaceItem(inventoryItem(slot)));
+            if (r.kind == PlaceKind.Furnace) {
+                warn("Couldn't place a furnace: {}.", why);
+                furnaceFail(r.task, FurnaceFinder.NONE + ": couldn't place one (" + why + ")");
+                return continueAnvilRun();
+            }
             warn("Couldn't place a crafting table: {}.", why);
             tableFail(r.task, CraftingTableFinder.NONE + ": couldn't place one (" + why + ")");
             return continueAnvilRun();
@@ -15561,7 +15700,7 @@ public class StashSorter extends AbstractFieldModule {
         if (r == null) return false;
         if (job != null) return true;
         if (!orders.gate()) return false;
-        if (r.kind == PlaceKind.Table) {
+        if (r.kind != PlaceKind.Anvil) {
             // A table for a craft: the order ending does not strand it (it is put down, it is useful anyway); a respawn or a
             // change of dimension does end it, reported as failed to the one that asked
             if (r.phase != AnvilPhase.PutBack && tableRunBroken()) return anvilGaveUp(r, "the bot respawned or changed dimension");
@@ -15587,12 +15726,12 @@ public class StashSorter extends AbstractFieldModule {
                 }
                 if (shulkerPause() != null && findUnpackSource(r.bin) != null) return anvilGaveUp(r, "shulker handling is paused (" + shulkerPause() + ")");
                 if (startBinUnpack(r.bin, placeLead(r))) return true;
-                return anvilGaveUp(r, r.kind == PlaceKind.Table ? "the crafting table in the stash couldn't be taken" : "the anvil in the stash couldn't be taken");
+                return anvilGaveUp(r, r.kind == PlaceKind.Anvil ? "the anvil in the stash couldn't be taken" : "the " + placeWhat(r).substring(2) + " in the stash couldn't be taken");
             }
             case Place -> {
-                if (carriedAnvilSlot(r) < 0) return anvilGaveUp(r, r.kind == PlaceKind.Table ? "the crafting table is no longer carried" : "the anvil is no longer carried");
+                if (carriedAnvilSlot(r) < 0) return anvilGaveUp(r, "the " + placeWhat(r).substring(placeWhat(r).indexOf(' ') + 1) + " is no longer carried");
                 if (r.spots >= MAX_ANVIL_SPOTS) return anvilGaveUp(r, "it couldn't be put down at " + MAX_ANVIL_SPOTS + " spots");
-                if (r.kind == PlaceKind.Table && tickCount - r.startTick > TABLE_PLACE_TICKS) return anvilGaveUp(r, "it took more than 90 seconds");
+                if (r.kind != PlaceKind.Anvil && tickCount - r.startTick > TABLE_PLACE_TICKS) return anvilGaveUp(r, "it took more than 90 seconds");
                 PlaceSearch.Result found = PlaceSearch.search(playerFeet(), playerBody(), placeView, anvilSkip);
                 if (found.found() == null) return anvilGaveUp(r, "no spot within " + PlaceSearch.RADIUS + " blocks: " + found.why());
                 r.spots++;
@@ -15609,13 +15748,14 @@ public class StashSorter extends AbstractFieldModule {
                 resetJobState();
                 jobStartedInside = false;
                 step(r.kind == PlaceKind.Table ? "crafting table: putting it down " + found.found().steps() + " blocks away; next: craft there."
+                    : r.kind == PlaceKind.Furnace ? "furnace: putting it down " + found.found().steps() + " blocks away; next: smelt there."
                     : "naming: putting the anvil down " + found.found().steps() + " blocks away; next: name the shulker there.");
                 return true;
             }
             case PutBack -> {
                 // The hotbar swap is undone first: what it displaced goes back, an anvil not put down comes back to a carry slot
                 if (anvilSwapBack(r)) return true;
-                if (r.kind == PlaceKind.Table && !r.done) craftKeep.keySet().removeIf(slot -> tableItem(inventoryItem(slot)));
+                if (r.kind != PlaceKind.Anvil && !r.done) craftKeep.keySet().removeIf(slot -> tableItem(inventoryItem(slot)) || furnaceItem(inventoryItem(slot)));
                 List<Integer> left = new ArrayList<>(looseCarried());
                 left.removeIf(slot -> craftKeep.containsKey(slot) || pendingSourceShulker(slot));
                 if (!r.done && r.jobs++ < 20 && handle == null && returnSpentShulker()) return true;
@@ -15636,7 +15776,7 @@ public class StashSorter extends AbstractFieldModule {
             return;
         }
         anvilStepTicks++;
-        if (r.kind == PlaceKind.Table ? tableRunBroken() : (!orders.flow.running() || orders.flow.cancelRequested() || orders.flow.parkRequested())) {
+        if (r.kind != PlaceKind.Anvil ? tableRunBroken() : (!orders.flow.running() || orders.flow.cancelRequested() || orders.flow.parkRequested())) {
             endAnvilPlace(false);
             return;
         }
@@ -15720,11 +15860,19 @@ public class StashSorter extends AbstractFieldModule {
             }
             case Wait -> {
                 BlockPos at = f.spot();
-                if (Containers.isLoaded(at) && (r.kind == PlaceKind.Table ? CraftingTableSpot.isTable(at) : AnvilSpot.isAnvil(at))) {
+                if (Containers.isLoaded(at) && (r.kind == PlaceKind.Table ? CraftingTableSpot.isTable(at) : r.kind == PlaceKind.Furnace ? FurnaceSpot.isFurnace(at) : AnvilSpot.isAnvil(at))) {
                     activity.releaseOurPathing();
                     restoreRules();
                     String dimension = Stash.currentDimension();
-                    if (r.kind == PlaceKind.Table) {
+                    if (r.kind == PlaceKind.Furnace) {
+                        // Left standing and remembered (CRAFT-CONTRACT-v1.2.md 14): the next smelt uses it too
+                        if (dimension != null) FurnaceSpot.remember(dimension, at.x(), at.y(), at.z(), r.crafted ? FurnaceFinder.CRAFTED : FurnaceFinder.PLACED);
+                        furnaceChanged();
+                        recordFurnacePlacement(r.task);
+                        r.done = true;
+                        step("furnace: put one down " + String.format("%.0f", Math.sqrt(distSq(playerFeet(), at))) + " blocks away and remembered it; next: smelt there.");
+                    }
+                    else if (r.kind != PlaceKind.Anvil) {
                         if (dimension != null) CraftingTableSpot.remember(dimension, at.x(), at.y(), at.z(), r.crafted ? CraftingTableSpot.CRAFTED : CraftingTableSpot.PLACED);
                         if (r.forOrderCraft) recordTablePlacement(r.task);
                         tableChanged();
@@ -16091,6 +16239,758 @@ public class StashSorter extends AbstractFieldModule {
         tableFail(r.task, CraftingTableFinder.NONE + ": couldn't craft one (" + why + ")");
     }
 
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Smelting for craft orders (1.22.0, milestone B2, CRAFT-CONTRACT-v1.2.md 14). A chunk of a craft load whose plan has furnace steps is made in
+    // runs (CraftSegments): a run of furnace steps is a FurnaceTrip (walk to the furnace, fuel and input in, wait for the output, take it, the
+    // leftover fuel back), a run at the crafting table the CraftTrip as before. One furnace serves the whole order: the one remembered, else the
+    // nearest standing in the stash area, else one taken from the stash and put down and left (remembered), else one crafted from 8 cobblestone at
+    // the crafting table and put down (FurnaceFinder). What the bot puts in and takes out is kept in the ledger's smelt journal (SmeltJournal), so
+    // after a restart the next chunk begins by taking up what is in the furnace. All on the bot tick thread.
+
+    private enum FurnaceWay { Ready, Wait, Started, Failed }
+
+    private AnvilFinder.@Nullable Scan furnaceScanNow;
+    private List<BlockPos> furnaceScanFound = List.of();
+    private long furnaceScanDoneAt = Long.MIN_VALUE / 4;
+    // Furnaces given up on this order (busy, could not be reached or opened): not found again
+    private final Set<BlockPos> furnaceSkip = new HashSet<>();
+    // Furnaces a trip opened and found empty: preferred over ones nobody has looked into
+    private final Set<BlockPos> furnaceKnownEmpty = new HashSet<>();
+    // No furnace could be had for this task: told to whoever asks for one next, once
+    private @Nullable String furnaceFailedTask, furnaceFailedWhy;
+    private long furnaceFailedAt;
+    // Per order: the id the counters are for, furnaces found in use by something else, tries made, and tries to take up a stopped run's furnace
+    private @Nullable String furnaceOrder;
+    private boolean orderFurnaceBusy;
+    private int orderFurnaceFails, orderRecoveryTries;
+
+    /** Resets what is counted per order when another order begins. */
+    private void furnaceOrderBegins(String orderId) {
+        if (orderId.equals(furnaceOrder)) return;
+        furnaceOrder = orderId;
+        orderFurnaceBusy = false;
+        orderFurnaceFails = 0;
+        orderRecoveryTries = 0;
+        furnaceSkip.clear();
+        furnaceFailedTask = null;
+        furnaceFailedWhy = null;
+    }
+
+    /** The furnace was remembered, forgotten or put down: what was seen about furnaces is forgotten. */
+    private void furnaceChanged() {
+        furnaceScanDoneAt = Long.MIN_VALUE / 4;
+    }
+
+    private void furnaceFail(String task, String why) {
+        furnaceFailedTask = task;
+        furnaceFailedWhy = why;
+        furnaceFailedAt = tickCount;
+    }
+
+    private CraftTableCap.State furnaceCapState() {
+        List<Long> times = CONFIG.craftFurnacePlacedAt == null ? List.of() : new ArrayList<>(CONFIG.craftFurnacePlacedAt);
+        return new CraftTableCap.State(times, CONFIG.craftFurnaceOrder == null || CONFIG.craftFurnaceOrder.isEmpty() ? null : CONFIG.craftFurnaceOrder, CONFIG.craftFurnaceOrderCount);
+    }
+
+    /** A furnace is about to be put down (from the stash or crafted): refused past one an order and three an hour (a cap against a loop that fills the area with furnaces). */
+    private boolean furnacePlacementRefused(String task, String[] why) {
+        if (CraftTableCap.allowed(furnaceCapState(), task, System.currentTimeMillis())) return false;
+        why[0] = "no more furnaces to put down (" + CraftTableCap.lastHour(furnaceCapState(), System.currentTimeMillis()) + " of " + CraftTableCap.PER_HOUR + " this hour)";
+        return true;
+    }
+
+    /** A furnace was put down for an order: counted and saved. */
+    private void recordFurnacePlacement(String task) {
+        CraftTableCap.State next = CraftTableCap.record(furnaceCapState(), task, System.currentTimeMillis());
+        CONFIG.craftFurnacePlacedAt = new ArrayList<>(next.times());
+        CONFIG.craftFurnaceOrder = next.orderId() == null ? "" : next.orderId();
+        CONFIG.craftFurnaceOrderCount = next.orderCount();
+        try {
+            com.aquarius.Globals.saveConfigAsync();
+        } catch (RuntimeException | LinkageError e) {
+            // Kept in memory at least
+        }
+    }
+
+    /** A furnace that can't be used (busy, not reached, not opened) is not used again this order; a remembered one is forgotten. */
+    private void giveUpFurnace() {
+        FurnaceSpot.Spot spot = FurnaceSpot.get();
+        if (spot == null) return;
+        furnaceSkip.add(spot.pos());
+        FurnaceSpot.clear();
+        furnaceChanged();
+    }
+
+    private boolean furnaceScanFresh() {
+        return tickCount - furnaceScanDoneAt < ANVIL_SCAN_TICKS;
+    }
+
+    private void startFurnaceScan() {
+        Stash s = stash;
+        if (furnaceScanNow != null || s == null) return;
+        List<BlockPos> at = new ArrayList<>();
+        for (Box b : s.boxes) if (!b.delivery) at.add(b.pos);
+        furnaceScanNow = new AnvilFinder.Scan(AnvilFinder.region(s.bounds(), at, playerFeet(), CONFIG.radius, CONFIG.height), FurnaceFinder::isFurnaceName);
+        advanceFurnaceScan();
+    }
+
+    private void advanceFurnaceScan() {
+        AnvilFinder.Scan sc = furnaceScanNow;
+        if (sc == null) return;
+        sc.step(anvilBlocks, AnvilFinder.LOOKUPS_PER_TICK);
+        if (!sc.done()) return;
+        furnaceScanFound = new ArrayList<>(sc.found());
+        furnaceScanDoneAt = tickCount;
+        furnaceScanNow = null;
+        final long looked = sc.lookups();
+        final int n = furnaceScanFound.size();
+        debug(() -> "Furnace search: " + looked + " block lookups, " + n + " furnaces standing.");
+    }
+
+    /** The nearest furnace the last search found that still stands, in the stash area, with a spot beside it to stand on, and not given up on. */
+    private @Nullable BlockPos nearestScannedFurnace() {
+        Stash s = stash;
+        if (s == null) return null;
+        List<BlockPos> standing = new ArrayList<>();
+        for (BlockPos p : furnaceScanFound) if (FurnaceFinder.isFurnaceName(anvilBlocks.name(p.x(), p.y(), p.z()))) standing.add(p);
+        CraftBounds.StashArea area = stashArea(s);
+        return FurnaceFinder.nearestPreferring(standing, playerFeet(), p -> !furnaceSkip.contains(p) && CraftBounds.contains(area, p, 0) && CraftingTableFinder.standBeside(p, anvilBlocks), furnaceKnownEmpty::contains);
+    }
+
+    /** The stash's furnace items no line of the order needs, as loads to gather; empty when there is none. */
+    private List<Order.Lot> furnaceLots() {
+        Stash s = orders.st();
+        if (s == null) return List.of();
+        CraftPool.Stock stock = SourceRules.craftSurvey(s.boxes, new HashSet<>(List.of(FurnaceFinder.FURNACE_ID)), orders.reservedShulkerKeys(), CONFIG.useNamedShulkers, neverUse(), sourceLive).plainOnly();
+        List<Unit> others = orders.flow.holdsOrder() ? remainingUnits() : List.of();
+        if (residualNet(stock, others).getOrDefault(FurnaceFinder.FURNACE_ID, 0L) <= 0) return List.of();
+        return CraftPool.lots(stock, Map.of(FurnaceFinder.FURNACE_ID, 1L), others);
+    }
+
+    /** A crafting table is known (set, found, put down, or the website's) so a furnace could be crafted at it. */
+    private boolean tableKnownForFurnace() {
+        if (CraftingTableSpot.isSet()) return true;
+        CraftSettings cs = craftSettings();
+        return cs != null && cs.table() != null;
+    }
+
+    /** How one furnace is crafted: the plan (8 cobblestone at the crafting table), and the stash and the other units it was planned against. */
+    private record FurnacePlan(CraftPlanner.Plan plan, CraftPool.Stock stock, List<Unit> others) {
+    }
+
+    /** The plan for crafting one furnace from what the stash can give (not what the order needs), or null when there is none or no crafting table is known. */
+    private @Nullable FurnacePlan furnaceCraftPlan() {
+        Recipes recipes = recipesOrNull();
+        Stash s = orders.st();
+        if (recipes == null || s == null || !tableKnownForFurnace()) return null;
+        Set<String> ids = new HashSet<>(recipes.inputsOf(FurnaceFinder.FURNACE_ID, 1));
+        CraftPool.Stock stock = SourceRules.craftSurvey(s.boxes, ids, orders.reservedShulkerKeys(), CONFIG.useNamedShulkers, neverUse(), sourceLive).plainOnly();
+        List<Unit> others = orders.flow.holdsOrder() ? remainingUnits() : List.of();
+        CraftPlanner.Plan plan = CraftPlanner.plan(recipes, FurnaceFinder.FURNACE_ID, 1, residualNet(stock, others), CraftingTableFinder.limits(neverUse()));
+        return plan.ok() ? new FurnacePlan(plan, stock, others) : null;
+    }
+
+    /**
+     * A chunk with furnace steps is about to start: makes sure a furnace is there. Ready: one is remembered and standing, or was found. Wait: the search
+     * is still going. Started: a run was begun to take one from the stash (and put it down) or to craft one at the crafting table, the chunk is asked for
+     * again afterwards. Failed: none can be had, {@code why[0]} says why.
+     */
+    private FurnaceWay ensureFurnace(String task, String[] why) {
+        if (stash == null || !CACHE.getPlayerCache().isAlive()) return FurnaceWay.Ready;
+        if (task.equals(furnaceFailedTask) && tickCount - furnaceFailedAt < TABLE_FAIL_TTL_TICKS) {
+            why[0] = furnaceFailedWhy == null ? FurnaceFinder.NONE : furnaceFailedWhy;
+            furnaceFailedTask = null;
+            furnaceFailedWhy = null;
+            return FurnaceWay.Failed;
+        }
+        FurnaceSpot.Spot spot = FurnaceSpot.get();
+        if (spot != null && (!FurnaceSpot.here(spot) || furnaceSkip.contains(spot.pos()))) {
+            // Another dimension, or given up on: forgotten
+            FurnaceSpot.clear();
+            furnaceChanged();
+            spot = null;
+        }
+        // The furnace remembered is standing (or its chunk is not loaded: nothing is forgotten on a guess)
+        if (spot != null && (!Containers.isLoaded(spot.pos()) || FurnaceSpot.isFurnace(spot.pos()))) return FurnaceWay.Ready;
+        if (spot != null) {
+            info("The furnace I knew is gone, looking for another.");
+            furnaceSkip.add(spot.pos());
+            FurnaceSpot.clear();
+            furnaceChanged();
+        }
+        if (!furnaceScanFresh()) {
+            startFurnaceScan();
+            if (!furnaceScanFresh()) return FurnaceWay.Wait;
+        }
+        FurnaceFinder.World world = new FurnaceFinder.World() {
+            @Override
+            public boolean isFurnace(BlockPos p) {
+                return !Containers.isLoaded(p) || FurnaceSpot.isFurnace(p);
+            }
+
+            @Override
+            public @Nullable BlockPos search() {
+                return nearestScannedFurnace();
+            }
+
+            @Override
+            public boolean stockHasFurnace() {
+                return !furnaceLots().isEmpty();
+            }
+
+            @Override
+            public boolean canCraft() {
+                return furnaceCraftPlan() != null;
+            }
+        };
+        FurnaceFinder.Decision d = FurnaceFinder.decide(null, world);
+        String dimension = Stash.currentDimension();
+        switch (d.step()) {
+            case FOUND -> {
+                if (dimension == null || d.pos() == null) {
+                    why[0] = FurnaceFinder.NONE + ": the dimension isn't known";
+                    return FurnaceWay.Failed;
+                }
+                FurnaceSpot.remember(dimension, d.pos().x(), d.pos().y(), d.pos().z(), FurnaceFinder.FOUND);
+                furnaceChanged();
+                info("Found a furnace in the stash area, using it for smelting.");
+                return FurnaceWay.Ready;
+            }
+            case PLACE_FROM_STOCK -> {
+                if (furnacePlacementRefused(task, why)) return FurnaceWay.Failed;
+                List<Order.Lot> lots = furnaceLots();
+                if (lots.isEmpty()) {
+                    why[0] = FurnaceFinder.NONE;
+                    return FurnaceWay.Failed;
+                }
+                AnvilRun r = new AnvilRun(task, lots);
+                r.kind = PlaceKind.Furnace;
+                r.startTick = tickCount;
+                anvilRun = r;
+                tableRunDim = dimension;
+                info("No furnace in the area, taking one out of the stash to place.");
+                continueAnvilRun();
+                return FurnaceWay.Started;
+            }
+            case CRAFT -> {
+                if (furnacePlacementRefused(task, why)) return FurnaceWay.Failed;
+                FurnacePlan fp = furnaceCraftPlan();
+                if (fp == null) {
+                    why[0] = FurnaceFinder.NONE;
+                    return FurnaceWay.Failed;
+                }
+                CraftRun run = new CraftRun(null, task, fp.plan(), CraftPool.lots(fp.stock(), fp.plan().fromStock(), fp.others()));
+                run.forFurnace = true;
+                tableRunDim = dimension;
+                CraftSettings cs = craftSettings();
+                if (!CraftingTableSpot.isSet() && cs != null && cs.table() != null) CraftingTableSpot.useWebsite(websiteSpot(cs.table()));
+                info("No furnace in the area or the stash, crafting one from cobblestone.");
+                beginCraft(run, "furnace: none in the area or the stash");
+                return FurnaceWay.Started;
+            }
+            default -> {
+                why[0] = d.failure() == null ? FurnaceFinder.NONE : d.failure();
+                return FurnaceWay.Failed;
+            }
+        }
+    }
+
+    /** The furnace craft is over: made, it is put down; not made, whoever asked is told it can't be had. */
+    private void finishFurnaceCraft(CraftRun r) {
+        CraftingTableSpot.useWebsite(null);
+        if (r.made >= 1 && r.tableSlot >= 0 && furnaceItem(inventoryItem(r.tableSlot)) && !tableRunBroken()) {
+            AnvilRun p = new AnvilRun(r.task, List.of());
+            p.kind = PlaceKind.Furnace;
+            p.crafted = true;
+            p.heldSlot = r.tableSlot;
+            p.phase = AnvilPhase.Place;
+            p.startTick = tickCount;
+            anvilRun = p;
+            step("furnace: crafted one; next: put it down.");
+            return;
+        }
+        craftKeep.keySet().removeIf(slot -> furnaceItem(inventoryItem(slot)));
+        String why = r.failure == null ? "nothing was made" : r.failure;
+        warn("Couldn't craft a furnace: {}.", why);
+        step("furnace: couldn't craft one: " + why + ".");
+        furnaceFail(r.task, FurnaceFinder.NONE + ": couldn't craft one (" + why + ")");
+    }
+
+    /** The bot's own furnace in use (found, put down or crafted), for the heartbeat's {@code botFurnace}; null when none or it is outside the limits. Never logged. */
+    public ManagerIndex.@Nullable BotTable botFurnace() {
+        FurnaceSpot.Spot spot = FurnaceSpot.get();
+        if (spot == null) return null;
+        Stash st = orders.st();
+        if (st == null || CraftBounds.areaWhy(effectiveDimension(st), stashArea(st), new CraftSettings.Table(spot.x(), spot.y(), spot.z(), spot.dimension()), 64) != null) return null;
+        return new ManagerIndex.BotTable(spot.x() + "," + spot.y() + "," + spot.z(), FurnaceSpot.source());
+    }
+
+    /** What `stash craftorders` says about smelting. No position. */
+    public String craftSmeltLine() {
+        Smelting sm = Smelting.of(com.porter.qwertestash.manager.Extras.current());
+        if (!CONFIG.craftSmelt) return "off (`stash craftorders smelt on`)";
+        if (sm == null) return "on, but the server's extras have no smelting tables yet: no orders that smelt are taken";
+        FurnaceSpot.Spot spot = FurnaceSpot.get();
+        return "on: " + sm.all().size() + " smelt recipes, " + sm.fuelIds().size() + " fuels, at most " + CONFIG.craftOrderMaxSmelt + " items per order; furnace: "
+            + (spot == null ? "none yet (one is looked for in the stash area, taken from the stash or crafted, when needed)" : FurnaceSpot.source() + " (position hidden)");
+    }
+
+    /** The item ids smelting may leave in a furnace of the bot's own: its inputs, outputs and fuels. */
+    private static Set<String> smeltKnownIds(Smelting sm) {
+        Set<String> out = new HashSet<>(sm.fuelIds());
+        for (Smelting.Recipe r : sm.all()) {
+            out.addAll(r.in());
+            out.add(r.out());
+        }
+        return out;
+    }
+
+    private boolean startFurnaceTrip(CraftRun r) {
+        CraftLedger ledger = r.debt != null ? null : orders.flow.craftLedger();
+        Smelting sm = r.debt != null ? Smelting.of(com.porter.qwertestash.manager.Extras.current()) : ledger == null ? null : ledger.smelting();
+        SmeltJournal journal = r.debt != null ? r.debt : ledger == null ? null : ledger.journal();
+        if (journal == null || sm == null) {
+            r.code = CraftOrder.RECIPE_MISMATCH;
+            return craftGaveUp(r, "this bot can't smelt", false);
+        }
+        FurnaceSpot.Spot spot = FurnaceSpot.get();
+        if (spot == null || !FurnaceSpot.here(spot) || (Containers.isLoaded(spot.pos()) && !FurnaceSpot.isFurnace(spot.pos()))) {
+            // Gone since it was looked for: forgotten, and the trip is not made to a block that isn't there
+            if (spot != null) giveUpFurnace();
+            r.code = CraftOrder.NO_FURNACE;
+            return craftGaveUp(r, FurnaceFinder.NONE + ": the furnace is gone", false);
+        }
+        List<FurnaceTrip.Batch> batches = r.recovery ? List.of() : FurnaceTrip.batches(r.current().plan().steps(), sm, StashSorter::stackOf);
+        if (!r.recovery && batches.isEmpty()) return craftGaveUp(r, "nothing to smelt", false);
+        Set<Integer> keepOwned = CraftSlots.retained(r.owned, slot -> inventoryItem(slot) != null, craftHeldSlots(r));
+        r.owned.clear();
+        r.owned.addAll(keepOwned);
+        markJobStart();
+        job = Job.Craft;
+        target = null;
+        actions = 0;
+        tries = 0;
+        stepTicks = 0;
+        jobRunTicks = 0;
+        step = Step.Walking;
+        resetJobState();
+        // The furnace may be well outside the stash area
+        jobStartedInside = false;
+        tableGoal = new GoalNear(spot.pos(), REACH_RANGE_SQ);
+        inventoryTrip = false;
+        boolean own = FurnaceFinder.isOwn(FurnaceSpot.source());
+        // Whenever the journal changes the order is saved and the furnace debt written (it outlives the order)
+        final CraftLedger forLedger = ledger;
+        Runnable saved = () -> {
+            if (forLedger != null) orders.flow.craftLedgerChanged();
+            writeFurnaceDebt(journal);
+        };
+        FurnaceDebt owed = FurnaceDebt.parse(CONFIG.craftFurnaceDebt);
+        furnacer = (r.recovery ? FurnaceTrip.recover(furnacePort, journal, saved, sm.cookTicks(), own, smeltKnownIds(sm))
+            : new FurnaceTrip(furnacePort, batches, journal, saved, sm.cookTicks(), own, smeltKnownIds(sm), false)).withDebtIds(owed == null ? Set.of() : owed.ids());
+        if (ledger != null) ledger.setFurnaceSource(FurnaceSpot.source());
+        long items = 0;
+        for (FurnaceTrip.Batch b : batches) items += b.count();
+        step(r.recovery ? "smelting: taking up what a stopped run left in the furnace; next: put back what is left."
+            : "smelting: " + items + " items in " + batches.size() + " batches at the furnace (" + CraftPlanner.describe(r.current().plan()) + "); next: put back what is left.");
+        return true;
+    }
+
+    private void tickFurnace() {
+        FurnaceTrip t = furnacer;
+        CraftRun r = craft;
+        if (t == null || r == null) {
+            endFurnaceTrip(null);
+            return;
+        }
+        // The order ended, or is to be cancelled or parked: the trip takes what is the bot's out of the furnace, then closes
+        if (r.unit != null && (!orders.flow.running() || orders.flow.cancelRequested() || orders.flow.parkRequested())) t.abort("the order ended");
+        t.tick();
+        if (r.oc != null) orders.flow.setPhase("smelting " + t.smelted() + " items (batch " + (t.batchIndex() + 1) + "): " + Recipes.pretty(r.oc.key));
+        if (t.step() != FurnaceTrip.Step.Walk && t.step() != FurnaceTrip.Step.Open) step = Step.Working;
+        if (t.step() == FurnaceTrip.Step.Done) endFurnaceTrip(t.outcome());
+    }
+
+    /** Loose carried plain stacks (nothing has claimed them), by namespaced id. */
+    private Map<String, Long> looseCountsById() {
+        Map<String, Long> out = new HashMap<>();
+        for (int slot : looseCarried()) {
+            Item it = inventoryItem(slot);
+            if (it != null && freshPlain(it) && !it.isShulker()) out.merge("minecraft:" + it.id, (long) it.count, Long::sum);
+        }
+        return out;
+    }
+
+    /** These items (by id), as many as are carried loose, are the order's surplus from now on: not put away until the order ends. */
+    private void claimLooseAsSurplus(Map<String, Long> claim) {
+        for (var e : claim.entrySet()) {
+            long left = e.getValue();
+            for (int slot : looseCarried()) {
+                if (left <= 0) break;
+                Item it = inventoryItem(slot);
+                if (it == null || !freshPlain(it) || it.isShulker() || !("minecraft:" + it.id).equals(e.getKey())) continue;
+                orderCraftSurplus.put(slot, it.id);
+                left -= it.count;
+            }
+        }
+    }
+
+    /** The trip to the furnace is over: what it made is kept for the chunk, and what is left goes back next. */
+    private void endFurnaceTrip(FurnaceTrip.@Nullable Outcome outcome) {
+        CraftRun r = craft;
+        FurnaceTrip finished = furnacer;
+        furnacer = null;
+        tableGoal = null;
+        activity.releaseOurPathing();
+        restoreRules();
+        job = null;
+        target = null;
+        step = Step.Walking;
+        wait = CONFIG.delayTicks;
+        if (r == null) return;
+        if (outcome == null) outcome = new FurnaceTrip.Outcome(CraftOrder.INTERRUPTED, FurnaceTrip.CLOSED, true, false, Map.of(), Map.of(), 0);
+        FurnaceSpot.Spot usedSpot = FurnaceSpot.get();
+        if (finished != null && finished.wasEmpty() && usedSpot != null) furnaceKnownEmpty.add(usedSpot.pos());
+        String code = outcome.failure();
+        // A furnace in use by something else, or that can't be reached or opened, is given up on (a remembered one is forgotten): another is looked for
+        if (CraftOrder.FURNACE_BUSY.equals(code)) {
+            orderFurnaceBusy = true;
+            giveUpFurnace();
+        }
+        else if (CraftOrder.FURNACE_BLOCKED.equals(code)) giveUpFurnace();
+        if (outcome.stuck()) {
+            r.stuck = true;
+            if (FurnaceTrip.CLOSED.equals(outcome.detail())) alert("The furnace window wouldn't reopen and the bot's items may still be in the furnace. It is taken up again before the next smelt or when the bot is free; if that fails, take them out by hand.");
+            else alert("Items are stuck in the furnace and the inventory has no free slot for them. The furnace is let go of and the order goes on short: make room, and take what is in it by hand.");
+        }
+        if (outcome.xpGained() > 0) info("Smelting: the furnace gave {} experience points.", String.format("%.1f", outcome.xpGained()));
+        r.trips++;
+        r.phase = CraftPhase.PutBack;
+        CraftLedger ledger = orders.flow.craftLedger();
+        if (r.oc != null) {
+            r.oc.smelted += outcome.smelted();
+            // Only the last run of the plan makes the item the chunk is for; the runs before it make what the later ones use
+            if (r.current().plan().item().equals(r.plan.item())) r.made += outcome.made(r.plan.item());
+        }
+        if (r.recovery) settleSmeltRecovery(r, ledger, outcome);
+        if (!outcome.done()) {
+            r.failure = outcome.detail() == null ? code : outcome.detail();
+            r.code = code;
+            r.retry = outcome.retry() && !outcome.stuck();
+            // Cut short: no in-place retry. The chunk ends, and its retry plans from the start, taking up what is in the furnace first (startOrderCraftLoads)
+            warn("Smelting stopped short ({}), {} items taken out of the furnace.", outcome.failure(), outcome.smelted());
+        }
+        else if (!r.recovery && r.segs != null && r.seg + 1 < r.segs.size() && (r.unit == null || orders.flow.running())) {
+            r.seg++;
+            r.advance = true;
+            r.phase = CraftPhase.Craft;
+        }
+        else info("Smelted {} items.", outcome.smelted());
+    }
+
+    /**
+     * A stopped run's furnace was taken up (a restart, a trip cut short): its journal says what went in and what was taken out, the budget is charged for
+     * what the furnace turned into products and burnt, and the products carried are the order's surplus, so the chunk planned next uses them. A furnace that
+     * could not be reached or opened keeps the journal for another try, twice at most.
+     */
+    private void settleSmeltRecovery(CraftRun r, @Nullable CraftLedger ledger, FurnaceTrip.Outcome outcome) {
+        if (r.debt != null) {
+            // The furnace of an order that is over: nothing to account for, the items go back with the usual put-back; kept for another try when it could not be reached
+            String why = outcome.failure();
+            boolean unreached = CraftOrder.FURNACE_BLOCKED.equals(why) || CraftOrder.FURNACE_BUSY.equals(why) || CraftOrder.INTERRUPTED.equals(why) || outcome.stuck();
+            if (unreached && ++debtTries < 3) {
+                debtRetryAt = tickCount + 20 * 60;
+                warn("Couldn't take up the items owed by the furnace ({}); trying again later.", why);
+                return;
+            }
+            if (unreached) alert("Couldn't take up what a smelt left in the furnace ({}): it is given up on. Take it out by hand.", why);
+            debtTries = 0;
+            r.debt.close();
+            writeFurnaceDebt(r.debt);
+            step("smelting: the furnace is taken up; what was in it goes back to the stash.");
+            return;
+        }
+        if (ledger == null) return;
+        String code = outcome.failure();
+        boolean unreached = CraftOrder.FURNACE_BLOCKED.equals(code) || CraftOrder.FURNACE_BUSY.equals(code) || CraftOrder.INTERRUPTED.equals(code) || outcome.stuck();
+        if (unreached && ++orderRecoveryTries < 3) {
+            warn("Couldn't take up what was left in the furnace ({}); trying again.", code);
+            return;
+        }
+        if (unreached) alert("Couldn't take up what a stopped smelt left in the furnace ({}): it is given up on. Take it out by hand.", code);
+        SmeltJournal j = ledger.journal();
+        SmeltJournal.Settlement s = unreached ? new SmeltJournal.Settlement(Map.of(), Map.of()) : j.settle(outcome.returned(), looseCountsById());
+        ledger.charge(s.charge());
+        ledger.addSmelted(j.produced());
+        claimLooseAsSurplus(s.surplus());
+        ledger.setSurplus(orderSurplusCounts());
+        j.close();
+        writeFurnaceDebt(j);
+        orders.flow.craftLedgerChanged();
+        step("smelting: took up the furnace; " + s.surplus().values().stream().mapToLong(Long::longValue).sum() + " items smelted are carried on as the order's surplus.");
+    }
+
+    /** The smelting of a recovery run is over: what was left in the furnace is settled in the ledger, and what else is carried goes back. */
+    private void finishSmeltRecovery(CraftRun r) {
+        CraftingTableSpot.useWebsite(null);
+        step("smelting: the furnace is taken up; carrying on with the order.");
+    }
+
+    private int debtTries;
+    private long debtRetryAt;
+
+    /** Writes (or clears) the bot-level furnace debt from a journal: the furnace and what was put in and taken out. Saved with the settings. */
+    private void writeFurnaceDebt(SmeltJournal j) {
+        FurnaceSpot.Spot spot = FurnaceSpot.get();
+        String next = spot == null ? "" : FurnaceDebt.toSaved(spot.dimension(), spot.x(), spot.y(), spot.z(), j);
+        // A journal without a furnace to point at keeps what was written before (the furnace was forgotten meanwhile): only a closed one clears it
+        if (spot == null && j.isOpen()) return;
+        if (next.equals(CONFIG.craftFurnaceDebt)) return;
+        CONFIG.craftFurnaceDebt = next;
+        try {
+            com.aquarius.Globals.saveConfigAsync();
+        } catch (RuntimeException | LinkageError e) {
+            // Kept in memory at least
+        }
+    }
+
+    /** Starts taking up the furnace of the debt record (an order left items in it and is over). @return true when a trip was started */
+    private boolean startDebtRecovery(@Nullable Unit u) {
+        if (craft != null || anvilRun != null || tickCount < debtRetryAt || !orders.gate()) return false;
+        FurnaceDebt d = FurnaceDebt.parse(CONFIG.craftFurnaceDebt);
+        if (d == null) {
+            CONFIG.craftFurnaceDebt = "";
+            return false;
+        }
+        String here = Stash.currentDimension();
+        if (here != null && !com.porter.qwertestash.orders.OrderBlocker.sameDimension(here, d.dimension())) return false;
+        if (Smelting.of(com.porter.qwertestash.manager.Extras.current()) == null) return false;
+        // The furnace the debt is for is the one used, whatever was remembered
+        FurnaceSpot.Spot now = FurnaceSpot.get();
+        if (now == null || now.x() != d.x() || now.y() != d.y() || now.z() != d.z()) FurnaceSpot.remember(d.dimension(), d.x(), d.y(), d.z(), FurnaceFinder.FOUND);
+        furnaceSkip.remove(new BlockPos(d.x(), d.y(), d.z()));
+        CraftPlanner.Plan none = new CraftPlanner.Plan("", 0, List.of(), Map.of(), 0, null);
+        CraftRun run = new CraftRun(u, "furnace debt", none, List.of());
+        run.recovery = true;
+        run.debt = d.journal();
+        tableRunDim = here;
+        craft = run;
+        craftCard = "Smelting: taking up the furnace";
+        craftCardDetail = "what an earlier order left in the furnace";
+        step("smelting: an earlier order left items in the furnace; going there to take them up.");
+        if (u != null) orders.flow.craftLoadsStarted(u);
+        if (continueCraft()) return true;
+        return job != null;
+    }
+
+    /** Starts taking up what a stopped smelt left in the furnace. @return true when a trip was started */
+    private boolean startSmeltRecovery(Unit u, CraftLedger ledger) {
+        furnaceOrderBegins(String.valueOf(orders.flow.orderId()));
+        FurnaceSpot.Spot spot = FurnaceSpot.get();
+        if (spot == null || !FurnaceSpot.here(spot)) {
+            // No furnace to go to: what was in it can't be taken up, and the journal is dropped
+            warn("A stopped smelt left items in a furnace that is not known any more: they are not taken up.");
+            ledger.journal().close();
+            writeFurnaceDebt(ledger.journal());
+            orders.flow.craftLedgerChanged();
+            return false;
+        }
+        CraftPlanner.Plan none = new CraftPlanner.Plan("", 0, List.of(), Map.of(), 0, null);
+        CraftRun run = new CraftRun(u, String.valueOf(orders.flow.orderId()), none, List.of());
+        run.recovery = true;
+        tableRunDim = Stash.currentDimension();
+        craft = run;
+        craftCard = "Smelting: taking up the furnace";
+        craftCardDetail = "what a stopped run left in the furnace";
+        step("smelting: a stopped run left items in the furnace; going there to take them up.");
+        orders.flow.craftLoadsStarted(u);
+        if (continueCraft()) return true;
+        return job != null;
+    }
+
+    /** The furnace window of ours, or null. */
+    private @Nullable Container furnaceWindow() {
+        if (openContainerId() == 0 || !ownsWindow()) return null;
+        Container c = openContainer();
+        return c != null && c.getType() == ContainerType.FURNACE && Stashes.slots(c) == 3 ? c : null;
+    }
+
+    /** The trip's view of the bot at the furnace: walking and opening through the pathfinder, clicks through the inventory queue. */
+    private final FurnaceTrip.Port furnacePort = new FurnaceTrip.Port() {
+        @Override
+        public boolean arrived() {
+            return tableGoal != null && arrivedAt(tableGoal);
+        }
+
+        @Override
+        public boolean walk() {
+            FurnaceSpot.Spot spot = FurnaceSpot.get();
+            if (spot == null || !activity.mayRequest()) return false;
+            tableGoal = requestWalk(spot.pos(), "the furnace");
+            wait = 10;
+            return true;
+        }
+
+        @Override
+        public boolean pathing() {
+            return activity.ownPathing();
+        }
+
+        @Override
+        public boolean furnaceOpen() {
+            return furnaceWindow() != null;
+        }
+
+        @Override
+        public boolean otherWindowOpen() {
+            return openContainerId() != 0 && ownsWindow() && furnaceWindow() == null;
+        }
+
+        @Override
+        public boolean openPaused() {
+            return StashSorter.this.openPaused();
+        }
+
+        @Override
+        public void opened() {
+            if (CONFIG.containerDelay > 0) wait = Math.max(wait, openWait());
+        }
+
+        @Override
+        public boolean open() {
+            FurnaceSpot.Spot spot = FurnaceSpot.get();
+            if (spot == null || !activity.mayRequest() || activity.ownPathing()) return false;
+            openIdBefore = openContainerId();
+            openRequestedAt = lastOpenClickAt = System.currentTimeMillis();
+            foreignSinceClick = false;
+            requestOpen(spot.pos(), "the furnace");
+            wait = CONFIG.settleTicks;
+            return true;
+        }
+
+        @Override
+        public boolean busy() {
+            return StashSorter.this.busy();
+        }
+
+        @Override
+        public Map<String, Integer> carried() {
+            return craftPort.carried();
+        }
+
+        @Override
+        public @Nullable String itemAt(int slot) {
+            Container c = furnaceWindow();
+            Item it = c == null ? null : Item.of(c.getItemStack(slot));
+            return it == null ? null : kindOf(it);
+        }
+
+        @Override
+        public int countAt(int slot) {
+            Container c = furnaceWindow();
+            Item it = c == null ? null : Item.of(c.getItemStack(slot));
+            return it == null ? 0 : it.count;
+        }
+
+        @Override
+        public boolean place(int slot, String kind, int goal) {
+            Container c = furnaceWindow();
+            if (c == null || holdingCursor() || slot < 0 || slot > 1) return false;
+            Item there = Item.of(c.getItemStack(slot));
+            int have = there == null ? 0 : there.count;
+            if (have >= goal) return false;
+            // The source: a stack with exactly enough, else the smallest with more, else the biggest (topped up from another next)
+            int src = -1;
+            Item best = null;
+            long bestScore = Long.MAX_VALUE;
+            for (int s : craftUsable()) {
+                Item it = inventoryItem(s);
+                if (it == null || !kindOf(it).equals(kind) || (there != null && !there.sameAs(it))) continue;
+                int want = goal - have;
+                long score = it.count >= want ? it.count - want : 10_000L - it.count;
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = it;
+                    src = s;
+                }
+            }
+            if (best == null) return false;
+            int take = Math.min(goal - have, best.count);
+            ClickPlanner.Clicks clicks = ClickPlanner.plan(Math.max(1, best.maxStack), best.count, have, have + take);
+            if (clicks == null || clicks.ops().length == 0) return false;
+            int from = toWindow(src, c);
+            int windowId = c.getContainerId();
+            ClickItem[] actionsNow = new ClickItem[clicks.ops().length];
+            for (int i = 0; i < actionsNow.length; i++) {
+                int op = clicks.ops()[i];
+                actionsNow[i] = new ClickItem(windowId, op < 2 ? from : slot, op % 2 == 1 ? ClickItemAction.RIGHT_CLICK : ClickItemAction.LEFT_CLICK);
+            }
+            if (submit(actionsNow) == RequestFuture.rejected) return false;
+            actions++;
+            wait = CONFIG.delayTicks;
+            return true;
+        }
+
+        @Override
+        public boolean holdingCursor() {
+            return StashSorter.this.holdingCursor();
+        }
+
+        @Override
+        public int stowCursor() {
+            Container c = furnaceWindow();
+            Item held = Item.of(mouseStack());
+            if (c == null || held == null) return -1;
+            int into = freeCarrySlot();
+            if (into == -1) {
+                // Only so the stack on the cursor is not lost: any free slot, said
+                into = freeInventoryIndex();
+                if (into != -1) warn("No free carry slot for the stack on the cursor: it goes into inventory slot {} so it isn't lost.", into + 1);
+            }
+            if (into == -1) return -1;
+            if (submit(new ClickItem(c.getContainerId(), toWindow(into, c), ClickItemAction.LEFT_CLICK)) == RequestFuture.rejected) return -1;
+            stashHeld.put(into, held.id);
+            CraftRun r = craft;
+            if (r != null) r.owned.add(into);
+            wait = CONFIG.delayTicks;
+            return into;
+        }
+
+        @Override
+        public int take(int slot) {
+            Container c = furnaceWindow();
+            if (c == null || holdingCursor()) return -1;
+            Item what = Item.of(c.getItemStack(slot));
+            if (what == null) return -1;
+            int into = fitSlot(what, what.count);
+            if (into == -1) return -1;
+            int windowId = c.getContainerId();
+            RequestFuture f = submit(new ClickItem(windowId, slot, ClickItemAction.LEFT_CLICK), new ClickItem(windowId, toWindow(into, c), ClickItemAction.LEFT_CLICK));
+            if (f == RequestFuture.rejected) return -1;
+            stashHeld.put(into, what.id);
+            CraftRun r = craft;
+            if (r != null) {
+                r.owned.add(into);
+                if (slot == FurnaceTrip.OUTPUT && r.oc != null && what.id.equals(r.oc.id())) r.oc.resultSlots.add(into);
+            }
+            actions++;
+            wait = CONFIG.delayTicks;
+            return into;
+        }
+
+        @Override
+        public boolean close() {
+            if (openContainerId() == 0 || !ownsWindow()) return true;
+            closeSafely();
+            return false;
+        }
+
+        @Override
+        public double xp() {
+            return xpPoints();
+        }
+    };
     // ------------------------------------------------------------------------------------------------------------------
     // Delivery storage (1.9.0): the delivery container and the double chests put up above it (DeliveryBook keeps which are full).
     // With "auto expand" on, when every chest is full another double chest is taken from the stash (or crafted, when crafting is on)
@@ -17445,7 +18345,17 @@ public class StashSorter extends AbstractFieldModule {
 
         @Override
         public Set<String> craftCan() {
-            return Set.copyOf(ManagerIndex.craftCan());
+            return Set.copyOf(ManagerIndex.craftCan(com.porter.qwertestash.manager.Extras.current(), CONFIG.craftSmelt));
+        }
+
+        @Override
+        public @Nullable Smelting craftSmelting() {
+            return CONFIG.craftSmelt ? Smelting.of(com.porter.qwertestash.manager.Extras.current()) : null;
+        }
+
+        @Override
+        public int craftMaxSmelt() {
+            return craftSmelting() == null ? 0 : ManagerIndex.clampMaxSmelt(CONFIG.craftOrderMaxSmelt);
         }
 
         /** The stash as the index counts it, complete kits' contents left out (CRAFT-CONTRACT-v1.2.md 11.2). Tick thread, at planning. */

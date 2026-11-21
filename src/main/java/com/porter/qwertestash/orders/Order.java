@@ -132,8 +132,15 @@ public final class Order {
     public record Qty(String id, int count) {
     }
 
-    /** One recipe made {@code fills} times, as the server planned it: what it makes per fill ({@code count}) and what goes in, by id. */
-    public record CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs) {
+    /**
+     * One recipe made {@code fills} times, as the server planned it: what it makes per fill ({@code count}) and what goes in, by id. A furnace step
+     * ({@code station: "furnace"}, B2) names an extras smelt recipe; its {@code fills} are the items smelted and {@code fuel} what burns for them.
+     */
+    public record CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs, boolean furnace, List<Qty> fuel) {
+        /** A step at the crafting table (CRAFT-CONTRACT-v1.2.md 9: no {@code station} means {@code table}). */
+        public CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs) {
+            this(recipe, result, count, fills, inputs, false, List.of());
+        }
     }
 
     /**
@@ -142,7 +149,13 @@ public final class Order {
      * craft line is then short ({@code recipe_mismatch}).
      */
     public record Craft(int v, String mc, String recipes, List<Qty> lines, List<CraftStep> steps, List<Qty> take, List<Qty> leftovers, int fills, boolean malformed,
-                        List<Qty> forEnchant, int maxDepth, @Nullable String extras, List<String> needs, @Nullable String reserved) {
+                        List<Qty> forEnchant, int maxDepth, @Nullable String extras, List<String> needs, @Nullable String reserved, int smelt) {
+        /** A v2 block of milestone B1: no items smelted. */
+        public Craft(int v, String mc, String recipes, List<Qty> lines, List<CraftStep> steps, List<Qty> take, List<Qty> leftovers, int fills, boolean malformed,
+                     List<Qty> forEnchant, int maxDepth, @Nullable String extras, List<String> needs, @Nullable String reserved) {
+            this(v, mc, recipes, lines, steps, take, leftovers, fills, malformed, forEnchant, maxDepth, extras, needs, reserved, 0);
+        }
+
         /**
          * A v1 block, with bases for enchant plans. {@code maxDepth} is 0 (a v1 block has none: the planner's own 4 levels), no extras, no needs and
          * nothing reserved.
@@ -161,11 +174,24 @@ public final class Order {
             return new Craft(0, "", "", List.of(), List.of(), List.of(), List.of(), 0, true);
         }
 
-        /** Grid fills of all the steps. */
+        /** Grid fills of all the steps at the crafting table (a furnace step's fills are items: {@link #smeltItems}). */
         public long stepFills() {
             long n = 0;
-            for (CraftStep s : steps) n += s.fills();
+            for (CraftStep s : steps) if (!s.furnace()) n += s.fills();
             return n;
+        }
+
+        /** Items the furnace steps smelt in all. */
+        public long smeltItems() {
+            long n = 0;
+            for (CraftStep s : steps) if (s.furnace()) n += s.fills();
+            return n;
+        }
+
+        /** The block has a furnace step (it needs the {@code smelt} feature). */
+        public boolean hasFurnace() {
+            for (CraftStep s : steps) if (s.furnace()) return true;
+            return false;
         }
     }
 
@@ -363,13 +389,27 @@ public final class Order {
             if (sa.size() > MAX_CRAFT_STEPS) return Craft.unreadable();
             for (JsonElement s : sa) {
                 JsonObject so = s.getAsJsonObject();
+                // B2: station "furnace" and fuel (a v2 block only; a v1 block carries neither, and an unknown station is unreadable)
+                boolean furnace = false;
+                List<Qty> fuel = List.of();
+                if (v == 2) {
+                    JsonElement st = so.get("station");
+                    if (st != null && !st.isJsonNull()) {
+                        if (!st.isJsonPrimitive() || !st.getAsJsonPrimitive().isString()) return Craft.unreadable();
+                        String station = st.getAsString();
+                        if (station.equals("furnace")) furnace = true;
+                        else if (!station.equals("table")) return Craft.unreadable();
+                    }
+                    JsonElement fu = so.get("fuel");
+                    if (fu != null && !fu.isJsonNull()) fuel = qtys(fu, "id", 8);
+                }
                 steps.add(new CraftStep(so.get("recipe").getAsString(), so.get("result").getAsString(), so.get("count").getAsInt(), so.get("fills").getAsInt(),
-                    qtys(so.get("inputs"), "id", 64)));
+                    qtys(so.get("inputs"), "id", 64), furnace, fuel));
             }
             int fills = c.get("fills").getAsInt();
             // v 2 (CRAFT-CONTRACT-v1.2.md 9): the depth, the extras hash and the features the plan needs are required; anything this bot does not carry out (a
             // furnace step, a spec, a grid, a remainder, ...) is noted in `reserved` and makes the block fail its check with recipe_mismatch
-            int maxDepth = 0;
+            int maxDepth = 0, smelt = 0;
             String extras = null, reserved = null;
             List<String> needs = List.of();
             if (v == 2) {
@@ -390,6 +430,14 @@ public final class Order {
                     needs.add(n.getAsString());
                 }
                 reserved = reservedField(c);
+                // B2: the items the furnace steps smelt in all (absent or null is 0); a negative or non-numeric value is unreadable
+                JsonElement sm = c.get("smelt");
+                if (sm != null && !sm.isJsonNull()) {
+                    if (!sm.isJsonPrimitive() || !sm.getAsJsonPrimitive().isNumber()) return Craft.unreadable();
+                    long n = sm.getAsLong();
+                    if (n < 0 || n > 1_000_000) return Craft.unreadable();
+                    smelt = (int) n;
+                }
             }
             // ENCHANT-CONTRACT draft 3.4: how many of each craft line are bases for enchant plans. Optional; there but wrong makes the whole block unreadable
             List<Qty> forEnchant = List.of();
@@ -403,7 +451,7 @@ public final class Order {
                 }
                 if (total > EnchantOrder.MAX_ITEMS) return Craft.unreadable();
             }
-            return new Craft(v, mc, recipes, lines, steps, take, leftovers, fills, false, forEnchant, maxDepth, extras, needs, reserved);
+            return new Craft(v, mc, recipes, lines, steps, take, leftovers, fills, false, forEnchant, maxDepth, extras, needs, reserved, smelt);
         } catch (RuntimeException ex) {
             return Craft.unreadable();
         }
@@ -415,8 +463,6 @@ public final class Order {
      * {@code key} on an input or a take entry. B4: a {@code remainder}. A field that is absent, null or (for a list) empty is not there.
      */
     static @Nullable String reservedField(JsonObject c) {
-        JsonElement smelt = c.get("smelt");
-        if (smelt != null && smelt.isJsonPrimitive() && (!smelt.getAsJsonPrimitive().isNumber() || smelt.getAsLong() != 0)) return "smelt";
         for (JsonElement l : arrayOf(c, "lines")) if (set(l, "spec")) return "lines[].spec";
         for (JsonElement t : arrayOf(c, "take")) {
             if (set(t, "key")) return "take[].key";
@@ -424,8 +470,8 @@ public final class Order {
         }
         for (JsonElement l : arrayOf(c, "leftovers")) if (set(l, "spec")) return "leftovers[].spec";
         for (JsonElement s : arrayOf(c, "steps")) {
-            if (set(s, "station") && !"table".equals(field(s, "station").getAsString())) return "steps[].station";
-            for (String name : new String[] {"fuel", "spec", "grid", "remainder"}) if (set(s, name)) return "steps[]." + name;
+            // B2 carries out "furnace" stations, fuel and smelt counts; a station that is neither is refused (parseCraft makes such a block unreadable)
+            for (String name : new String[] {"spec", "grid", "remainder"}) if (set(s, name)) return "steps[]." + name;
             for (JsonElement in : arrayOf(s.getAsJsonObject(), "inputs")) {
                 if (set(in, "spec")) return "inputs[].spec";
                 if (set(in, "key")) return "inputs[].key";

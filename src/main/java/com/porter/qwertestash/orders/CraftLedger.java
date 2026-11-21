@@ -46,6 +46,16 @@ public final class CraftLedger {
     private final Map<String, Long> lost = new LinkedHashMap<>(), savedSurplus = new LinkedHashMap<>();
     private long fills;
     private final int maxFills;
+    /** Smelting (B2): the bot's smelt and fuel tables for a block with furnace steps (null for any other), the most items it smelts for the order, and what it did. */
+    private @Nullable Smelting smelting;
+    private int maxSmelt;
+    private boolean hasFurnace;
+    /** Per out item: how many the block's furnace steps make, and how many were taken out of the furnace (the report's {@code smelted}). */
+    private final Map<String, Long> smeltWanted = new LinkedHashMap<>(), smeltMade = new LinkedHashMap<>();
+    /** How the furnace came to be used ({@code found}, {@code placed}, {@code crafted}), or null when none was used. */
+    private @Nullable String furnaceSource;
+    /** What the bot has put into the furnace and taken out of it during the chunk under way (CRAFT-CONTRACT-v1.2.md 14): saved with the ledger. */
+    private final SmeltJournal journal = new SmeltJournal();
 
     /**
      * @param table     the bot's recipe table, pinned for the order
@@ -71,6 +81,64 @@ public final class CraftLedger {
         for (Order.Line l : craftLines) wanted.merge(l.key(), (long) l.count(), Long::sum);
         for (Order.Qty q : craft.forEnchant()) if (q.count() > 0) forEnchant.merge(q.id(), (long) q.count(), Long::sum);
         this.plannedFills = (int) Math.min(Integer.MAX_VALUE, craft.stepFills());
+        this.hasFurnace = craft.hasFurnace();
+        for (Order.CraftStep s : craft.steps()) if (s.furnace()) smeltWanted.merge(Recipes.ns(s.result()), (long) s.fills() * s.count(), Long::sum);
+    }
+
+    /**
+     * The smelting this order's sub-plans use (B2): the bot's smelt and fuel tables, and the most items it smelts for the order (what its heartbeat says).
+     * Set when the order starts, before any plan.
+     */
+    public void useSmelting(@Nullable Smelting smelting, int maxSmelt) {
+        this.smelting = smelting;
+        this.maxSmelt = Math.max(0, maxSmelt);
+    }
+
+    public @Nullable Smelting smelting() {
+        return smelting;
+    }
+
+    /** The block has furnace steps: the report carries {@code smelted} and {@code furnace}. */
+    public boolean hasFurnace() {
+        return hasFurnace;
+    }
+
+    public SmeltJournal journal() {
+        return journal;
+    }
+
+    /** How many more items the order may smelt (the cap of CRAFT-CONTRACT-v1.2.md 14, less what was taken out of the furnace so far). */
+    public long smeltLeft() {
+        return Math.max(0, Math.min(Smelting.MAX_SMELT, maxSmelt) - smeltedTotal());
+    }
+
+    public long smeltedTotal() {
+        long n = 0;
+        for (long c : smeltMade.values()) n += c;
+        return n;
+    }
+
+    /** Items were taken out of the furnace's output: counted in the report's {@code smelted}. */
+    public void addSmelted(Map<String, Long> out) {
+        for (var e : out.entrySet()) if (e.getValue() != null && e.getValue() > 0) smeltMade.merge(Recipes.ns(e.getKey()), e.getValue(), Long::sum);
+    }
+
+    public long smeltMade(String id) {
+        return smeltMade.getOrDefault(Recipes.ns(id), 0L);
+    }
+
+    /** The furnace the order used came to be this way: {@code found}, {@code placed} or {@code crafted} (the first one used is the one reported). */
+    public void setFurnaceSource(@Nullable String source) {
+        if (furnaceSource == null && source != null) furnaceSource = source;
+    }
+
+    public @Nullable String furnaceSource() {
+        return furnaceSource;
+    }
+
+    /** What was put into the furnace and did not come back out is charged to the budget (a run that was cut short, see {@link SmeltJournal#settle}). */
+    public void charge(Map<String, Long> fromStock) {
+        madeChunk("", 0, 0, fromStock);
     }
 
     /** A ledger for an order whose craft block could not be used: every craft line is short with this reason. */
@@ -163,7 +231,7 @@ public final class CraftLedger {
 
     /** A new sub-plan session from the budget left and the surplus carried. */
     public CraftSub.Session session() {
-        return new CraftSub.Session(table, allowed, take, budget, surplus, limits);
+        return new CraftSub.Session(table, allowed, take, budget, surplus, limits, smelting);
     }
 
     /** Where the key's craft line comes in the order (0 first): the server plans the lines in this order, so the bot crafts them in it. */
@@ -321,6 +389,25 @@ public final class CraftLedger {
         o.add("used", qtys(used));
         o.add("returned", qtys(returned));
         if (PREFLIGHT_SHORT.equals(preflight)) o.add("restock", restock);
+        // B2 (CRAFT-CONTRACT-v1.2.md 12): what the furnace steps were to make and what came out, and how the furnace was had (no position); only for a block with furnace steps
+        if (hasFurnace) {
+            JsonArray sm = new JsonArray();
+            for (var e : smeltWanted.entrySet()) {
+                if (sm.size() >= MAX_ENTRIES) break;
+                JsonObject x = new JsonObject();
+                x.addProperty("id", cut(e.getKey()));
+                x.addProperty("wanted", e.getValue());
+                x.addProperty("made", smeltMade.getOrDefault(e.getKey(), 0L));
+                sm.add(x);
+            }
+            o.add("smelted", sm);
+            if (furnaceSource == null) o.add("furnace", com.google.gson.JsonNull.INSTANCE);
+            else {
+                JsonObject f = new JsonObject();
+                f.addProperty("source", furnaceSource);
+                o.add("furnace", f);
+            }
+        }
         return o;
     }
 
@@ -354,6 +441,11 @@ public final class CraftLedger {
         for (var e : shortReason.entrySet()) r.addProperty(e.getKey(), e.getValue());
         o.add("reasons", r);
         if (PREFLIGHT_OK.equals(preflight)) o.addProperty("preflight", PREFLIGHT_OK);
+        if (hasFurnace) {
+            o.add("smeltMade", map(smeltMade));
+            if (furnaceSource != null) o.addProperty("furnace", furnaceSource);
+            if (journal.isOpen()) o.add("smelt", journal.toJson());
+        }
         return o;
     }
 
@@ -390,6 +482,20 @@ public final class CraftLedger {
             shortReason.clear();
             shortReason.putAll(reasons);
             if (o.has("preflight") && o.get("preflight").isJsonPrimitive() && PREFLIGHT_OK.equals(o.get("preflight").getAsString())) preflight = PREFLIGHT_OK;
+            // The smelting (B2): what came out of the furnace, how it was had, and the journal of a run that was cut short
+            smeltMade.clear();
+            if (o.has("smeltMade") && o.get("smeltMade").isJsonObject()) smeltMade.putAll(read(o.getAsJsonObject("smeltMade")));
+            if (o.has("furnace") && o.get("furnace").isJsonPrimitive()) furnaceSource = o.get("furnace").getAsString();
+            journal.close();
+            if (o.has("smelt")) {
+                SmeltJournal saved = SmeltJournal.fromJson(o.get("smelt"));
+                if (saved.isOpen()) {
+                    journal.open();
+                    journal.placed().putAll(saved.placed());
+                    journal.produced().putAll(saved.produced());
+                    if (saved.active() != null) journal.loaded(saved.active());
+                }
+            }
         } catch (RuntimeException e) {
             // A broken record is a fresh ledger: the order goes on with its full budget
         }

@@ -187,7 +187,7 @@ class CraftBatchTest {
         assertEquals(CraftOrder.CANCELLED, CraftOrder.reasonOf(CraftTrip.CLOSED, false, true));
         assertEquals(CraftOrder.NO_TABLE, CraftOrder.reasonOf("no crafting table available", false, false));
         assertTrue(CraftOrder.REASONS.contains(CraftOrder.CAP));
-        assertEquals(11, CraftOrder.REASONS.size());
+        assertEquals(15, CraftOrder.REASONS.size());
     }
 
     @Test

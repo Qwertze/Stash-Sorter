@@ -289,6 +289,21 @@ public class StashConfig {
     public int craftOrderMaxFills = 2048;
     /** Grid fills made for craft orders in any one hour. */
     public int craftOrderMaxPerHour = 4096;
+    /** Smelt in craft orders (B2, CRAFT-CONTRACT-v1.2.md 14): the heartbeat says {@code can: ["smelt"]} when this is on and the server's extras hold the smelt and fuel tables. */
+    public boolean craftSmelt = true;
+    /** Items one craft order may smelt (the {@code maxSmelt} the heartbeat says; the contract's cap is 256). */
+    public int craftOrderMaxSmelt = 256;
+    /** The furnace smelting uses (B2): the one found standing in the stash area, or put down from the stash or crafted; never shown on the website. Blank dimension: none. */
+    public String craftFurnaceDimension = "";
+    public int craftFurnaceX, craftFurnaceY, craftFurnaceZ;
+    /** How that furnace came to be: "found", "placed" or "crafted". */
+    public String craftFurnaceSource = "";
+    /** What the bot still owes its furnace (FurnaceDebt, JSON; "" for none): never shown on the website, it holds a position. */
+    public String craftFurnaceDebt = "";
+    /** Furnaces the bot put down or crafted for craft orders (when, milliseconds), and for which order and how many (CraftTableCap's rules: one an order, three an hour). */
+    public List<Long> craftFurnacePlacedAt = new ArrayList<>();
+    public String craftFurnaceOrder = "";
+    public int craftFurnaceOrderCount;
     /** Crafting tables the bot put down for craft orders (when, milliseconds), and for which order and how many (CraftTableCap). */
     public List<Long> craftTablePlacedAt = new ArrayList<>();
     public String craftTableOrder = "";

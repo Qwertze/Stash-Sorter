@@ -93,7 +93,7 @@ public final class CraftSub {
     }
 
     /** One step as planned, before the steps are merged. */
-    private record Raw(Recipes.Recipe recipe, int fills, Map<String, Long> uses) {
+    private record Raw(Recipes.Recipe recipe, int fills, Map<String, Long> uses, @Nullable Map<String, Long> fuel) {
     }
 
     /** x was crafted using y. */
@@ -118,6 +118,7 @@ public final class CraftSub {
         final Recipes table;
         final Set<String> allowed;
         final Limits limits;
+        final @Nullable Smelting smelting;
         Map<String, Long> pool, surplus, taken = new LinkedHashMap<>();
         final List<Raw> steps = new ArrayList<>();
         Set<Lock> locks = new HashSet<>();
@@ -137,15 +138,25 @@ public final class CraftSub {
 
         /** As above, planned with the limits of a v1 or a v2 craft block. */
         public Session(Recipes table, @Nullable Set<String> allowed, Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus, Limits limits) {
+            this(table, allowed, estPool, pool, surplus, limits, null);
+        }
+
+        /**
+         * As above, with the smelting of the extras (B2): the smelt recipes among {@code allowed} are used like any other recipe, and each smelt step
+         * also burns fuel (of one kind per step, see {@link #fuelFor}).
+         */
+        public Session(Recipes table, @Nullable Set<String> allowed, Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus, Limits limits,
+                       @Nullable Smelting smelting) {
             this.limits = limits;
             this.table = table;
             this.allowed = allowed;
+            this.smelting = smelting;
             this.pool = positive(pool);
             this.surplus = positive(surplus);
             // The recipes that make each item, among the ones allowed
             if (allowed != null) {
                 for (String id : allowed) {
-                    Recipes.Recipe r = table.byId(id);
+                    Recipes.Recipe r = recipeById(id);
                     if (r == null) continue;
                     making.computeIfAbsent(r.result(), k -> new ArrayList<>()).add(r);
                 }
@@ -158,6 +169,18 @@ public final class CraftSub {
             Map<String, Long> out = new HashMap<>();
             for (var e : m.entrySet()) if (e.getValue() != null && e.getValue() > 0) out.merge(Recipes.ns(e.getKey()), e.getValue(), Long::sum);
             return out;
+        }
+
+        /** A recipe of the table, or a smelt recipe of the extras, by id. */
+        Recipes.@Nullable Recipe recipeById(String id) {
+            Recipes.Recipe r = table.byId(id);
+            if (r == null && smelting != null) r = smelting.asRecipe(id);
+            return r;
+        }
+
+        /** The recipe is a furnace recipe. */
+        boolean smelts(Recipes.Recipe r) {
+            return smelting != null && smelting.isSmelt(r);
         }
 
         List<Recipes.Recipe> recipesFor(String id) {
@@ -177,7 +200,7 @@ public final class CraftSub {
                 for (Recipes.Recipe r : table.all()) if (eligible(r)) all.add(r);
             }
             else for (String id : allowed) {
-                Recipes.Recipe r = table.byId(id);
+                Recipes.Recipe r = recipeById(id);
                 if (r != null) all.add(r);
             }
             for (int round = 0; round < limits.rounds(); round++) {
@@ -199,6 +222,12 @@ public final class CraftSub {
                 for (String alt : usable(cell, r)) best = Math.min(best, estOf(alt));
                 sum += best;
                 if (Double.isInfinite(sum)) return Double.POSITIVE_INFINITY;
+            }
+            // A smelt needs some fuel the order holds or can make: with none it can't be made (the fuel's own cost is a few percent of an item's, left out)
+            if (smelts(r)) {
+                boolean fuel = false;
+                for (String f : smelting.fuelIds()) if (!f.equals(r.result()) && !Double.isInfinite(estOf(f))) fuel = true;
+                if (!fuel) return Double.POSITIVE_INFINITY;
             }
             return sum / Math.max(1, r.count());
         }
@@ -267,8 +296,8 @@ public final class CraftSub {
             Map<String, Long> fromPool = taken;
             taken = merged(takenBefore, fromPool);
             List<CraftPlanner.Step> merged = merge(mine);
-            int fills = 0;
-            for (CraftPlanner.Step s : merged) fills += s.fills();
+            // Grid fills only: a furnace step's fills are items smelted (CraftPlanner.smeltItems)
+            int fills = CraftPlanner.gridFills(merged);
             return new Outcome(new CraftPlanner.Plan(target, count, Collections.unmodifiableList(merged), fromPool, fills, null), new HashMap<>(surplus));
         }
 
@@ -413,11 +442,73 @@ public final class CraftSub {
                     return "not enough " + name + " (" + left + " short)";
                 }
             }
-            steps.add(new Raw(r, fills, uses));
+            // A smelt is one step per input kind and batch of at most 64 items (CRAFT-CONTRACT-v1.2.md, B2 review), each with the fuel of its own
+            // (one kind, arithmetic per step); a table recipe is one step with no fuel
+            if (smelts(r)) {
+                for (var in : uses.entrySet()) {
+                    long left = in.getValue();
+                    while (left > 0) {
+                        int n = (int) Math.min(left, Smelting.MAX_BATCH);
+                        Map<String, Long> fuel = new LinkedHashMap<>();
+                        String why = fuelFor(id, n, depth, below, fuel);
+                        if (why != null) return why;
+                        Map<String, Long> one = new LinkedHashMap<>();
+                        one.put(in.getKey(), (long) n);
+                        steps.add(new Raw(r, n, one, fuel));
+                        left -= n;
+                    }
+                }
+            }
+            else steps.add(new Raw(r, fills, uses, null));
             long extra = (long) fills * r.count() - qty;
             if (extra > 0) surplus.merge(id, extra, Long::sum);
             for (String alt : craftedAlts) locks.add(new Lock(id, alt));
             return null;
+        }
+
+        /**
+         * The fuel of a smelt of {@code fills} items of {@code id} (CRAFT-CONTRACT-v1.2.md 14): one kind, {@code ceil(batch * cook / ticks)} per batch of at
+         * most 64 items. The kind is the most plentiful (surplus + pool) of the fuels the order holds or can make, then by id; one that has to be made
+         * (charcoal from logs, an earlier step of the same plan) is tried after the ones in stock. Not a fuel that is the item itself, is on the path (a
+         * loop) or that was made using this item. @return null when it is found (recorded in {@code out}), else why not
+         */
+        private @Nullable String fuelFor(String id, int fills, int depth, List<String> below, Map<String, Long> out) {
+            List<String> kinds = new ArrayList<>();
+            for (String f : smelting.fuelIds()) {
+                if (f.equals(id) || below.contains(f) || locks.contains(new Lock(f, id))) continue;
+                if (inS(f) + inP(f) <= 0 && Double.isInfinite(estOf(f))) continue;
+                kinds.add(f);
+            }
+            // The coal class first, then wood and the like; of each, what covers the batch (surplus + pool) before what has to be made (charcoal from logs
+            // last); the most plentiful first, then by id (CRAFT-CONTRACT-v1.2.md, B2 review)
+            kinds.sort((a, b) -> {
+                boolean ca = inS(a) + inP(a) >= smelting.batchFuel(a, fills), cb = inS(b) + inP(b) >= smelting.batchFuel(b, fills);
+                if (ca != cb) return ca ? -1 : 1;
+                if (ca) {
+                    int t = Integer.compare(Smelting.fuelTier(a), Smelting.fuelTier(b));
+                    if (t != 0) return t;
+                }
+                int c = Long.compare(inS(b) + inP(b), inS(a) + inP(a));
+                return c != 0 ? c : a.compareTo(b);
+            });
+            String first = null;
+            for (String f : kinds) {
+                long k = smelting.batchFuel(f, fills);
+                // A fuel whose need for one batch is more than its stack is not used (it would not fit the fuel slot)
+                if (k <= 0 || k > smelting.fuelStack(f)) continue;
+                boolean made = inS(f) + inP(f) < k;
+                Snap before = new Snap(this);
+                String why = need(f, k, depth + 1, below);
+                if (why == null) {
+                    out.merge(f, k, Long::sum);
+                    if (made) locks.add(new Lock(id, f));
+                    return null;
+                }
+                restore(before);
+                if (first == null) first = why;
+                if (nodes > limits.maxNodes()) return TOO_LARGE;
+            }
+            return first != null ? first : "no fuel to smelt " + Recipes.pretty(id) + " with";
         }
 
         /** The largest k at most {@code want} for which need(alt, k) succeeds, each try from the state as it is (found by a binary search). */
@@ -454,38 +545,51 @@ public final class CraftSub {
      * pool or surplus, else 1 + the highest height among the steps making its inputs), then by first appearance.
      */
     static List<CraftPlanner.Step> merge(List<Raw> raws) {
-        Map<String, Raw> byRecipe = new LinkedHashMap<>();
+        // Table steps are merged per recipe; furnace steps never are (CRAFT-CONTRACT-v1.2.md, B2 review): each is one batch of one input kind with its own fuel
+        Map<String, Raw> byKey = new LinkedHashMap<>();
+        int furnaceSteps = 0;
         for (Raw r : raws) {
-            Raw old = byRecipe.get(r.recipe().id());
-            if (old == null) byRecipe.put(r.recipe().id(), new Raw(r.recipe(), r.fills(), new LinkedHashMap<>(r.uses())));
+            if (r.fuel() != null) {
+                byKey.put(r.recipe().id() + "#" + furnaceSteps++, r);
+                continue;
+            }
+            Raw old = byKey.get(r.recipe().id());
+            if (old == null) byKey.put(r.recipe().id(), new Raw(r.recipe(), r.fills(), new LinkedHashMap<>(r.uses()), null));
             else {
                 Map<String, Long> uses = new LinkedHashMap<>(old.uses());
                 for (var e : r.uses().entrySet()) uses.merge(e.getKey(), e.getValue(), Long::sum);
-                byRecipe.put(r.recipe().id(), new Raw(old.recipe(), old.fills() + r.fills(), uses));
+                byKey.put(r.recipe().id(), new Raw(old.recipe(), old.fills() + r.fills(), uses, null));
             }
         }
         Map<String, Integer> height = new HashMap<>();
-        Map<String, String> makerOf = new HashMap<>();
-        for (Raw r : byRecipe.values()) makerOf.put(r.recipe().result(), r.recipe().id());
-        for (int pass = 0; pass <= byRecipe.size(); pass++) {
+        Map<String, List<String>> makersOf = new HashMap<>();
+        for (var e : byKey.entrySet()) makersOf.computeIfAbsent(e.getValue().recipe().result(), k -> new ArrayList<>()).add(e.getKey());
+        for (int pass = 0; pass <= byKey.size(); pass++) {
             boolean changed = false;
-            for (Raw r : byRecipe.values()) {
+            for (var e : byKey.entrySet()) {
+                Raw r = e.getValue();
                 int h = 0;
-                for (String in : r.uses().keySet()) {
-                    String maker = makerOf.get(in);
-                    if (maker != null && !maker.equals(r.recipe().id())) h = Math.max(h, height.getOrDefault(maker, 0) + 1);
+                List<String> inputs = new ArrayList<>(r.uses().keySet());
+                if (r.fuel() != null) inputs.addAll(r.fuel().keySet());
+                for (String in : inputs) {
+                    for (String maker : makersOf.getOrDefault(in, List.of())) {
+                        if (!maker.equals(e.getKey())) h = Math.max(h, height.getOrDefault(maker, 0) + 1);
+                    }
                 }
-                if (h != height.getOrDefault(r.recipe().id(), -1)) {
-                    height.put(r.recipe().id(), h);
+                if (h != height.getOrDefault(e.getKey(), -1)) {
+                    height.put(e.getKey(), h);
                     changed = true;
                 }
             }
             if (!changed) break;
         }
-        List<Raw> order = new ArrayList<>(byRecipe.values());
-        order.sort((a, b) -> Integer.compare(height.getOrDefault(a.recipe().id(), 0), height.getOrDefault(b.recipe().id(), 0)));
+        List<Map.Entry<String, Raw>> order = new ArrayList<>(byKey.entrySet());
+        order.sort((a, b) -> Integer.compare(height.getOrDefault(a.getKey(), 0), height.getOrDefault(b.getKey(), 0)));
         List<CraftPlanner.Step> out = new ArrayList<>();
-        for (Raw r : order) out.add(new CraftPlanner.Step(r.recipe(), r.fills(), height.getOrDefault(r.recipe().id(), 0), r.uses()));
+        for (var e : order) {
+            Raw r = e.getValue();
+            out.add(new CraftPlanner.Step(r.recipe(), r.fills(), height.getOrDefault(e.getKey(), 0), r.uses(), r.fuel()));
+        }
         return out;
     }
 }

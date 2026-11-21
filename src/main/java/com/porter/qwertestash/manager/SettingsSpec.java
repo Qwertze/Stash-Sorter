@@ -200,6 +200,8 @@ public final class SettingsSpec {
         add("craftOrders", "Craft orders", crafting, "Take orders with craft lines: items the stash can make from what it holds, crafted at the crafting table set for this stash on the website. Needs crafting on and a recipe table fetched from the server.").cmd("craftorders {v}");
         add("craftOrderMaxFills", "Most grid fills per craft order", crafting, "Grid fills one craft order may make. Sent to the server, which refuses bigger orders for this bot.").range(1, 100000).whole().cmd("craftorders maxfills {v}");
         add("craftOrderMaxPerHour", "Most craft order fills per hour", crafting, "Grid fills made for craft orders in any one hour.").range(0, 100000).whole().cmd("craftorders maxperhour {v}");
+        add("craftSmelt", "Smelt in craft orders", crafting, "Smelt items in a furnace for craft orders (glass, charcoal, ingots, ...) when the server's extras hold the smelting tables. Needs craft orders on.").cmd("craftorders smelt {v}");
+        add("craftOrderMaxSmelt", "Most items smelted per craft order", crafting, "Items one craft order may smelt (at most 256). Sent to the server.").range(1, 256).whole().cmd("craftorders maxsmelt {v}");
         add("craftNeverUse", "Never craft with", crafting, "Item ids never taken from the stash to craft with, like diamond_block.").pattern("[a-z0-9_]{1,64}").length(64);
         // The crafting table is set with `stash craftingtable` and its position is not shown on the website
         add("craftingTableDimension", "Crafting table dimension", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
@@ -207,6 +209,13 @@ public final class SettingsSpec {
         add("craftingTableY", "Crafting table Y", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
         add("craftingTableZ", "Crafting table Z", crafting, "Set with `stash craftingtable`.").locked("set with `stash craftingtable`").hidden = true;
         add("craftingTableSource", "Crafting table source", crafting, "Set with `stash craftingtable`, or found, placed or crafted by the bot.").locked("set with `stash craftingtable`, or found, placed or crafted by the bot").hidden = true;
+        // The furnace smelting uses is found, put down or crafted by the bot; its position is not shown on the website
+        add("craftFurnaceDimension", "Furnace dimension", crafting, "Found, put down or crafted by the bot.").locked("found, put down or crafted by the bot").hidden = true;
+        add("craftFurnaceX", "Furnace X", crafting, "Found, put down or crafted by the bot.").locked("found, put down or crafted by the bot").hidden = true;
+        add("craftFurnaceY", "Furnace Y", crafting, "Found, put down or crafted by the bot.").locked("found, put down or crafted by the bot").hidden = true;
+        add("craftFurnaceZ", "Furnace Z", crafting, "Found, put down or crafted by the bot.").locked("found, put down or crafted by the bot").hidden = true;
+        add("craftFurnaceDebt", "Furnace items owed", crafting, "What the bot put in its furnace and has not taken out yet.").locked("kept by the bot").hidden = true;
+        add("craftFurnaceSource", "Furnace source", crafting, "Found, put down or crafted by the bot.").locked("found, put down or crafted by the bot").hidden = true;
 
         String manager = "Stash Manager";
         add("manager", "Stash Manager", manager, "Send the stash index to the Stash Manager server and answer its rescans.").cmd("manager {v}");

@@ -87,9 +87,19 @@ public final class OrderFlow {
             return null;
         }
 
-        /** The features beyond B1 this bot does ({@code craftOrders.can} of the heartbeat); empty in B1. A v2 block's {@code needs} must be within it. */
+        /** The features beyond B1 this bot does ({@code craftOrders.can} of the heartbeat); B2: {@code smelt}. A v2 block's {@code needs} must be within it. */
         default java.util.Set<String> craftCan() {
             return java.util.Set.of();
+        }
+
+        /** The smelt and fuel tables of the extras this bot holds (B2), or null: furnace steps of a block are then refused. */
+        default @Nullable Smelting craftSmelting() {
+            return null;
+        }
+
+        /** The most items one craft order may smelt ({@code craftOrders.maxSmelt} of the heartbeat, B2), 0 when this bot doesn't smelt. */
+        default int craftMaxSmelt() {
+            return 0;
         }
 
         /**
@@ -998,12 +1008,15 @@ public final class OrderFlow {
             host.say("This order has craft lines but this bot has no recipe table or craft orders are off: they are not crafted.");
             return CraftLedger.refused(lines, Recipes.empty(), 0, CraftOrder.RECIPE_MISMATCH);
         }
-        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan());
+        Smelting smelting = host.craftSmelting();
+        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan(), smelting, host.craftMaxSmelt());
         if (bad != null) {
             host.say("The order's craft lines are not crafted: " + bad + ".");
             return CraftLedger.refused(lines, table, host.craftMaxFills(), CraftOrder.RECIPE_MISMATCH);
         }
-        return new CraftLedger(o.craft, lines, table, host.craftMaxFills());
+        CraftLedger ledger = new CraftLedger(o.craft, lines, table, host.craftMaxFills());
+        ledger.useSmelting(smelting, host.craftMaxSmelt());
+        return ledger;
     }
 
     /**
