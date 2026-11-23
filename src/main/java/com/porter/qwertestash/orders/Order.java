@@ -30,9 +30,21 @@ public final class Order {
      * One line: {@code type} is "item" (key is an items[] key), "shulker" (key is a shulkers[] group key) or "craft" (1.15.0: key is a
      * plain item id the stash can make; the order's {@link Craft} block has the plan).
      */
-    public record Line(String type, String key, int count, boolean repair) {
+    public record Line(String type, String key, int count, boolean repair, @Nullable String spec) {
+        public Line(String type, String key, int count, boolean repair) {
+            this(type, key, count, repair, null);
+        }
+
         public Line(String type, String key, int count) {
-            this(type, key, count, false);
+            this(type, key, count, false, null);
+        }
+
+        /**
+         * What the line is called in the craft ledger and in a craft load: the key, or for a craft line with a spec (B3, a rocket or star variant) the
+         * pseudo id {@code <key>@<spec>} ({@link Pseudo}).
+         */
+        public String ref() {
+            return Pseudo.of(key, spec);
         }
     }
 
@@ -126,20 +138,61 @@ public final class Order {
         public Lot made() {
             return new Lot(key, variant, count, CRAFTED);
         }
+
+        /**
+         * The same load, made, under the index key of the stack that was made (B3: a load of a rocket or star spec is planned under its pseudo id; what is made
+         * has the key of its own components, which is what the bin and the delivery know it by). A null key leaves it as it was.
+         */
+        public Lot madeAs(@Nullable String madeKey) {
+            return new Lot(madeKey == null ? key : madeKey, variant, count, CRAFTED);
+        }
     }
 
-    /** An item id and a count: a craft block's lines, inputs, take and leftovers. */
-    public record Qty(String id, int count) {
+    /**
+     * An item id and a count: a craft block's lines, inputs, take and leftovers. B3 (CRAFT-CONTRACT-v1.2.md 9): {@code spec} names a variant of the item
+     * (a rocket or star) and {@code key} the index key it is taken by (a {@code take} entry's key; an input's key only when one key carries the spec).
+     */
+    public record Qty(String id, int count, @Nullable String key, @Nullable String spec) {
+        public Qty(String id, int count) {
+            this(id, count, null, null);
+        }
+
+        /** The planner's name for it: the id, or the pseudo id of its spec. */
+        public String ref() {
+            return Pseudo.of(id, spec);
+        }
+    }
+
+    /** One cell of a special step's grid (B3): an item id and, for a star, its spec. */
+    public record Cell(String id, @Nullable String spec) {
+        public String ref() {
+            return Pseudo.of(id, spec);
+        }
     }
 
     /**
      * One recipe made {@code fills} times, as the server planned it: what it makes per fill ({@code count}) and what goes in, by id. A furnace step
      * ({@code station: "furnace"}, B2) names an extras smelt recipe; its {@code fills} are the items smelted and {@code fuel} what burns for them.
      */
-    public record CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs, boolean furnace, List<Qty> fuel) {
+    public record CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs, boolean furnace, List<Qty> fuel, @Nullable String spec,
+                            @Nullable List<@Nullable Cell> grid) {
         /** A step at the crafting table (CRAFT-CONTRACT-v1.2.md 9: no {@code station} means {@code table}). */
         public CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs) {
-            this(recipe, result, count, fills, inputs, false, List.of());
+            this(recipe, result, count, fills, inputs, false, List.of(), null, null);
+        }
+
+        public CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs, boolean furnace, List<Qty> fuel) {
+            this(recipe, result, count, fills, inputs, furnace, fuel, null, null);
+        }
+
+        /** A special step (B3): it makes a variant of {@code result}, from the exact nine-cell {@code grid}. */
+        public boolean special() {
+            return grid != null;
+        }
+
+        /** What the step makes, as the planner names it: the result id, or the pseudo id of its spec. */
+        public String resultRef() {
+            return Pseudo.of(result, spec);
         }
     }
 
@@ -191,6 +244,21 @@ public final class Order {
         /** The block has a furnace step (it needs the {@code smelt} feature). */
         public boolean hasFurnace() {
             for (CraftStep s : steps) if (s.furnace()) return true;
+            return false;
+        }
+
+        /**
+         * The block uses a field of milestone B3 (CRAFT-CONTRACT-v1.2.md 9): a spec on a line, step, input, take or leftover, a take or input key or a grid.
+         * Such a block needs the {@code firework} feature and the bot's own extras.
+         */
+        public boolean usesSpecs() {
+            for (Qty q : lines) if (q.spec() != null) return true;
+            for (Qty q : take) if (q.spec() != null || q.key() != null) return true;
+            for (Qty q : leftovers) if (q.spec() != null) return true;
+            for (CraftStep s : steps) {
+                if (s.spec() != null || s.grid() != null) return true;
+                for (Qty q : s.inputs()) if (q.spec() != null || q.key() != null) return true;
+            }
             return false;
         }
     }
@@ -340,7 +408,10 @@ public final class Order {
                 String type = l.get("type").getAsString();
                 String key = l.get("key").getAsString();
                 int count = l.get("count").getAsInt();
-                if ((type.equals(ITEM) || type.equals(SHULKER) || type.equals(CRAFT) || type.equals(KIT) || type.equals(ENCHANT)) && !key.isEmpty() && count >= 1 && count <= MAX_LINE_COUNT) lines.add(new Line(type, key, count, type.equals(ITEM) && flag(l, "repair")));
+                // B3: a craft line may name a variant of its item (a rocket or star spec); no other line has one
+                JsonElement sp = l.get("spec");
+                String spec = type.equals(CRAFT) && sp != null && sp.isJsonPrimitive() && sp.getAsJsonPrimitive().isString() && !sp.getAsString().isEmpty() ? sp.getAsString() : null;
+                if ((type.equals(ITEM) || type.equals(SHULKER) || type.equals(CRAFT) || type.equals(KIT) || type.equals(ENCHANT)) && !key.isEmpty() && count >= 1 && count <= MAX_LINE_COUNT) lines.add(new Line(type, key, count, type.equals(ITEM) && flag(l, "repair"), spec));
             } catch (RuntimeException ex) {
                 // A broken line is left out and shows up as undelivered
             }
@@ -381,9 +452,9 @@ public final class Order {
             JsonObject c = e.getAsJsonObject();
             int v = c.get("v").getAsInt();
             String mc = c.get("mc").getAsString(), recipes = c.get("recipes").getAsString();
-            List<Qty> lines = qtys(c.get("lines"), "key", 200);
-            List<Qty> take = qtys(c.get("take"), "id", MAX_CRAFT_TAKE);
-            List<Qty> leftovers = qtys(c.get("leftovers"), "id", 4096);
+            List<Qty> lines = qtys(c.get("lines"), "key", 200, v == 2);
+            List<Qty> take = qtys(c.get("take"), "id", MAX_CRAFT_TAKE, v == 2);
+            List<Qty> leftovers = qtys(c.get("leftovers"), "id", 4096, v == 2);
             List<CraftStep> steps = new ArrayList<>();
             JsonArray sa = c.getAsJsonArray("steps");
             if (sa.size() > MAX_CRAFT_STEPS) return Craft.unreadable();
@@ -403,8 +474,15 @@ public final class Order {
                     JsonElement fu = so.get("fuel");
                     if (fu != null && !fu.isJsonNull()) fuel = qtys(fu, "id", 8);
                 }
+                // B3: the variant a special step makes and its exact nine-cell grid (a v2 block only)
+                String stepSpec = null;
+                List<Cell> grid = null;
+                if (v == 2) {
+                    stepSpec = optionalString(so.get("spec"));
+                    grid = grid(so.get("grid"));
+                }
                 steps.add(new CraftStep(so.get("recipe").getAsString(), so.get("result").getAsString(), so.get("count").getAsInt(), so.get("fills").getAsInt(),
-                    qtys(so.get("inputs"), "id", 64), furnace, fuel));
+                    qtys(so.get("inputs"), "id", 64, v == 2), furnace, fuel, stepSpec, grid));
             }
             int fills = c.get("fills").getAsInt();
             // v 2 (CRAFT-CONTRACT-v1.2.md 9): the depth, the extras hash and the features the plan needs are required; anything this bot does not carry out (a
@@ -458,26 +536,45 @@ public final class Order {
     }
 
     /**
-     * The first field of a v2 craft block that is reserved for a later milestone (CRAFT-CONTRACT-v1.2.md 9), as text, or null. B2: a furnace
-     * station, {@code fuel}, a {@code smelt} count above 0. B3: a {@code spec} on a line, step or leftover, a {@code grid}, a {@code spec} or
-     * {@code key} on an input or a take entry. B4: a {@code remainder}. A field that is absent, null or (for a list) empty is not there.
+     * The first field of a v2 craft block that is reserved for a later milestone (CRAFT-CONTRACT-v1.2.md 9), as text, or null. B4: a {@code remainder}.
+     * A field that is absent, null or (for a list) empty is not there. The fields of B2 (furnace stations, {@code fuel}, {@code smelt}) and of B3 (a
+     * {@code spec} on a line, step, input, take or leftover, a {@code grid}, a {@code key} on an input or a take entry) are carried out: they are read
+     * ({@link Craft#usesSpecs}) and judged by {@link CraftOrder#check}, which refuses them for a bot that doesn't say {@code firework}.
      */
     static @Nullable String reservedField(JsonObject c) {
-        for (JsonElement l : arrayOf(c, "lines")) if (set(l, "spec")) return "lines[].spec";
-        for (JsonElement t : arrayOf(c, "take")) {
-            if (set(t, "key")) return "take[].key";
-            if (set(t, "spec")) return "take[].spec";
-        }
-        for (JsonElement l : arrayOf(c, "leftovers")) if (set(l, "spec")) return "leftovers[].spec";
         for (JsonElement s : arrayOf(c, "steps")) {
-            // B2 carries out "furnace" stations, fuel and smelt counts; a station that is neither is refused (parseCraft makes such a block unreadable)
-            for (String name : new String[] {"spec", "grid", "remainder"}) if (set(s, name)) return "steps[]." + name;
-            for (JsonElement in : arrayOf(s.getAsJsonObject(), "inputs")) {
-                if (set(in, "spec")) return "inputs[].spec";
-                if (set(in, "key")) return "inputs[].key";
-            }
+            if (set(s, "remainder")) return "steps[].remainder";
         }
         return null;
+    }
+
+    /** A string field that is there (not null), or null; a value of another type makes the block unreadable. */
+    private static @Nullable String optionalString(@Nullable JsonElement e) {
+        if (e == null || e.isJsonNull()) return null;
+        if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) throw new IllegalArgumentException("not a string");
+        String s = e.getAsString();
+        return s.isEmpty() ? null : s;
+    }
+
+    /**
+     * A special step's grid (B3): null when the field is absent or null, else its cells, each null (empty) or {@code {id, spec?}}. The number of cells is
+     * not judged here ({@link CraftOrder#check} wants nine); a cell that is not null or an object with an id is unreadable.
+     */
+    private static @Nullable List<@Nullable Cell> grid(@Nullable JsonElement e) {
+        if (e == null || e.isJsonNull()) return null;
+        if (!e.isJsonArray() || e.getAsJsonArray().size() > 16) throw new IllegalArgumentException("bad grid");
+        List<Cell> out = new ArrayList<>();
+        for (JsonElement x : e.getAsJsonArray()) {
+            if (x.isJsonNull()) {
+                out.add(null);
+                continue;
+            }
+            JsonObject o = x.getAsJsonObject();
+            JsonElement id = o.get("id");
+            if (id == null || !id.isJsonPrimitive() || !id.getAsJsonPrimitive().isString()) throw new IllegalArgumentException("bad grid cell");
+            out.add(new Cell(id.getAsString(), optionalString(o.get("spec"))));
+        }
+        return java.util.Collections.unmodifiableList(out);
     }
 
     private static List<JsonElement> arrayOf(JsonObject o, String name) {
@@ -502,6 +599,11 @@ public final class Order {
     }
 
     private static List<Qty> qtys(@Nullable JsonElement e, String idName, int max) {
+        return qtys(e, idName, max, false);
+    }
+
+    /** As above; {@code specs}: an entry's optional {@code spec} (and, when the id is not itself called key, {@code key}) is read too (B3, a v2 block only). */
+    private static List<Qty> qtys(@Nullable JsonElement e, String idName, int max, boolean specs) {
         if (e == null || !e.isJsonArray()) throw new IllegalArgumentException("not a list");
         JsonArray a = e.getAsJsonArray();
         if (a.size() > max) throw new IllegalArgumentException("too many");
@@ -510,7 +612,11 @@ public final class Order {
             JsonObject o = x.getAsJsonObject();
             int count = o.get("count").getAsInt();
             if (count < 0) throw new IllegalArgumentException("negative");
-            out.add(new Qty(o.get(idName).getAsString(), count));
+            if (!specs) {
+                out.add(new Qty(o.get(idName).getAsString(), count));
+                continue;
+            }
+            out.add(new Qty(o.get(idName).getAsString(), count, idName.equals("key") ? null : optionalString(o.get("key")), optionalString(o.get("spec"))));
         }
         return out;
     }
@@ -518,7 +624,8 @@ public final class Order {
     /** The total asked for per line key, lines with the same key merged. */
     public Map<String, Integer> requested() {
         Map<String, Integer> out = new LinkedHashMap<>();
-        for (Line l : lines) out.merge(l.key(), l.count(), Integer::sum);
+        // A craft line with a spec (B3) is delivered under the key of the stack that was made, which the plan can not know: the craft ledger accounts for it
+        for (Line l : lines) if (l.spec() == null) out.merge(l.key(), l.count(), Integer::sum);
         return out;
     }
 

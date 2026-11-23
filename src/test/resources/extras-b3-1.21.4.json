@@ -1,0 +1,456 @@
+{
+  "v": 1,
+  "hash": "8b91796f5ddac63017d2b042a1da40334e05e46a",
+  "cookTicks": 200,
+  "smelt": [
+    {
+      "id": "qwerte:smelt/brick",
+      "in": [
+        "minecraft:clay_ball"
+      ],
+      "out": "minecraft:brick",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/charcoal",
+      "in": [
+        "minecraft:acacia_log",
+        "minecraft:acacia_wood",
+        "minecraft:birch_log",
+        "minecraft:birch_wood",
+        "minecraft:cherry_log",
+        "minecraft:cherry_wood",
+        "minecraft:dark_oak_log",
+        "minecraft:dark_oak_wood",
+        "minecraft:jungle_log",
+        "minecraft:jungle_wood",
+        "minecraft:mangrove_log",
+        "minecraft:mangrove_wood",
+        "minecraft:oak_log",
+        "minecraft:oak_wood",
+        "minecraft:pale_oak_log",
+        "minecraft:pale_oak_wood",
+        "minecraft:spruce_log",
+        "minecraft:spruce_wood",
+        "minecraft:stripped_acacia_log",
+        "minecraft:stripped_acacia_wood",
+        "minecraft:stripped_birch_log",
+        "minecraft:stripped_birch_wood",
+        "minecraft:stripped_cherry_log",
+        "minecraft:stripped_cherry_wood",
+        "minecraft:stripped_dark_oak_log",
+        "minecraft:stripped_dark_oak_wood",
+        "minecraft:stripped_jungle_log",
+        "minecraft:stripped_jungle_wood",
+        "minecraft:stripped_mangrove_log",
+        "minecraft:stripped_mangrove_wood",
+        "minecraft:stripped_oak_log",
+        "minecraft:stripped_oak_wood",
+        "minecraft:stripped_pale_oak_log",
+        "minecraft:stripped_pale_oak_wood",
+        "minecraft:stripped_spruce_log",
+        "minecraft:stripped_spruce_wood"
+      ],
+      "out": "minecraft:charcoal",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/copper_ingot",
+      "in": [
+        "minecraft:raw_copper"
+      ],
+      "out": "minecraft:copper_ingot",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/cracked_stone_bricks",
+      "in": [
+        "minecraft:stone_bricks"
+      ],
+      "out": "minecraft:cracked_stone_bricks",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/deepslate",
+      "in": [
+        "minecraft:cobbled_deepslate"
+      ],
+      "out": "minecraft:deepslate",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/dried_kelp",
+      "in": [
+        "minecraft:kelp"
+      ],
+      "out": "minecraft:dried_kelp",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/glass",
+      "in": [
+        "minecraft:red_sand",
+        "minecraft:sand"
+      ],
+      "out": "minecraft:glass",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/gold_ingot",
+      "in": [
+        "minecraft:raw_gold"
+      ],
+      "out": "minecraft:gold_ingot",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/green_dye",
+      "in": [
+        "minecraft:cactus"
+      ],
+      "out": "minecraft:green_dye",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/iron_ingot",
+      "in": [
+        "minecraft:raw_iron"
+      ],
+      "out": "minecraft:iron_ingot",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/lime_dye",
+      "in": [
+        "minecraft:sea_pickle"
+      ],
+      "out": "minecraft:lime_dye",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/nether_brick",
+      "in": [
+        "minecraft:netherrack"
+      ],
+      "out": "minecraft:nether_brick",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/smooth_sandstone",
+      "in": [
+        "minecraft:sandstone"
+      ],
+      "out": "minecraft:smooth_sandstone",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/smooth_stone",
+      "in": [
+        "minecraft:stone"
+      ],
+      "out": "minecraft:smooth_stone",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/stone",
+      "in": [
+        "minecraft:cobblestone"
+      ],
+      "out": "minecraft:stone",
+      "count": 1
+    },
+    {
+      "id": "qwerte:smelt/terracotta",
+      "in": [
+        "minecraft:clay"
+      ],
+      "out": "minecraft:terracotta",
+      "count": 1
+    }
+  ],
+  "fuel": [
+    {
+      "id": "minecraft:acacia_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:acacia_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:acacia_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:birch_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:birch_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:birch_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:charcoal",
+      "ticks": 1600
+    },
+    {
+      "id": "minecraft:cherry_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:cherry_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:cherry_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:coal",
+      "ticks": 1600
+    },
+    {
+      "id": "minecraft:coal_block",
+      "ticks": 16000
+    },
+    {
+      "id": "minecraft:dark_oak_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:dark_oak_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:dark_oak_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:dried_kelp_block",
+      "ticks": 4000
+    },
+    {
+      "id": "minecraft:jungle_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:jungle_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:jungle_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:mangrove_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:mangrove_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:mangrove_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:oak_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:oak_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:oak_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:pale_oak_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:pale_oak_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:pale_oak_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:spruce_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:spruce_planks",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:spruce_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stick",
+      "ticks": 100
+    },
+    {
+      "id": "minecraft:stripped_acacia_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_acacia_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_birch_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_birch_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_cherry_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_cherry_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_dark_oak_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_dark_oak_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_jungle_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_jungle_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_mangrove_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_mangrove_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_oak_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_oak_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_pale_oak_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_pale_oak_wood",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_spruce_log",
+      "ticks": 300
+    },
+    {
+      "id": "minecraft:stripped_spruce_wood",
+      "ticks": 300
+    }
+  ],
+  "special": [
+    "rocket",
+    "star",
+    "star_fade"
+  ],
+  "dyes": {
+    "black": {
+      "firework": "1e1b1b"
+    },
+    "blue": {
+      "firework": "253192"
+    },
+    "brown": {
+      "firework": "51301a"
+    },
+    "cyan": {
+      "firework": "287697"
+    },
+    "gray": {
+      "firework": "434343"
+    },
+    "green": {
+      "firework": "3b511a"
+    },
+    "light_blue": {
+      "firework": "6689d3"
+    },
+    "light_gray": {
+      "firework": "ababab"
+    },
+    "lime": {
+      "firework": "41cd34"
+    },
+    "magenta": {
+      "firework": "c354cd"
+    },
+    "orange": {
+      "firework": "eb8844"
+    },
+    "pink": {
+      "firework": "d88198"
+    },
+    "purple": {
+      "firework": "7b2fbe"
+    },
+    "red": {
+      "firework": "b3312c"
+    },
+    "white": {
+      "firework": "f0f0f0"
+    },
+    "yellow": {
+      "firework": "decf2a"
+    }
+  },
+  "starItems": {
+    "burst": [
+      "minecraft:feather"
+    ],
+    "creeper": [
+      "minecraft:creeper_head",
+      "minecraft:dragon_head",
+      "minecraft:piglin_head",
+      "minecraft:player_head",
+      "minecraft:skeleton_skull",
+      "minecraft:wither_skeleton_skull",
+      "minecraft:zombie_head"
+    ],
+    "large_ball": [
+      "minecraft:fire_charge"
+    ],
+    "star": [
+      "minecraft:gold_nugget"
+    ],
+    "trail": [
+      "minecraft:diamond"
+    ],
+    "twinkle": [
+      "minecraft:glowstone_dust"
+    ]
+  },
+  "stew": {},
+  "dyeable": []
+}

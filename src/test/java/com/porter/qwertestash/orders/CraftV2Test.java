@@ -188,15 +188,23 @@ class CraftV2Test {
 
     @Test
     void everyReservedFieldMakesTheBlockFailItsCheck() {
+        // B4's remainder is still reserved. B3's fields (specs, keys, grids) are carried out by a bot that says firework: for any other bot the check
+        // refuses them, as it did while they were reserved
+        JsonObject rem = blockJson();
+        rem.getAsJsonArray("steps").get(0).getAsJsonObject().add("remainder", JsonParser.parseString("[ { \"id\": \"minecraft:bowl\", \"count\": 1 } ]"));
+        Order.Craft remainder = Order.parseCraft(rem);
+        assertNotNull(remainder.reserved(), "step remainder");
+        assertNotNull(CraftOrder.check(remainder, R, 2048, null, Set.of()), "step remainder");
         String[][] cases = {
-            {"spec", "\"rocket:1\""}, {"grid", "[null,null,null,null,null,null,null,null,null]"},
-            {"remainder", "[ { \"id\": \"minecraft:bowl\", \"count\": 1 } ]"}};
+            {"spec", "\"rocket:1\""}, {"grid", "[null,null,null,null,null,null,null,null,null]"}};
         for (String[] f : cases) {
             JsonObject b = blockJson();
             b.getAsJsonArray("steps").get(0).getAsJsonObject().add(f[0], JsonParser.parseString(f[1]));
             Order.Craft c = Order.parseCraft(b);
-            assertNotNull(c.reserved(), "step " + f[0]);
+            assertNull(c.reserved(), "step " + f[0]);
+            assertTrue(c.usesSpecs(), "step " + f[0]);
             assertNotNull(CraftOrder.check(c, R, 2048, null, Set.of()), "step " + f[0]);
+            assertNotNull(CraftOrder.check(c, R, 2048, null, Set.of("firework")), "step " + f[0] + ": even a bot that says firework refuses a plain step with a spec or a grid");
         }
         mutate(b -> b.getAsJsonArray("lines").get(0).getAsJsonObject().addProperty("spec", "rocket:1"), "lines spec");
         mutate(b -> b.getAsJsonArray("take").get(0).getAsJsonObject().addProperty("key", "minecraft:spruce_log#ab12cd34"), "take key");
@@ -212,7 +220,8 @@ class CraftV2Test {
         Order.Craft c = Order.parseCraft(b);
         assertNotNull(c);
         assertFalse(c.malformed(), what);
-        assertNotNull(c.reserved(), what);
+        assertNull(c.reserved(), what + ": read, not reserved (B3)");
+        assertTrue(c.usesSpecs(), what);
         assertNotNull(CraftOrder.check(c, R, 2048, null, Set.of()), what);
     }
 

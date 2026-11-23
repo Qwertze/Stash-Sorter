@@ -7,6 +7,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.porter.qwertestash.orders.FireworkSpecs;
 import com.porter.qwertestash.stash.AreaRules;
 import com.porter.qwertestash.stash.CraftSettings;
 import com.porter.qwertestash.stash.Item;
@@ -42,7 +43,7 @@ public final class ManagerIndex {
 
     /** What is worked out once per key. */
     private record Info(String key, String id, String name, String englishName, int maxStack, List<String> details, boolean enchanted, int damage, int maxDamage, boolean mending,
-                        String match, EnchantFields.@Nullable Fields enchant) {
+                        String match, EnchantFields.@Nullable Fields enchant, @Nullable String spec) {
     }
 
     private static final class Agg {
@@ -102,6 +103,30 @@ public final class ManagerIndex {
      */
     public static Built build(Stash stash, boolean includeExcluded, String player, String mcVersion, @Nullable String dimension,
                               Function<String, @Nullable String> englishName, @Nullable Function<Item, @Nullable String> completeKit) {
+        return build(stash, includeExcluded, player, mcVersion, dimension, englishName, completeKit, null);
+    }
+
+    /** The firework tables the index in the making is built with (B3), set by the builder thread for the length of one build; null: no {@code spec} is written. */
+    private static final ThreadLocal<FireworkSpecs.@Nullable Tables> FIREWORKS = new ThreadLocal<>();
+
+    /**
+     * As above, with {@code items[].spec} (CRAFT-CONTRACT-v1.2.md 4, B3): a rocket or star whose components have a spec in the grammar of section 3 carries it.
+     * Sent only when {@code fireworks} is given (the bot says {@code firework} in its {@code can}) and the index has a player (the server accepts a spec only
+     * from the stash's owner, like {@code ench}). Without them the index is what it was before B3, hash included.
+     * @param fireworks the firework tables of the bot's extras, or null to send no spec
+     */
+    public static Built build(Stash stash, boolean includeExcluded, String player, String mcVersion, @Nullable String dimension,
+                              Function<String, @Nullable String> englishName, @Nullable Function<Item, @Nullable String> completeKit, FireworkSpecs.@Nullable Tables fireworks) {
+        FIREWORKS.set(player == null || player.isBlank() ? null : fireworks);
+        try {
+            return buildNow(stash, includeExcluded, player, mcVersion, dimension, englishName, completeKit);
+        } finally {
+            FIREWORKS.remove();
+        }
+    }
+
+    private static Built buildNow(Stash stash, boolean includeExcluded, String player, String mcVersion, @Nullable String dimension,
+                                  Function<String, @Nullable String> englishName, @Nullable Function<Item, @Nullable String> completeKit) {
         Map<String, Info> infos = new LinkedHashMap<>();
         Map<String, Agg> groups = new LinkedHashMap<>();
         Map<String, Shulker> shulkers = new LinkedHashMap<>();
@@ -149,6 +174,8 @@ public final class ManagerIndex {
             if (i.mending()) o.addProperty("mending", true);
             // ENCHANT-CONTRACT v1.0: the enchantments, the stored repair cost and the custom name of books and gear, for the enchant planner
             if (i.enchant() != null) EnchantFields.write(o, i.enchant());
+            // B3: the spec of a rocket or star (CRAFT-CONTRACT-v1.2.md 4); part of the hashed items array
+            if (i.spec() != null) o.addProperty("spec", i.spec());
             // The plugin has no creative tabs: every item goes in "other"
             o.addProperty("tab", "other");
             o.addProperty("tabOrder", OTHER_ORDER);
@@ -364,12 +391,30 @@ public final class ManagerIndex {
     }
 
     /**
+     * The firework tables an index is built with (B3), or null: only when the bot says {@code firework} in its {@code can}, that is, the setting is on and the
+     * extras hold the special, dye and star tables.
+     */
+    public static FireworkSpecs.@Nullable Tables fireworkTables(@Nullable Extras extras, boolean fireworkOn) {
+        return fireworkOn ? FireworkSpecs.Tables.of(extras) : null;
+    }
+
+    /**
      * The features this build carries out for these extras: {@code smelt} (B2) when {@code smeltOn} (the setting {@code craftSmelt}) and the extras hold both the
      * smelt and the fuel tables (CRAFT-CONTRACT-v1.2.md 13.3 and 14), none otherwise. A bot with no extras says none.
      */
     public static List<String> craftCan(@Nullable Extras extras, boolean smeltOn) {
-        if (smeltOn && com.porter.qwertestash.orders.Smelting.of(extras) != null) return List.of("smelt");
-        return List.of();
+        return craftCan(extras, smeltOn, false);
+    }
+
+    /**
+     * As above, and {@code firework} (B3, CRAFT-CONTRACT-v1.2.md 2.1) when {@code fireworkOn} (the setting {@code craftFirework}) and the extras hold the
+     * {@code special} (rocket and star), {@code dyes} (with firework colours) and {@code starItems} tables.
+     */
+    public static List<String> craftCan(@Nullable Extras extras, boolean smeltOn, boolean fireworkOn) {
+        List<String> out = new ArrayList<>();
+        if (smeltOn && com.porter.qwertestash.orders.Smelting.of(extras) != null) out.add("smelt");
+        if (fireworkOn && FireworkSpecs.Tables.of(extras) != null) out.add("firework");
+        return out;
     }
 
     /** The most items one order may smelt, as {@code craftOrders.maxSmelt} says it: 1 to 256 (the setting, clamped). */
@@ -919,9 +964,17 @@ public final class ManagerIndex {
         boolean enchanted = item.enchants != null && !item.enchants.isEmpty();
         info = new Info(key, clamp("minecraft:" + item.id, MAX_TEXT), clamp(name, MAX_TEXT), clamp(en, MAX_TEXT), Math.max(1, item.maxStack), details, enchanted,
             durability(item.damage, item.maxDamage)[0], durability(item.damage, item.maxDamage)[1], item.hasMending(), clamp(item.matchKey(), MAX_TEXT),
-            EnchantFields.of(item));
+            EnchantFields.of(item), specOf(item));
         infos.put(key, info);
         return info;
+    }
+
+    /** The spec of a rocket or star, when this build is made with firework tables; null for everything else. */
+    private static @Nullable String specOf(Item item) {
+        FireworkSpecs.Tables t = FIREWORKS.get();
+        if (t == null || item.fw == null) return null;
+        String spec = FireworkSpecs.specOf(item.fw, t);
+        return spec == null ? null : clamp(spec, FireworkSpecs.MAX_SPEC);
     }
 
     /**

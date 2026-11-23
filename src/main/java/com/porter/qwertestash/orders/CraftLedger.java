@@ -37,6 +37,14 @@ public final class CraftLedger {
     private final Map<String, String> shortReason = new LinkedHashMap<>();
     private final int plannedFills;
     private boolean refused;
+    /**
+     * B3 (CRAFT-CONTRACT-v1.2.md 9): the block's special steps as the sub-plan's recipes (a rocket or star is a pseudo id, see {@link Pseudo}); per spec'd id
+     * the index keys it is taken by and how many each (the take's entries, in the server's key order); how many of each key were taken so far.
+     */
+    private final Map<String, Recipes.Recipe> special = new LinkedHashMap<>();
+    private final Map<String, LinkedHashMap<String, Long>> keyCap = new LinkedHashMap<>();
+    private final Map<String, Long> keyUsed = new LinkedHashMap<>();
+    private final Map<String, String> keySpec = new LinkedHashMap<>();
     /** How a v2 block was planned: the depth, the estimate rounds and the calls the sub-plans may use (CRAFT-CONTRACT-v1.2.md 7). */
     private final CraftSub.Limits limits;
     /** The preflight of a v2 order (CRAFT-CONTRACT-v1.2.md 11.2): null for any other order, {@code "ok"} or {@code "short"}, and the restock list of a short one. */
@@ -71,14 +79,20 @@ public final class CraftLedger {
         this.limits = CraftSub.Limits.of(craft);
         if (restrict) {
             this.allowed = new java.util.LinkedHashSet<>();
-            for (Order.CraftStep s : craft.steps()) allowed.add(s.recipe());
+            for (Order.CraftStep s : craft.steps()) allowed.add(FireworkSpecs.planId(s));
         }
         else this.allowed = null;
+        special.putAll(FireworkSpecs.recipesOf(craft));
         for (Order.Qty t : craft.take()) {
-            take.merge(Recipes.ns(t.id()), (long) t.count(), Long::sum);
-            budget.merge(Recipes.ns(t.id()), (long) t.count(), Long::sum);
+            String ref = Pseudo.of(Recipes.ns(t.id()), t.spec());
+            take.merge(ref, (long) t.count(), Long::sum);
+            budget.merge(ref, (long) t.count(), Long::sum);
+            if (t.spec() != null && t.key() != null) {
+                keyCap.computeIfAbsent(ref, k -> new LinkedHashMap<>()).merge(t.key(), (long) t.count(), Long::sum);
+                keySpec.put(t.key(), ref);
+            }
         }
-        for (Order.Line l : craftLines) wanted.merge(l.key(), (long) l.count(), Long::sum);
+        for (Order.Line l : craftLines) wanted.merge(l.ref(), (long) l.count(), Long::sum);
         for (Order.Qty q : craft.forEnchant()) if (q.count() > 0) forEnchant.merge(q.id(), (long) q.count(), Long::sum);
         this.plannedFills = (int) Math.min(Integer.MAX_VALUE, craft.stepFills());
         this.hasFurnace = craft.hasFurnace();
@@ -226,12 +240,69 @@ public final class CraftLedger {
 
     public void setSurplus(Map<String, Long> now) {
         surplus.clear();
-        for (var e : now.entrySet()) if (e.getValue() != null && e.getValue() > 0) surplus.put(Recipes.ns(e.getKey()), e.getValue());
+        for (var e : now.entrySet()) if (e.getValue() != null && e.getValue() > 0) surplus.put(ns(e.getKey()), e.getValue());
+    }
+
+    /** An id or pseudo id made namespaced: {@code chest} as {@code minecraft:chest}, {@code firework_star@star:...} as {@code minecraft:firework_star@star:...}. */
+    public static String ns(String id) {
+        return Pseudo.of(Recipes.ns(Pseudo.base(id)), Pseudo.spec(id));
     }
 
     /** A new sub-plan session from the budget left and the surplus carried. */
     public CraftSub.Session session() {
-        return new CraftSub.Session(table, allowed, take, budget, surplus, limits, smelting);
+        return new CraftSub.Session(table, allowed, take, budget, surplus, limits, smelting, special);
+    }
+
+    /** As {@link #session()} from this pool and surplus (a chunk planned again from what is carried): the order's recipes only, its special steps too. */
+    public CraftSub.Session sessionWith(Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus) {
+        return new CraftSub.Session(table, allowed, estPool, pool, surplus, limits, smelting, special);
+    }
+
+    /** The block has a step or a take of a rocket or star (B3). */
+    public boolean hasSpecs() {
+        return !special.isEmpty() || !keyCap.isEmpty();
+    }
+
+    /** The item ids (namespaced) the order's take is of, spec'd entries under their item id: what the stash is surveyed for. */
+    public java.util.Set<String> takeItemIds() {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (String ref : take.keySet()) out.add(Pseudo.base(ref));
+        return out;
+    }
+
+    /** The index keys that take entries name for a spec'd id (B3), for the stash survey. */
+    public java.util.Set<String> specKeys() {
+        return java.util.Collections.unmodifiableSet(keySpec.keySet());
+    }
+
+    /** The pseudo id (item id and spec) the index key stands for in the order's take, or null when it is not one of its spec'd keys. */
+    public @Nullable String refOfKey(String key) {
+        return keySpec.get(key);
+    }
+
+    /**
+     * The index keys a plan's stock of spec'd items is taken by (B3), with how many of each: for each pseudo id of {@code fromStock} the keys of the take's
+     * entries in their order, each up to what is left of its entry. Plain ids are left out (they are gathered by item id). Never more than the take.
+     */
+    public Map<String, Long> keysFor(Map<String, Long> fromStock) {
+        Map<String, Long> out = new LinkedHashMap<>(), used = new LinkedHashMap<>(keyUsed);
+        walkKeys(fromStock, used, out);
+        return out;
+    }
+
+    private void walkKeys(Map<String, Long> stock, Map<String, Long> used, @Nullable Map<String, Long> out) {
+        for (var e : stock.entrySet()) {
+            if (!Pseudo.is(e.getKey())) continue;
+            long left = e.getValue() == null ? 0 : e.getValue();
+            for (var k : keyCap.getOrDefault(e.getKey(), new LinkedHashMap<>()).entrySet()) {
+                if (left <= 0) break;
+                long n = Math.min(left, k.getValue() - used.getOrDefault(k.getKey(), 0L));
+                if (n <= 0) continue;
+                used.merge(k.getKey(), n, Long::sum);
+                if (out != null) out.merge(k.getKey(), n, Long::sum);
+                left -= n;
+            }
+        }
     }
 
     /** Where the key's craft line comes in the order (0 first): the server plans the lines in this order, so the bot crafts them in it. */
@@ -257,8 +328,9 @@ public final class CraftLedger {
     public void madeChunk(String key, long count, long fillsMade, Map<String, Long> fromStock) {
         if (count > 0) made.merge(key, count, Long::sum);
         fills += Math.max(0, fillsMade);
+        walkKeys(fromStock, keyUsed, null);
         for (var e : fromStock.entrySet()) {
-            String id = Recipes.ns(e.getKey());
+            String id = ns(e.getKey());
             long n = Math.max(0, e.getValue());
             used.merge(id, n, Long::sum);
             budget.merge(id, -n, Long::sum);
@@ -278,7 +350,7 @@ public final class CraftLedger {
     /** What the bot gives back at the end, by id (set when the order ends). */
     public void setReturned(Map<String, Long> back) {
         returned.clear();
-        for (var e : back.entrySet()) if (e.getValue() != null && e.getValue() > 0) returned.put(Recipes.ns(e.getKey()), e.getValue());
+        for (var e : back.entrySet()) if (e.getValue() != null && e.getValue() > 0) returned.put(ns(e.getKey()), e.getValue());
     }
 
     /** Anything asked for and neither made nor already short is short with this reason (the order ended before it was crafted). */
@@ -296,6 +368,8 @@ public final class CraftLedger {
     public void setDelivered(Map<String, Integer> delivered, Map<String, Integer> requested) {
         lost.clear();
         for (var e : wanted.entrySet()) {
+            // A rocket or star line (B3) is delivered under the key of the stack that was made, which this ledger does not know: it is not counted here
+            if (Pseudo.is(e.getKey())) continue;
             // The bases made for enchant plans are never delivered: only the ordered part of a line can be lost on the way to a shulker
             long ordered = Math.max(0, e.getValue() - forEnchant.getOrDefault(e.getKey(), 0L));
             long m = Math.min(ordered, made.getOrDefault(e.getKey(), 0L));
@@ -307,8 +381,20 @@ public final class CraftLedger {
 
     /** Budget given back: items counted as gathered that are not carried any more (a restart lost them). */
     public void refund(Map<String, Long> back) {
+        // B3: a spec'd id's refund goes back to its keys, the last used first
         for (var e : back.entrySet()) {
-            String id = Recipes.ns(e.getKey());
+            if (!Pseudo.is(e.getKey())) continue;
+            long left = Math.max(0, e.getValue());
+            List<Map.Entry<String, Long>> keys = new ArrayList<>(keyCap.getOrDefault(e.getKey(), new LinkedHashMap<>()).entrySet());
+            for (int i = keys.size() - 1; i >= 0 && left > 0; i--) {
+                long n = Math.min(left, keyUsed.getOrDefault(keys.get(i).getKey(), 0L));
+                if (n <= 0) continue;
+                keyUsed.merge(keys.get(i).getKey(), -n, Long::sum);
+                left -= n;
+            }
+        }
+        for (var e : back.entrySet()) {
+            String id = ns(e.getKey());
             long n = Math.max(0, e.getValue());
             long cap = take.getOrDefault(id, 0L);
             budget.merge(id, n, Long::sum);
@@ -370,7 +456,7 @@ public final class CraftLedger {
         for (var e : PREFLIGHT_SHORT.equals(preflight) ? Map.<String, Long>of().entrySet() : wanted.entrySet()) {
             if (m.size() >= MAX_ENTRIES) break;
             JsonObject x = new JsonObject();
-            x.addProperty("key", cut(e.getKey()));
+            ref(x, "key", e.getKey());
             x.addProperty("wanted", e.getValue());
             x.addProperty("made", Math.min(e.getValue(), made.getOrDefault(e.getKey(), 0L)));
             m.add(x);
@@ -380,7 +466,7 @@ public final class CraftLedger {
         for (var e : shortCount.entrySet()) {
             if (s.size() >= MAX_ENTRIES) break;
             JsonObject x = new JsonObject();
-            x.addProperty("key", cut(e.getKey()));
+            ref(x, "key", e.getKey());
             x.addProperty("count", e.getValue());
             x.addProperty("reason", shortReason.getOrDefault(e.getKey(), CraftOrder.INTERRUPTED));
             s.add(x);
@@ -411,13 +497,19 @@ public final class CraftLedger {
         return o;
     }
 
+    /** The item id under {@code name}, and for a variant (B3) its {@code spec} beside it (CRAFT-CONTRACT-v1.2.md 12: {@code made[].spec}, {@code short[].spec}). */
+    private static void ref(JsonObject x, String name, String ref) {
+        x.addProperty(name, cut(Pseudo.base(ref)));
+        if (Pseudo.is(ref)) x.addProperty("spec", Pseudo.spec(ref));
+    }
+
     private static JsonArray qtys(Map<String, Long> m) {
         JsonArray a = new JsonArray();
         for (var e : m.entrySet()) {
             if (a.size() >= MAX_ENTRIES) break;
             if (e.getValue() <= 0) continue;
             JsonObject x = new JsonObject();
-            x.addProperty("id", cut(e.getKey()));
+            ref(x, "id", e.getKey());
             x.addProperty("count", e.getValue());
             a.add(x);
         }
@@ -441,6 +533,7 @@ public final class CraftLedger {
         for (var e : shortReason.entrySet()) r.addProperty(e.getKey(), e.getValue());
         o.add("reasons", r);
         if (PREFLIGHT_OK.equals(preflight)) o.addProperty("preflight", PREFLIGHT_OK);
+        if (!keyUsed.isEmpty()) o.add("keyUsed", map(keyUsed));
         if (hasFurnace) {
             o.add("smeltMade", map(smeltMade));
             if (furnaceSource != null) o.addProperty("furnace", furnaceSource);
@@ -468,6 +561,10 @@ public final class CraftLedger {
                 long cap = take.getOrDefault(e.getKey(), 0L);
                 if (cap <= 0) b.remove(e.getKey());
                 else if (e.getValue() > cap) b.put(e.getKey(), cap);
+            }
+            keyUsed.clear();
+            if (o.has("keyUsed") && o.get("keyUsed").isJsonObject()) {
+                for (var e : read(o.getAsJsonObject("keyUsed")).entrySet()) if (keySpec.containsKey(e.getKey())) keyUsed.put(e.getKey(), e.getValue());
             }
             savedSurplus.clear();
             if (o.has("surplus") && o.get("surplus").isJsonObject()) savedSurplus.putAll(read(o.getAsJsonObject("surplus")));

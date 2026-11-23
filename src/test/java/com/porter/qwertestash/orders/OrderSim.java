@@ -299,6 +299,14 @@ final class OrderSim implements OrderFlow.Host {
         return can;
     }
 
+    /** The firework tables of the bot's extras (B3), or null. */
+    FireworkSpecs.@Nullable Tables fireworks;
+
+    @Override
+    public FireworkSpecs.@Nullable Tables craftFireworks() {
+        return fireworks;
+    }
+
     /** What the stash holds per key: loose stacks, what lies in shulkers and the plain stock craft orders take from. */
     @Override
     public @Nullable Map<String, Long> preflightStock() {
@@ -371,6 +379,8 @@ final class OrderSim implements OrderFlow.Host {
                 return;
             }
             flow.craftChunk(u, idx, 0, 0, Map.of(), chunkTrip);
+            // As the sorter does: a result of another spec than the order names is the same for the rest of the line
+            if (chunkTrip.equals(CraftOrder.RECIPE_MISMATCH) && Pseudo.is(key)) flow.craftShortRef(key, chunkTrip);
             return;
         }
         Map<String, Long> have = new HashMap<>(craftCarry);
@@ -382,10 +392,16 @@ final class OrderSim implements OrderFlow.Host {
             for (var use : s.uses().entrySet()) have.merge(use.getKey(), -use.getValue(), Long::sum);
             have.merge(s.recipe().result(), s.made(), Long::sum);
         }
+        // A rocket or star of a spec (B3): the stack made has the index key of its own components, here a key made from its spec
+        String madeKey = Pseudo.is(key) ? Pseudo.base(key) + "#" + String.format("%08x", Pseudo.spec(key).hashCode()) : null;
+        if (madeKey != null) {
+            have.merge(key, (long) -c.count(), Long::sum);
+            have.merge(madeKey, (long) c.count(), Long::sum);
+        }
         have.values().removeIf(v -> v <= 0);
         craftCarry.clear();
         craftCarry.putAll(have);
-        flow.craftChunk(u, idx, c.count(), c.plan().fills(), c.plan().fromStock(), null);
+        flow.craftChunk(u, idx, c.count(), c.plan().fills(), c.plan().fromStock(), null, madeKey);
     }
 
     private int stackOfId(String id) {

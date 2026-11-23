@@ -16,9 +16,22 @@ public final class CraftCharge {
 
     /** What the gathered loads hold, by namespaced item id (the keys are plain: no component patch). */
     public static Map<String, Long> gathered(List<Order.Lot> loads) {
+        return gathered(loads, k -> null);
+    }
+
+    /**
+     * As above; a load whose key is one of the order's rocket or star keys (B3, {@code refOfKey} gives its pseudo id) is counted under that pseudo id, so
+     * the budget of the spec'd take is charged, not the plain id's.
+     */
+    public static Map<String, Long> gathered(List<Order.Lot> loads, java.util.function.Function<String, String> refOfKey) {
         Map<String, Long> out = new LinkedHashMap<>();
         for (Order.Lot lot : loads) {
             String key = lot.key();
+            String ref = refOfKey.apply(key);
+            if (ref != null) {
+                out.merge(ref, (long) lot.count(), Long::sum);
+                continue;
+            }
             int hash = key.indexOf('#');
             out.merge(Recipes.ns(hash < 0 ? key : key.substring(0, hash)), (long) lot.count(), Long::sum);
         }

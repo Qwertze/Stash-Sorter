@@ -91,10 +91,19 @@ public final class CraftGrid {
      * @param stackOf the stack size of a kind (an item id, with its components when it has any)
      */
     public static @Nullable Batch batch(Recipes.Recipe r, Map<String, Integer> carried, int fills, int maxPerSlot, int width, java.util.function.ToIntFunction<String> stackOf) {
+        return batch(r, carried, fills, maxPerSlot, width, stackOf, kind -> null);
+    }
+
+    /**
+     * As above for a recipe that may have cells of a variant (B3: a special step's grid, where a star is the pseudo id {@code <id>@<spec>}, see {@link Pseudo}).
+     * @param specOf the spec of a carried kind (the rocket or star spec of its components), or null when it has none
+     */
+    public static @Nullable Batch batch(Recipes.Recipe r, Map<String, Integer> carried, int fills, int maxPerSlot, int width, java.util.function.ToIntFunction<String> stackOf,
+                                        java.util.function.Function<String, String> specOf) {
         int[] at = slots(r, width);
         List<List<String>> cells = r.ingredients();
         for (int k = Math.min(fills, maxPerSlot); k >= 1; k--) {
-            String[] item = assign(cells, at, carried, k);
+            String[] item = assign(cells, at, carried, k, specOf);
             if (item == null) continue;
             boolean fits = true;
             for (int i = 1; i <= 9 && fits; i++) if (item[i] != null && k > stackOf.applyAsInt(item[i])) fits = false;
@@ -103,7 +112,17 @@ public final class CraftGrid {
         return null;
     }
 
-    private static @Nullable String[] assign(List<List<String>> cells, int[] at, Map<String, Integer> carried, int k) {
+    /** The carried kind fits the cell: its item is one the cell takes, and for a variant cell ({@link Pseudo}) the kind has that spec. */
+    private static boolean fits(List<String> cell, String kind, java.util.function.Function<String, String> specOf) {
+        String base = CraftSlots.baseOf(kind);
+        if (cell.contains(base)) return true;
+        for (String alt : cell) {
+            if (Pseudo.is(alt) && Pseudo.base(alt).equals(base) && Pseudo.spec(alt).equals(specOf.apply(kind))) return true;
+        }
+        return false;
+    }
+
+    private static @Nullable String[] assign(List<List<String>> cells, int[] at, Map<String, Integer> carried, int k, java.util.function.Function<String, String> specOf) {
         Map<String, Integer> left = new HashMap<>(carried);
         String[] item = new String[10];
         for (int i = 0; i < cells.size(); i++) {
@@ -113,7 +132,7 @@ public final class CraftGrid {
             // since stacks that differ in a component can't share it (1.8.1)
             List<String> cell = cells.get(i);
             for (String kind : new java.util.TreeSet<>(left.keySet())) {
-                if (!cell.contains(CraftSlots.baseOf(kind))) continue;
+                if (!fits(cell, kind, specOf)) continue;
                 int n = left.getOrDefault(kind, 0);
                 if (n >= k && (best == null || n > bestLeft || (n == bestLeft && kind.compareTo(best) < 0))) {
                     best = kind;

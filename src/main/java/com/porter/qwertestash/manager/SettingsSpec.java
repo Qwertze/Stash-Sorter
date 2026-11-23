@@ -201,6 +201,7 @@ public final class SettingsSpec {
         add("craftOrderMaxFills", "Most grid fills per craft order", crafting, "Grid fills one craft order may make. Sent to the server, which refuses bigger orders for this bot.").range(1, 100000).whole().cmd("craftorders maxfills {v}");
         add("craftOrderMaxPerHour", "Most craft order fills per hour", crafting, "Grid fills made for craft orders in any one hour.").range(0, 100000).whole().cmd("craftorders maxperhour {v}");
         add("craftSmelt", "Smelt in craft orders", crafting, "Smelt items in a furnace for craft orders (glass, charcoal, ingots, ...) when the server's extras hold the smelting tables. Needs craft orders on.").cmd("craftorders smelt {v}");
+        add("craftFirework", "Make fireworks in craft orders", crafting, "Make firework rockets and stars for craft orders (any colours, shapes and flight) when the server's extras hold the firework tables. The index then also says which rocket or star each stack is. Needs craft orders on.").cmd("craftorders firework {v}");
         add("craftOrderMaxSmelt", "Most items smelted per craft order", crafting, "Items one craft order may smelt (at most 256). Sent to the server.").range(1, 256).whole().cmd("craftorders maxsmelt {v}");
         add("craftNeverUse", "Never craft with", crafting, "Item ids never taken from the stash to craft with, like diamond_block.").pattern("[a-z0-9_]{1,64}").length(64);
         // The crafting table is set with `stash craftingtable` and its position is not shown on the website

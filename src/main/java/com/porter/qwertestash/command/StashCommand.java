@@ -145,6 +145,7 @@ public class StashCommand extends Command {
                 "craftorders maxfills <n>",
                 "craftorders maxperhour <n>",
                 "craftorders smelt on/off",
+                "craftorders firework on/off",
                 "craftorders maxsmelt <n>",
                 "craftorders",
                 "craftingtable here",
@@ -737,6 +738,13 @@ public class StashCommand extends Command {
                             ? "Craft orders that need a furnace are taken when the server's extras hold the smelting tables."
                             : "Craft orders that need a furnace are not taken: the server will not give this bot one.").primaryColor();
                 })))
+                .then(literal("firework").then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.craftFirework = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Craft Order Fireworks " + toggleStrCaps(CONFIG.craftFirework))
+                        .description(CONFIG.craftFirework
+                            ? "Craft orders for firework rockets and stars are taken when the server's extras hold the firework tables."
+                            : "Craft orders for firework rockets and stars are not taken: the server will not give this bot one.").primaryColor();
+                })))
                 .then(literal("maxsmelt").then(argument("items", integer(1, 256)).executes(c -> {
                     CONFIG.craftOrderMaxSmelt = getInteger(c, "items");
                     c.getSource().getEmbed().title("Craft Order Smelting Cap").description("One craft order may smelt at most " + CONFIG.craftOrderMaxSmelt + " items.").primaryColor();
@@ -1243,6 +1251,7 @@ public class StashCommand extends Command {
             .addField("Tables Put Down", MODULE.get(StashSorter.class).craftTablePlacementsLine())
             .addField("Bot's Own Table", MODULE.get(StashSorter.class).botTable() == null ? "none in use" : MODULE.get(StashSorter.class).botTable().source() + " (position hidden)")
             .addField("Smelting", MODULE.get(StashSorter.class).craftSmeltLine())
+            .addField("Fireworks", MODULE.get(StashSorter.class).craftFireworkLine())
             .addField("Caps", CONFIG.craftOrderMaxFills + " grid fills per order, " + CONFIG.craftOrderMaxPerHour + " per hour (" + MODULE.get(StashSorter.class).craftOrderFillsLastHour() + " used this hour)")
             .addField("What", "items the website's planner says the stash can make; crafted at the crafting table set on the website (not `stash craftingtable`)");
     }

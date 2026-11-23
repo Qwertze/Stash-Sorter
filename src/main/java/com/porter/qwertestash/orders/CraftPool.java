@@ -30,13 +30,20 @@ public final class CraftPool {
          * counts plain keys (CRAFT-CONTRACT.md "Bot execution" point 4).
          */
         public Stock plainOnly() {
+            return plainAnd(java.util.Set.of());
+        }
+
+        /**
+         * The plain stacks, and the stacks of these index keys too (B3: the keys a craft block's rocket and star takes name, which carry a component patch).
+         */
+        public Stock plainAnd(java.util.Set<String> keys) {
             Map<String, Long> l = new HashMap<>(), i = new HashMap<>();
             Map<String, String> b = new HashMap<>();
             Map<String, Integer> m = new HashMap<>();
-            for (var e : loose.entrySet()) if (e.getKey().indexOf('#') < 0) l.put(e.getKey(), e.getValue());
-            for (var e : inShulkers.entrySet()) if (e.getKey().indexOf('#') < 0) i.put(e.getKey(), e.getValue());
-            for (var e : baseOf.entrySet()) if (e.getKey().indexOf('#') < 0) b.put(e.getKey(), e.getValue());
-            for (var e : maxStack.entrySet()) if (e.getKey().indexOf('#') < 0) m.put(e.getKey(), e.getValue());
+            for (var e : loose.entrySet()) if (e.getKey().indexOf('#') < 0 || keys.contains(e.getKey())) l.put(e.getKey(), e.getValue());
+            for (var e : inShulkers.entrySet()) if (e.getKey().indexOf('#') < 0 || keys.contains(e.getKey())) i.put(e.getKey(), e.getValue());
+            for (var e : baseOf.entrySet()) if (e.getKey().indexOf('#') < 0 || keys.contains(e.getKey())) b.put(e.getKey(), e.getValue());
+            for (var e : maxStack.entrySet()) if (e.getKey().indexOf('#') < 0 || keys.contains(e.getKey())) m.put(e.getKey(), e.getValue());
             return new Stock(l, i, b, m);
         }
     }
@@ -98,6 +105,28 @@ public final class CraftPool {
                     want -= n;
                     for (long left = n; left > 0; left -= max) out.add(new Order.Lot(key, (int) Math.min(max, left)));
                 }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The loads to gather for what a craft takes of particular index keys (B3: the rockets and stars of a block's take, each by its key, in the order given):
+     * loose stacks before what lies in shulkers, cut into stacks of the key's stack size. Short when the stock is.
+     */
+    public static List<Order.Lot> lotsByKey(Stock s, Map<String, Long> needByKey, List<Unit> others) {
+        Map<String, Long> reserved = reserved(others);
+        List<Order.Lot> out = new ArrayList<>();
+        for (var need : needByKey.entrySet()) {
+            String key = need.getKey();
+            long want = need.getValue();
+            for (int part = 0; part < 2 && want > 0; part++) {
+                long n = Math.min(want, left(s, key, reserved)[part]);
+                if (n <= 0) continue;
+                int max = Math.max(1, s.maxStack().getOrDefault(key, 64));
+                reserved.merge(key, n, Long::sum);
+                want -= n;
+                for (long left = n; left > 0; left -= max) out.add(new Order.Lot(key, (int) Math.min(max, left)));
             }
         }
         return out;

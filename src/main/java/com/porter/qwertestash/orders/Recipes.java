@@ -216,8 +216,9 @@ public final class Recipes {
         return id.indexOf(':') < 0 ? "minecraft:" + id : id;
     }
 
-    /** "minecraft:oak_log" as "Oak Log". */
+    /** "minecraft:oak_log" as "Oak Log"; a variant (B3, {@link Pseudo}) as "Firework Star (star, large ball, red)". */
     public static String pretty(String id) {
+        if (Pseudo.is(id)) return pretty(Pseudo.base(id)) + " (" + FireworkSpecs.describe(Pseudo.spec(id)) + ")";
         String bare = id.startsWith("minecraft:") ? id.substring("minecraft:".length()) : id;
         return com.porter.qwertestash.stash.Item.prettyName(bare);
     }

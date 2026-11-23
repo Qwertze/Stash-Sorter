@@ -1,0 +1,793 @@
+[
+  {
+    "recipe": "qwerte:special/rocket",
+    "result": "minecraft:firework_rocket@rocket:1",
+    "count": 3,
+    "spec": "rocket:1",
+    "grid": [
+      {
+        "id": "minecraft:paper"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/rocket",
+    "result": "minecraft:firework_rocket@rocket:1|star;lime;;",
+    "count": 3,
+    "spec": "rocket:1|star;lime;;",
+    "grid": [
+      {
+        "id": "minecraft:paper"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:star;lime;;"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:star;lime;;",
+    "count": 1,
+    "spec": "star:star;lime;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:gold_nugget"
+      },
+      {
+        "id": "minecraft:lime_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/rocket",
+    "result": "minecraft:firework_rocket@rocket:2|small_ball;red;;|large_ball;blue;;",
+    "count": 3,
+    "spec": "rocket:2|small_ball;red;;|large_ball;blue;;",
+    "grid": [
+      {
+        "id": "minecraft:paper"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:small_ball;red;;"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:large_ball;blue;;"
+      },
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:small_ball;red;;",
+    "count": 1,
+    "spec": "star:small_ball;red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:large_ball;blue;;",
+    "count": 1,
+    "spec": "star:large_ball;blue;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:fire_charge"
+      },
+      {
+        "id": "minecraft:blue_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/rocket",
+    "result": "minecraft:firework_rocket@rocket:3|star;lime;;|burst;white,black;red;w",
+    "count": 3,
+    "spec": "rocket:3|star;lime;;|burst;white,black;red;w",
+    "grid": [
+      {
+        "id": "minecraft:paper"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:star;lime;;"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:burst;white,black;red;w"
+      },
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star_fade",
+    "result": "minecraft:firework_star@star:burst;white,black;red;w",
+    "count": 1,
+    "spec": "star:burst;white,black;red;w",
+    "grid": [
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:burst;white,black;;w"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:burst;white,black;;w",
+    "count": 1,
+    "spec": "star:burst;white,black;;w",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:feather"
+      },
+      {
+        "id": "minecraft:glowstone_dust"
+      },
+      {
+        "id": "minecraft:white_dye"
+      },
+      {
+        "id": "minecraft:black_dye"
+      },
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:large_ball;red,blue;;t",
+    "count": 1,
+    "spec": "star:large_ball;red,blue;;t",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:fire_charge"
+      },
+      {
+        "id": "minecraft:diamond"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:blue_dye"
+      },
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/rocket",
+    "result": "minecraft:firework_rocket@rocket:2|small_ball;red;;",
+    "count": 3,
+    "spec": "rocket:2|small_ball;red;;",
+    "grid": [
+      {
+        "id": "minecraft:paper"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:small_ball;red;;"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/rocket",
+    "result": "minecraft:firework_rocket@rocket:1|large_ball;blue;;t|burst;white,black;red;w",
+    "count": 3,
+    "spec": "rocket:1|large_ball;blue;;t|burst;white,black;red;w",
+    "grid": [
+      {
+        "id": "minecraft:paper"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:large_ball;blue;;t"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:burst;white,black;red;w"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:large_ball;blue;;t",
+    "count": 1,
+    "spec": "star:large_ball;blue;;t",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:fire_charge"
+      },
+      {
+        "id": "minecraft:diamond"
+      },
+      {
+        "id": "minecraft:blue_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/rocket",
+    "result": "minecraft:firework_rocket@rocket:3|star;lime;;|creeper;red,red;;|small_ball;yellow,orange,pink;white,cyan;tw|burst;purple;;t|large_ball;gray;light_gray;w",
+    "count": 3,
+    "spec": "rocket:3|star;lime;;|creeper;red,red;;|small_ball;yellow,orange,pink;white,cyan;tw|burst;purple;;t|large_ball;gray;light_gray;w",
+    "grid": [
+      {
+        "id": "minecraft:paper"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:star;lime;;"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:creeper;red,red;;"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:small_ball;yellow,orange,pink;white,cyan;tw"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:burst;purple;;t"
+      },
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:large_ball;gray;light_gray;w"
+      }
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:creeper;red,red;;",
+    "count": 1,
+    "spec": "star:creeper;red,red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:creeper_head"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:creeper;red,red;;",
+    "count": 1,
+    "spec": "star:creeper;red,red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:dragon_head"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:creeper;red,red;;",
+    "count": 1,
+    "spec": "star:creeper;red,red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:piglin_head"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:creeper;red,red;;",
+    "count": 1,
+    "spec": "star:creeper;red,red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:player_head"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:creeper;red,red;;",
+    "count": 1,
+    "spec": "star:creeper;red,red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:skeleton_skull"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:creeper;red,red;;",
+    "count": 1,
+    "spec": "star:creeper;red,red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:wither_skeleton_skull"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:creeper;red,red;;",
+    "count": 1,
+    "spec": "star:creeper;red,red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:zombie_head"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star_fade",
+    "result": "minecraft:firework_star@star:small_ball;yellow,orange,pink;white,cyan;tw",
+    "count": 1,
+    "spec": "star:small_ball;yellow,orange,pink;white,cyan;tw",
+    "grid": [
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:small_ball;yellow,orange,pink;;tw"
+      },
+      {
+        "id": "minecraft:white_dye"
+      },
+      {
+        "id": "minecraft:cyan_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:small_ball;yellow,orange,pink;;tw",
+    "count": 1,
+    "spec": "star:small_ball;yellow,orange,pink;;tw",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:diamond"
+      },
+      {
+        "id": "minecraft:glowstone_dust"
+      },
+      {
+        "id": "minecraft:yellow_dye"
+      },
+      {
+        "id": "minecraft:orange_dye"
+      },
+      {
+        "id": "minecraft:pink_dye"
+      },
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:burst;purple;;t",
+    "count": 1,
+    "spec": "star:burst;purple;;t",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:feather"
+      },
+      {
+        "id": "minecraft:diamond"
+      },
+      {
+        "id": "minecraft:purple_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star_fade",
+    "result": "minecraft:firework_star@star:large_ball;gray;light_gray;w",
+    "count": 1,
+    "spec": "star:large_ball;gray;light_gray;w",
+    "grid": [
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:large_ball;gray;;w"
+      },
+      {
+        "id": "minecraft:light_gray_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:large_ball;gray;;w",
+    "count": 1,
+    "spec": "star:large_ball;gray;;w",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:fire_charge"
+      },
+      {
+        "id": "minecraft:glowstone_dust"
+      },
+      {
+        "id": "minecraft:gray_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star_fade",
+    "result": "minecraft:firework_star@star:large_ball;red,blue;white;tw",
+    "count": 1,
+    "spec": "star:large_ball;red,blue;white;tw",
+    "grid": [
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:large_ball;red,blue;;tw"
+      },
+      {
+        "id": "minecraft:white_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:large_ball;red,blue;;tw",
+    "count": 1,
+    "spec": "star:large_ball;red,blue;;tw",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:fire_charge"
+      },
+      {
+        "id": "minecraft:diamond"
+      },
+      {
+        "id": "minecraft:glowstone_dust"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      {
+        "id": "minecraft:blue_dye"
+      },
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:small_ball;blue,red;;",
+    "count": 1,
+    "spec": "star:small_ball;blue,red;;",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:blue_dye"
+      },
+      {
+        "id": "minecraft:red_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star_fade",
+    "result": "minecraft:firework_star@star:burst;magenta,light_blue;brown,green;t",
+    "count": 1,
+    "spec": "star:burst;magenta,light_blue;brown,green;t",
+    "grid": [
+      {
+        "id": "minecraft:firework_star",
+        "spec": "star:burst;magenta,light_blue;;t"
+      },
+      {
+        "id": "minecraft:brown_dye"
+      },
+      {
+        "id": "minecraft:green_dye"
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "recipe": "qwerte:special/star",
+    "result": "minecraft:firework_star@star:burst;magenta,light_blue;;t",
+    "count": 1,
+    "spec": "star:burst;magenta,light_blue;;t",
+    "grid": [
+      {
+        "id": "minecraft:gunpowder"
+      },
+      {
+        "id": "minecraft:feather"
+      },
+      {
+        "id": "minecraft:diamond"
+      },
+      {
+        "id": "minecraft:magenta_dye"
+      },
+      {
+        "id": "minecraft:light_blue_dye"
+      },
+      null,
+      null,
+      null,
+      null
+    ]
+  }
+]

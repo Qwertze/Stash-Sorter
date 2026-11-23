@@ -36,7 +36,8 @@ public final class Preflight {
             if (!l.type().equals(Order.ITEM) || StockPlanner.isShulkerKey(l.key())) continue;
             need.merge(l.key(), (long) l.count(), Long::sum);
         }
-        if (craft != null) for (Order.Qty t : craft.take()) need.merge(t.id(), (long) t.count(), Long::sum);
+        // A take entry with a key (B3, a rocket or star) reserves that index key (CRAFT-CONTRACT-v1.2.md 9); one without reserves its id
+        if (craft != null) for (Order.Qty t : craft.take()) need.merge(t.key() != null ? t.key() : t.id(), (long) t.count(), Long::sum);
         return need;
     }
 

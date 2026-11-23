@@ -41,6 +41,7 @@ import com.porter.qwertestash.orders.AnvilNamer;
 import com.porter.qwertestash.orders.BaseSlots;
 import com.porter.qwertestash.orders.BinTracker;
 import com.porter.qwertestash.orders.ClickPlanner;
+import com.porter.qwertestash.orders.FireworkSpecs;
 import com.porter.qwertestash.orders.CraftBatch;
 import com.porter.qwertestash.orders.CraftCharge;
 import com.porter.qwertestash.orders.CraftResume;
@@ -80,6 +81,7 @@ import com.porter.qwertestash.orders.SourcePicker;
 import com.porter.qwertestash.orders.SourceRules;
 import com.porter.qwertestash.orders.BinStep;
 import com.porter.qwertestash.orders.OrderFlow;
+import com.porter.qwertestash.orders.Pseudo;
 import com.porter.qwertestash.orders.RepairMemory;
 import com.porter.qwertestash.orders.RepairPassGate;
 import com.porter.qwertestash.orders.RepairPassReport;
@@ -13869,14 +13871,22 @@ public class StashSorter extends AbstractFieldModule {
 
         OrderChunk(Order.Lot lot, int target, int stack) {
             this.lot = lot;
-            this.key = Recipes.ns(lot.key());
+            this.key = CraftLedger.ns(lot.key());
             this.target = target;
             this.stack = stack;
         }
 
         String id() {
-            return shortId(key);
+            return shortId(Pseudo.base(key));
         }
+
+        /** The spec of the rocket or star this chunk makes (B3), or null for any other item. */
+        @Nullable String spec() {
+            return Pseudo.spec(key);
+        }
+
+        /** The index key of the stack the chunk made, when it makes a rocket or star (B3): the made load is known by it. */
+        @Nullable String madeKey;
     }
 
     private static String shortId(String id) {
@@ -13885,7 +13895,7 @@ public class StashSorter extends AbstractFieldModule {
 
     private static int stackOf(String id) {
         try {
-            var data = ItemRegistry.REGISTRY.get(shortId(Recipes.ns(CraftSlots.baseOf(id))));
+            var data = ItemRegistry.REGISTRY.get(shortId(Recipes.ns(CraftSlots.baseOf(Pseudo.base(id)))));
             return data == null ? 64 : Math.max(1, data.stackSize());
         } catch (RuntimeException | LinkageError e) {
             return 64;
@@ -14115,7 +14125,8 @@ public class StashSorter extends AbstractFieldModule {
         Map<String, Long> out = new HashMap<>();
         for (var e : new ArrayList<>(orderCraftSurplus.entrySet())) {
             Item it = inventoryItem(e.getKey());
-            if (it != null && it.id.equals(e.getValue())) out.merge("minecraft:" + it.id, (long) it.count, Long::sum);
+            // A rocket or star of a spec (B3) is counted under its pseudo id, as the sub-plan knows it
+            if (it != null && it.id.equals(e.getValue())) out.merge(refOfItem(it), (long) it.count, Long::sum);
         }
         return out;
     }
@@ -14140,10 +14151,11 @@ public class StashSorter extends AbstractFieldModule {
         orderCraftLots.entrySet().removeIf(e -> {
             Item it = inventoryItem(e.getKey());
             // A crafted load is a plain stack: a slot that now holds something with components (an enchanted result in the slot a base vacated) is no longer one
-            if (it == null || !it.id.equals(e.getValue()) || !freshPlain(it)) return true;
+            // A rocket or star of a spec (B3) is no plain stack: its load is known by its own index key
+            if (it == null || !it.id.equals(e.getValue()) || !(freshPlain(it) || it.fw != null)) return true;
             for (int i = 0; i < wanted.size(); i++) {
                 Order.Lot lot = wanted.get(i);
-                if (Recipes.ns(lot.key()).equals("minecraft:" + it.id) && lot.count() == it.count) {
+                if ((Recipes.ns(lot.key()).equals("minecraft:" + it.id) || lot.key().equals(it.indexKey())) && lot.count() == it.count) {
                     wanted.remove(i);
                     return false;
                 }
@@ -14167,8 +14179,21 @@ public class StashSorter extends AbstractFieldModule {
     private CraftPool.Stock orderStock(CraftLedger ledger) {
         Stash s = orders.st();
         if (s == null) return CraftPool.Stock.empty();
-        Set<String> ids = new HashSet<>(ledger.take().keySet());
-        return SourceRules.craftSurvey(s.boxes, ids, orders.reservedShulkerKeys(), CONFIG.useNamedShulkers, neverUse(), sourceLive).plainOnly();
+        Set<String> ids = new HashSet<>(ledger.takeItemIds());
+        // The rockets and stars of a block's take (B3) carry a component patch: they are taken by the index keys the take names
+        return SourceRules.craftSurvey(s.boxes, ids, orders.reservedShulkerKeys(), CONFIG.useNamedShulkers, neverUse(), sourceLive).plainAnd(ledger.specKeys());
+    }
+
+    /**
+     * The loads to gather for what a plan takes from the stash: plain items by item id (as always), and the rockets and stars of the order's take (B3, pseudo
+     * ids in {@code fromStock}) by the index keys its take names, in the order the server listed them.
+     */
+    private List<Order.Lot> gatherFor(CraftLedger ledger, CraftPool.Stock stock, Map<String, Long> fromStock, List<Unit> others) {
+        Map<String, Long> plain = new LinkedHashMap<>();
+        for (var e : fromStock.entrySet()) if (!Pseudo.is(e.getKey())) plain.put(e.getKey(), e.getValue());
+        List<Order.Lot> out = new ArrayList<>(CraftPool.lots(stock, plain, others));
+        out.addAll(CraftPool.lotsByKey(stock, ledger.keysFor(fromStock), others));
+        return out;
     }
 
     /** Starts the next chunk of crafting for a bin (OrderFlow.CraftLoads). @return true when a job was started */
@@ -14184,7 +14209,7 @@ public class StashSorter extends AbstractFieldModule {
         // What an earlier order left in the furnace (its ledger is gone) is taken up before any furnace is used
         if (!CONFIG.craftFurnaceDebt.isEmpty() && startDebtRecovery(u)) return true;
         Order.Lot lot = u.lots.get(idx);
-        String key = Recipes.ns(lot.key());
+        String key = CraftLedger.ns(lot.key());
         String task = String.valueOf(flow.orderId());
         String here = "order: shulker " + (flow.index() + 1) + "/" + flow.units().size();
         furnaceOrderBegins(task);
@@ -14270,7 +14295,7 @@ public class StashSorter extends AbstractFieldModule {
         long fillsLeft = Math.min((long) ledger.maxFills() - ledger.fills(), (long) CONFIG.craftOrderMaxPerHour - craftOrderFillsLastHour());
         CraftPool.Stock stock = orderStock(ledger);
         List<Unit> others = remainingUnits();
-        CraftBatch.Choice choice = CraftBatch.choose(ledger, key, lot.count(), freeCarryCount(), fillsLeft, StashSorter::stackOf, need -> CraftPool.lots(stock, need, others).size());
+        CraftBatch.Choice choice = CraftBatch.choose(ledger, key, lot.count(), freeCarryCount(), fillsLeft, StashSorter::stackOf, need -> gatherFor(ledger, stock, need, others).size());
         if (!choice.ok()) {
             String reason = choice.reason() == null ? CraftOrder.INGREDIENTS_SHORT : choice.reason();
             step(here + ": " + lot.count() + " " + Recipes.pretty(key) + " can't be crafted: " + CraftOrder.describe(reason) + (choice.detail() == null ? "" : " (" + choice.detail() + ")") + ".");
@@ -14308,12 +14333,11 @@ public class StashSorter extends AbstractFieldModule {
                 }
             }
         }
-        List<Order.Lot> gather = CraftPool.lots(stock, plan.fromStock(), others);
+        List<Order.Lot> gather = gatherFor(ledger, stock, plan.fromStock(), others);
         // The stash must really give what the plan takes (the budget is the server's count, the stash is what is here now)
-        Map<String, Long> got = new HashMap<>();
-        for (Order.Lot g : gather) got.merge(Recipes.ns(baseIdOf(g.key())), (long) g.count(), Long::sum);
+        Map<String, Long> got = CraftCharge.gathered(gather, ledger::refOfKey);
         for (var need : plan.fromStock().entrySet()) {
-            if (got.getOrDefault(Recipes.ns(need.getKey()), 0L) < need.getValue()) {
+            if (got.getOrDefault(CraftLedger.ns(need.getKey()), 0L) < need.getValue()) {
                 step(here + ": " + lot.count() + " " + Recipes.pretty(key) + " can't be crafted: the stash has no " + Recipes.pretty(need.getKey()) + " to give.");
                 flow.craftLotShort(u, idx, CraftOrder.INGREDIENTS_SHORT);
                 return false;
@@ -14323,7 +14347,7 @@ public class StashSorter extends AbstractFieldModule {
         CraftRun run = new CraftRun(u, task, plan, gather);
         run.oc = new OrderChunk(lot, choice.count(), stackOf(key));
         run.oc.smelts = smelts;
-        run.oc.gathered = CraftCharge.gathered(gather);
+        run.oc.gathered = CraftCharge.gathered(gather, ledger::refOfKey);
         // The surplus carried from earlier chunks is the craft's to use
         for (int slot : orderCraftSurplus.keySet()) if (inventoryItem(slot) != null) run.owned.add(slot);
         // The saved ledger no longer lists surplus this chunk may consume: a restart before the chunk is recorded refunds nothing it used
@@ -14368,7 +14392,7 @@ public class StashSorter extends AbstractFieldModule {
         int slot = -1;
         for (int s : oc.resultSlots) {
             Item it = inventoryItem(s);
-            if (it == null || !it.id.equals(oc.id())) continue;
+            if (it == null || !it.id.equals(oc.id()) || !hasSpec(it, oc.spec())) continue;
             if (slot < 0 || it.count > inventoryItem(slot).count) slot = s;
         }
         Item result = slot < 0 ? null : inventoryItem(slot);
@@ -14405,6 +14429,8 @@ public class StashSorter extends AbstractFieldModule {
         oc.settled = true;
         // Kept: the load's stack until its bin is built, and (when anything was crafted) every other stack of the craft as surplus
         if (oc.lotSlot >= 0) orderCraftLots.put(oc.lotSlot, oc.id());
+        // A rocket or star of a spec (B3) is known by the index key of its own components from here on
+        if (oc.lotSlot >= 0 && oc.spec() != null && result != null) oc.madeKey = result.indexKey();
         if (oc.fillsMade > 0 || oc.smelted > 0) {
             for (int s : new ArrayList<>(r.owned)) {
                 Item it = inventoryItem(s);
@@ -14474,7 +14500,7 @@ public class StashSorter extends AbstractFieldModule {
             if (tableTrouble != null && CraftingTableSpot.get() == null) tableTrouble = null;
             step(here + ": crafted " + oc.made + " " + Recipes.pretty(oc.key) + ".");
             // A chunk smaller than the load leaves the rest of it to craft
-            flow.craftChunk(u, idx, oc.made, oc.fillsMade, charged, null);
+            flow.craftChunk(u, idx, oc.made, oc.fillsMade, charged, null, oc.madeKey);
             return;
         }
         step(here + ": crafting " + Recipes.pretty(oc.key) + " stopped short (" + CraftOrder.describe(code) + "), " + oc.made + " of " + oc.target + " made.");
@@ -14507,7 +14533,9 @@ public class StashSorter extends AbstractFieldModule {
             flow.craftChunk(u, idx, 0, oc.fillsMade, charged, null);
             return;
         }
-        flow.craftChunk(u, idx, oc.made, oc.fillsMade, charged, code);
+        flow.craftChunk(u, idx, oc.made, oc.fillsMade, charged, code, oc.madeKey);
+        // The table gave another firework than the order names (B3): the rest of that line would only do the same, so it is short too
+        if (CraftOrder.RECIPE_MISMATCH.equals(code) && oc.spec() != null) flow.craftShortRef(oc.key, code);
     }
 
     /** Compaction found no empty shulker: one is crafted, when crafting is on. @return true when a job was started */
@@ -14624,12 +14652,12 @@ public class StashSorter extends AbstractFieldModule {
                 else if (r.trips > 0) {
                     Recipes recipes = recipesOrNull();
                     Map<String, Long> pool = new HashMap<>();
-                    for (var e : craftPort.carried().entrySet()) pool.merge(CraftSlots.baseOf(e.getKey()), (long) e.getValue(), Long::sum);
+                    for (var e : craftPort.carried().entrySet()) pool.merge(refOfKind(e.getKey()), (long) e.getValue(), Long::sum);
                     CraftPlanner.Plan again;
                     CraftLedger ledger = r.oc == null ? null : orders.flow.craftLedger();
                     if (ledger != null && recipes != null && r.made < r.wanted) {
                         // An order's chunk is planned again from what is carried, with the order's recipes only
-                        again = new CraftSub.Session(ledger.table(), ledger.allowed(), pool, pool, Map.of(), ledger.limits(), ledger.smelting()).plan(r.plan.item(), r.wanted - r.made).plan();
+                        again = ledger.sessionWith(pool, pool, Map.of()).plan(r.plan.item(), r.wanted - r.made).plan();
                     }
                     else again = recipes == null || r.made >= r.wanted ? null
                         : CraftPlanner.plan(recipes, r.plan.item(), r.wanted - r.made, pool, CraftPlanner.Limits.open());
@@ -15134,6 +15162,41 @@ public class StashSorter extends AbstractFieldModule {
         return CraftSlots.kind(it.id, it.key, it.variant);
     }
 
+    // Rockets and stars of a spec (B3, CRAFT-CONTRACT-v1.2.md 3 and 15)
+
+    private static @Nullable Object fireworkTablesFor;
+    private static FireworkSpecs.@Nullable Tables fireworkTablesNow;
+
+    /** The firework tables of the extras held now (cached per extras block), or null. */
+    private static synchronized FireworkSpecs.@Nullable Tables fireworkTables() {
+        com.porter.qwertestash.manager.Extras e = com.porter.qwertestash.manager.Extras.current();
+        if (e != fireworkTablesFor) {
+            fireworkTablesFor = e;
+            fireworkTablesNow = FireworkSpecs.Tables.of(e);
+        }
+        return fireworkTablesNow;
+    }
+
+    /** The rocket or star spec of a stack from its components (as read when the stack was seen), or null when it has none. */
+    private static @Nullable String specOfItem(@Nullable Item it) {
+        return it == null ? null : FireworkSpecs.specOf(it.fw, fireworkTables());
+    }
+
+    /** What the sub-plan calls this stack: its pseudo id when it has a spec, else its namespaced item id. */
+    private static String refOfItem(Item it) {
+        return com.porter.qwertestash.stash.FireworkItems.refOf(it, fireworkTables());
+    }
+
+    /** What the sub-plan calls a carried kind: its pseudo id when a stack of the kind has a spec, else its item id. */
+    private String refOfKind(String kind) {
+        return Pseudo.of(CraftSlots.baseOf(kind), craftPort.specOf(kind));
+    }
+
+    /** The stack is of the spec the load asks for: any stack when it asks for none. */
+    private static boolean hasSpec(Item it, @Nullable String spec) {
+        return spec == null || spec.equals(specOfItem(it));
+    }
+
     // Items left in the crafting table's grid with no room for them: the table is kept open and nothing else is done
     private boolean tableStuck;
     private long tableStuckAlertAt, tableStuckSince;
@@ -15368,6 +15431,21 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         @Override
+        public @Nullable String specOf(String kind) {
+            // The spec of a carried kind (a star of a spec, B3): worked out from a stack of that kind the craft may use
+            for (int slot : craftUsable()) {
+                Item it = inventoryItem(slot);
+                if (it != null && kindOf(it).equals(kind)) return specOfItem(it);
+            }
+            return null;
+        }
+
+        @Override
+        public @Nullable String specAt(int slot) {
+            return specOfItem(Item.of(gridStack(slot)));
+        }
+
+        @Override
         public boolean holdingCursor() {
             return StashSorter.this.holdingCursor();
         }
@@ -15417,7 +15495,7 @@ public class StashSorter extends AbstractFieldModule {
             if (r != null) {
                 r.owned.add(into);
                 if (tableSlot == CraftGrid.RESULT && what.id.equals("shulker_box")) r.resultSlots.add(into);
-                if (tableSlot == CraftGrid.RESULT && r.oc != null && what.id.equals(r.oc.id())) r.oc.resultSlots.add(into);
+                if (tableSlot == CraftGrid.RESULT && r.oc != null && what.id.equals(r.oc.id()) && hasSpec(what, r.oc.spec())) r.oc.resultSlots.add(into);
                 if (tableSlot == CraftGrid.RESULT && r.forTable && what.id.equals("crafting_table")) r.tableSlot = into;
                 if (tableSlot == CraftGrid.RESULT && r.forFurnace && what.id.equals("furnace")) r.tableSlot = into;
             }
@@ -16539,6 +16617,14 @@ public class StashSorter extends AbstractFieldModule {
         Stash st = orders.st();
         if (st == null || CraftBounds.areaWhy(effectiveDimension(st), stashArea(st), new CraftSettings.Table(spot.x(), spot.y(), spot.z(), spot.dimension()), 64) != null) return null;
         return new ManagerIndex.BotTable(spot.x() + "," + spot.y() + "," + spot.z(), FurnaceSpot.source());
+    }
+
+    /** What `stash craftorders` says about rockets and stars (B3). */
+    public String craftFireworkLine() {
+        FireworkSpecs.Tables t = FireworkSpecs.Tables.of(com.porter.qwertestash.manager.Extras.current());
+        if (!CONFIG.craftFirework) return "off (`stash craftorders firework on`)";
+        if (t == null) return "on, but the server's extras have no firework tables yet: no orders for rockets or stars are taken";
+        return "on: " + t.dyeColor().size() + " dye colours, " + t.starItems().size() + " star item roles; rockets and stars are made at the crafting table with the exact grid the order names";
     }
 
     /** What `stash craftorders` says about smelting. No position. */
@@ -18490,7 +18576,12 @@ public class StashSorter extends AbstractFieldModule {
 
         @Override
         public Set<String> craftCan() {
-            return Set.copyOf(ManagerIndex.craftCan(com.porter.qwertestash.manager.Extras.current(), CONFIG.craftSmelt));
+            return Set.copyOf(ManagerIndex.craftCan(com.porter.qwertestash.manager.Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework));
+        }
+
+        @Override
+        public FireworkSpecs.@Nullable Tables craftFireworks() {
+            return CONFIG.craftFirework ? FireworkSpecs.Tables.of(com.porter.qwertestash.manager.Extras.current()) : null;
         }
 
         @Override
@@ -18625,14 +18716,21 @@ public class StashSorter extends AbstractFieldModule {
             List<CraftResume.Stack> carried = new ArrayList<>();
             for (int slot : carriedSlots()) {
                 Item it = inventoryItem(slot);
-                if (it != null && it.indexKey().equals("minecraft:" + it.id)) carried.add(new CraftResume.Stack(slot, "minecraft:" + it.id, it.count));
+                if (it == null) continue;
+                boolean plain = it.indexKey().equals("minecraft:" + it.id);
+                if (plain) carried.add(new CraftResume.Stack(slot, "minecraft:" + it.id, it.count));
+                if (it.fw != null) {
+                    // A rocket or star (B3): a made load is known by its index key, surplus by its pseudo id (a slot is given to one of them only)
+                    if (!plain) carried.add(new CraftResume.Stack(slot, it.indexKey(), it.count));
+                    carried.add(new CraftResume.Stack(slot, refOfItem(it), it.count));
+                }
             }
             CraftResume.Result result = CraftResume.remark(loads, surplus, carried);
             for (int i = 0; i < result.lotSlots().size(); i++) {
                 int slot = result.lotSlots().get(i);
-                if (slot >= 0) orderCraftLots.put(slot, shortId(Recipes.ns(lots.get(i).key())));
+                if (slot >= 0) orderCraftLots.put(slot, shortId(Recipes.ns(baseIdOf(Pseudo.base(lots.get(i).key())))));
             }
-            for (var e : result.surplusSlots().entrySet()) orderCraftSurplus.put(e.getKey(), shortId(e.getValue()));
+            for (var e : result.surplusSlots().entrySet()) orderCraftSurplus.put(e.getKey(), shortId(Pseudo.base(e.getValue())));
             return result.refund();
         }
 
@@ -18655,7 +18753,7 @@ public class StashSorter extends AbstractFieldModule {
             for (var e : new ArrayList<>(orderReturnWatch.entrySet())) {
                 Item it = inventoryItem(e.getKey());
                 if (it == null || !it.id.equals(e.getValue())) orderReturnWatch.remove(e.getKey());
-                else out.merge("minecraft:" + it.id, (long) it.count, Long::sum);
+                else out.merge(refOfItem(it), (long) it.count, Long::sum);
             }
             return out;
         }

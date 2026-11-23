@@ -62,6 +62,19 @@ public final class CraftTrip {
         /** Brings this grid slot up to {@code count} of {@code item} (a kind) from one carried stack, as one request. */
         boolean place(int gridSlot, String item, int count);
 
+        /**
+         * The rocket or star spec of a carried kind (CRAFT-CONTRACT-v1.2.md 3), worked out from the components of a stack of that kind, or null when it has
+         * none (B3). Asked for the stars of a special step's grid.
+         */
+        default @Nullable String specOf(String kind) {
+            return null;
+        }
+
+        /** The spec of the stack in this table slot (0 result, 1-9 grid), or null when it is empty or has none (B3). Asked for the result of a special step. */
+        default @Nullable String specAt(int slot) {
+            return null;
+        }
+
         /** The stack size of a kind of carried stack (an item id, with its components when it has any): a batch never gives a grid slot more. */
         default int maxStack(String kind) {
             return 64;
@@ -109,6 +122,8 @@ public final class CraftTrip {
     public static final int OPEN_RETRY_TICKS = 40;
     public static final int FILL_TICKS = 20 * 10;
     public static final int RESULT_TICKS = 20 * 10;
+    /** A result whose spec is not the step's is looked at again this long before it is called a mismatch (B3). */
+    public static final int SPEC_TICKS = 20;
     public static final int CHECK_TICKS = 20 * 5;
     public static final int SETTLE_TICKS = 4;
     public static final int CLOSE_TICKS = 20 * 10;
@@ -124,7 +139,9 @@ public final class CraftTrip {
         CLOSED = "the crafting table closed before it was done", NO_RESULT = "no result from the crafting table in time",
         NOT_TAKEN = "the crafting table didn't give the result", NO_ROOM = "no room in the inventory for what was crafted",
         MISSING = "the inputs aren't all in the inventory", GRID = "the grid didn't fill as it should",
-        TOO_LONG = "the trip to the crafting table took too long";
+        TOO_LONG = "the trip to the crafting table took too long",
+        /** B3 (CRAFT-CONTRACT-v1.2.md 15): the result of a special step is not the spec the step names: the grid is taken back and the line is short with recipe_mismatch. */
+        SPEC_MISMATCH = "the crafting table gave a firework other than the one the order names";
 
     /** Grid slots of the inventory's 2x2 crafting grid (window slots 1-4; 5-8 are the armour). */
     public static final int INVENTORY_GRID = 4, TABLE_GRID = 9;
@@ -330,7 +347,7 @@ public final class CraftTrip {
                 }
                 CraftPlanner.Step st = steps.get(at);
                 if (fillsLeft < 0) fillsLeft = st.fills();
-                batch = CraftGrid.batch(st.recipe(), port.carried(), fillsLeft, MAX_PER_SLOT, inventoryGrid() ? 2 : 3, port::maxStack);
+                batch = CraftGrid.batch(st.recipe(), port.carried(), fillsLeft, MAX_PER_SLOT, inventoryGrid() ? 2 : 3, port::maxStack, port::specOf);
                 if (batch == null) {
                     end(MISSING + " (" + Recipes.pretty(st.recipe().result()) + ")", false, false);
                     return;
@@ -388,8 +405,18 @@ public final class CraftTrip {
                 if (port.busy() || sinceClick < SETTLE_TICKS) return;
                 CraftPlanner.Step st = steps.get(at);
                 String result = st.recipe().result();
-                if (!result.equals(port.itemAt(CraftGrid.RESULT)) || port.countAt(CraftGrid.RESULT) < 1) {
+                // A step that makes a variant (B3): the stack in the result slot must be that item (any components), and then its spec the one the step names
+                boolean variant = Pseudo.is(result);
+                String shown = port.itemAt(CraftGrid.RESULT);
+                if (shown == null || (variant ? !Pseudo.base(result).equals(CraftSlots.baseOf(shown)) : !result.equals(shown)) || port.countAt(CraftGrid.RESULT) < 1) {
                     if (stepTicks > RESULT_TICKS) end(NO_RESULT, false, true);
+                    return;
+                }
+                if (variant && !java.util.Objects.equals(Pseudo.spec(result), port.specAt(CraftGrid.RESULT))) {
+                    // The result slot may still show an earlier update: looked at again for a few ticks, then it is what the order does not name:
+                    // nothing is taken, the grid goes back, and the line is short (CRAFT-CONTRACT-v1.2.md 15)
+                    if (stepTicks <= SPEC_TICKS) return;
+                    end(SPEC_MISMATCH, false, false);
                     return;
                 }
                 gridBefore = gridTotal();
@@ -397,7 +424,7 @@ public final class CraftTrip {
                     end(NOT_TAKEN, false, true);
                     return;
                 }
-                int into = port.take(result, port.countAt(CraftGrid.RESULT));
+                int into = port.take(Pseudo.base(result), port.countAt(CraftGrid.RESULT));
                 if (into < 0) {
                     if (stepTicks > RESULT_TICKS) end(NO_ROOM, false, false);
                     return;

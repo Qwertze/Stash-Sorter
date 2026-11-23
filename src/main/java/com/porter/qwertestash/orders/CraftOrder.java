@@ -98,6 +98,19 @@ public final class CraftOrder {
      */
     public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
                                          int maxSmelt) {
+        return check(craft, table, maxFills, extrasHash, can, smelting, maxSmelt, null);
+    }
+
+    /**
+     * As above, for a bot that can make fireworks (B3, CRAFT-CONTRACT-v1.2.md 3, 9, 11.1 and 15). A block that uses specs, keys or grids passes only when the
+     * bot's {@code can} has {@code firework}, {@code firework} (its tables from its own extras) is not null, the block names the bot's extras and
+     * {@code needs} lists {@code firework}; then: every special step's grid is the one the bot builds itself from the step's spec ({@link FireworkSpecs#checkStep});
+     * every spec on a line, take or leftover is a canonical rocket or star spec of its item; a take with a spec has the index key it is taken by (a key
+     * of that item); and the lines are covered by what the steps make and the take holds, counted per spec.
+     * @param firework the bot's firework tables (from its extras), or null when it holds none
+     */
+    public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
+                                         int maxSmelt, FireworkSpecs.@Nullable Tables firework) {
         if (craft == null) return "the order has craft lines but no craft block";
         if (craft.malformed()) return "the craft block can't be read";
         if (craft.v() != 1 && craft.v() != 2) return "craft version " + craft.v() + " is not 1 or 2";
@@ -107,11 +120,24 @@ public final class CraftOrder {
             if (craft.extras() != null && !craft.extras().equals(extrasHash)) return "the order was planned with other extras";
             if (!craft.needs().isEmpty() && craft.extras() == null) return "the order needs extras it doesn't name";
             if (craft.reserved() != null) return "the craft block uses " + craft.reserved() + ", which this bot doesn't carry out";
+            if (craft.usesSpecs()) {
+                if (!can.contains("firework") || firework == null) return "the order uses rockets or stars, which this bot can't make";
+                if (!craft.needs().contains("firework")) return "the order uses rockets or stars but doesn't say it needs fireworks";
+                if (craft.extras() == null) return "the order needs extras it doesn't name";
+            }
         }
         if (!craft.recipes().equals(table.hash())) return "the order was planned with another recipe table";
         if (craft.steps().size() > Order.MAX_CRAFT_STEPS || craft.take().size() > Order.MAX_CRAFT_TAKE) return "too many steps or ingredients";
         long fills = 0, smelted = 0;
         for (Order.CraftStep s : craft.steps()) {
+            if (s.special()) {
+                // B3: a special step carries the exact grid of a rocket, star or fade; the bot builds it again from the spec and its own extras
+                String bad = FireworkSpecs.checkStep(s, firework);
+                if (bad != null) return bad;
+                fills += s.fills();
+                continue;
+            }
+            if (s.spec() != null) return "recipe " + s.recipe() + " has a spec but no grid";
             if (s.furnace()) {
                 // Only a v2 block has furnace steps (parseCraft reads the station of a v2 block only)
                 String bad = checkFurnaceStep(s, can, smelting);
@@ -125,7 +151,7 @@ public final class CraftOrder {
             if (s.fills() < 1) return "recipe " + s.recipe() + " has no fills";
             fills += s.fills();
             for (Order.Qty in : s.inputs()) {
-                if (in.count() < 1 || !plain(in.id())) return "recipe " + s.recipe() + " has a bad input";
+                if (in.count() < 1 || !plain(in.id()) || in.spec() != null) return "recipe " + s.recipe() + " has a bad input";
                 if (!accepts(r, in.id())) return "recipe " + s.recipe() + " takes no " + in.id();
             }
         }
@@ -135,17 +161,29 @@ public final class CraftOrder {
             if (craft.smelt() < smelted) return "the block says " + craft.smelt() + " items smelted but its furnace steps smelt " + smelted;
             if (smelted == 0) return "the block says " + craft.smelt() + " items smelted but has no furnace step";
         }
-        for (Order.Qty t : craft.take()) if (t.count() < 1 || !plain(t.id())) return "a take id is not a plain item id";
+        for (Order.Qty t : craft.take()) {
+            if (t.count() < 1 || !plain(t.id())) return "a take id is not a plain item id";
+            String bad = checkSpecified(t.id(), t.spec(), "take");
+            if (bad != null) return bad;
+            if (t.spec() != null && !keyOf(t.id(), t.key())) return "a take of " + t.id() + " with a spec has no index key of that item";
+            if (t.spec() == null && t.key() != null) return "a take of " + t.id() + " names a key but no spec";
+        }
+        for (Order.Qty l : craft.leftovers()) {
+            String bad = checkSpecified(l.id(), l.spec(), "leftover");
+            if (bad != null) return bad;
+        }
         long total = 0;
         java.util.Map<String, Long> made = new java.util.HashMap<>(), taken = new java.util.HashMap<>();
-        for (Order.CraftStep s : craft.steps()) made.merge(s.result(), (long) s.count() * s.fills(), Long::sum);
-        for (Order.Qty t : craft.take()) taken.merge(t.id(), (long) t.count(), Long::sum);
+        for (Order.CraftStep s : craft.steps()) made.merge(s.resultRef(), (long) s.count() * s.fills(), Long::sum);
+        for (Order.Qty t : craft.take()) taken.merge(t.ref(), (long) t.count(), Long::sum);
         for (Order.Qty l : craft.lines()) {
             if (l.count() < 1 || !plain(l.id())) return "a craft line key is not a plain item id";
+            String bad = checkSpecified(l.id(), l.spec(), "craft line");
+            if (bad != null) return bad;
             if (l.count() > MAX_LINE) return "a craft line asks for " + l.count() + ", more than " + MAX_LINE;
             total += l.count();
             // Every line is covered by the steps that make it (or by what the order takes of it from the stash)
-            if (made.getOrDefault(l.id(), 0L) + taken.getOrDefault(l.id(), 0L) < l.count()) return "the steps don't make " + l.count() + " of " + l.id();
+            if (made.getOrDefault(l.ref(), 0L) + taken.getOrDefault(l.ref(), 0L) < l.count()) return "the steps don't make " + l.count() + " of " + l.ref();
         }
         if (total > MAX_TOTAL) return "the craft lines ask for " + total + " in all, more than " + MAX_TOTAL;
         // ENCHANT-CONTRACT draft 3.4: the bases made for enchant plans are part of the craft lines (merged with an ordered line of the same item)
@@ -158,6 +196,22 @@ public final class CraftOrder {
         return null;
     }
 
+    /** A spec on a line, take or leftover (B3) is a canonical rocket or star spec of the item it sits on; null when there is none or it is fine. */
+    private static @Nullable String checkSpecified(String id, @Nullable String spec, String what) {
+        if (spec == null) return null;
+        FireworkSpecs.Parsed p = FireworkSpecs.parse(spec);
+        if (p == null) return "a " + what + " has a spec that is not a canonical rocket or star spec";
+        if (!id.equals(p.rocket() ? FireworkSpecs.ROCKET : FireworkSpecs.STAR)) return "a " + what + " of " + id + " has the spec of another item";
+        return null;
+    }
+
+    private static final Pattern KEY = Pattern.compile("^[a-z0-9_.-]+:[a-z0-9_./-]{1,128}(#[0-9a-f]{1,16})?$");
+
+    /** The key is an index key of this item: its id, then optionally {@code #} and a hash. */
+    private static boolean keyOf(String id, @Nullable String key) {
+        return key != null && KEY.matcher(key).matches() && (key.equals(id) || key.startsWith(id + "#"));
+    }
+
     /**
      * The reason code for a trip or a gather that ended with this failure text ({@link CraftTrip} and the host's own words).
      * @param stuck     items are left in the grid with nowhere to go
@@ -167,6 +221,7 @@ public final class CraftOrder {
         if (cancelled) return CANCELLED;
         if (stuck) return GRID_STUCK;
         if (failure == null) return INTERRUPTED;
+        if (failure.equals(CraftTrip.SPEC_MISMATCH)) return RECIPE_MISMATCH;
         if (failure.equals(CraftTrip.NOT_REACHED) || failure.equals(CraftTrip.NOT_OPENED) || failure.contains("another dimension")) return TABLE_BLOCKED;
         if (failure.contains("website's crafting table isn't one")) return TABLE_MISSING;
         if (failure.contains("no crafting table")) return NO_TABLE;

@@ -291,6 +291,8 @@ public class StashConfig {
     public int craftOrderMaxPerHour = 4096;
     /** Smelt in craft orders (B2, CRAFT-CONTRACT-v1.2.md 14): the heartbeat says {@code can: ["smelt"]} when this is on and the server's extras hold the smelt and fuel tables. */
     public boolean craftSmelt = true;
+    /** Make firework rockets and stars in craft orders (B3, CRAFT-CONTRACT-v1.2.md 15): the heartbeat says {@code can: [..., "firework"]} and the index carries {@code items[].spec} when this is on and the extras hold the firework tables. */
+    public boolean craftFirework = true;
     /** Items one craft order may smelt (the {@code maxSmelt} the heartbeat says; the contract's cap is 256). */
     public int craftOrderMaxSmelt = 256;
     /** The furnace smelting uses (B2): the one found standing in the stash area, or put down from the stash or crafted; never shown on the website. Blank dimension: none. */

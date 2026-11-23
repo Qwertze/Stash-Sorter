@@ -67,6 +67,12 @@ public final class Item {
      * goat horns, ominous bottles): what they are. Null for everything else, and for stacks saved before this existed.
      */
     public @Nullable String typeData;
+    /**
+     * For a firework rocket or star with no component outside the grammar of CRAFT-CONTRACT-v1.2.md 3 (B3): its flight and explosions as the game stores them
+     * ({@link FireworkItems}), from which its spec is derived against the extras' colour table. Null for everything else, for a rocket or star with another
+     * component (a custom name, lore, ...), and for stacks saved before this existed (it is set when their container is read again).
+     */
+    public @Nullable String fw;
     /** What's inside, for shulkers. Empty for everything else, and for empty shulkers. */
     public List<Item> contents = new ArrayList<>();
     /**
@@ -165,6 +171,7 @@ public final class Item {
         if (potion != null && potion.getPotionId() >= 0 && potion.getPotionId() < POTIONS.length) item.potion = POTIONS[potion.getPotionId()];
 
         item.typeData = typeDataOf(data.name(), components);
+        item.fw = FireworkItems.dataOf(data.name(), components, data.components());
 
         if (item.bundle) {
             List<ItemStack> packed = components.get(DataComponentTypes.BUNDLE_CONTENTS);

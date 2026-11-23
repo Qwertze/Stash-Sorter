@@ -97,6 +97,11 @@ public final class OrderFlow {
             return null;
         }
 
+        /** The firework tables of the extras this bot holds (B3), or null: rockets and stars of a block are then refused. */
+        default FireworkSpecs.@Nullable Tables craftFireworks() {
+            return null;
+        }
+
         /** The most items one craft order may smelt ({@code craftOrders.maxSmelt} of the heartbeat, B2), 0 when this bot doesn't smelt. */
         default int craftMaxSmelt() {
             return 0;
@@ -1009,7 +1014,7 @@ public final class OrderFlow {
             return CraftLedger.refused(lines, Recipes.empty(), 0, CraftOrder.RECIPE_MISMATCH);
         }
         Smelting smelting = host.craftSmelting();
-        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan(), smelting, host.craftMaxSmelt());
+        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan(), smelting, host.craftMaxSmelt(), host.craftFireworks());
         if (bad != null) {
             host.say("The order's craft lines are not crafted: " + bad + ".");
             return CraftLedger.refused(lines, table, host.craftMaxFills(), CraftOrder.RECIPE_MISMATCH);
@@ -1054,7 +1059,8 @@ public final class OrderFlow {
         List<Order.Lot> out = new ArrayList<>();
         if (ledger.shortTotal() > 0) return out;
         Map<String, Long> byKey = new LinkedHashMap<>();
-        for (Order.Line l : o.craftLines()) byKey.merge(l.key(), (long) l.count(), Long::sum);
+        // A craft line of a rocket or star spec (B3) is a load of its pseudo id (Order.Line#ref), apart from the plain lines of the item
+        for (Order.Line l : o.craftLines()) byKey.merge(l.ref(), (long) l.count(), Long::sum);
         // Counted before anything is made: a huge line must not allocate its loads
         long loads = 0;
         for (var e : byKey.entrySet()) loads += (e.getValue() + Math.max(1, host.maxStack(e.getKey())) - 1) / Math.max(1, host.maxStack(e.getKey()));
@@ -1214,14 +1220,22 @@ public final class OrderFlow {
      * try cut short, to be made again).
      */
     public void craftChunk(Unit u, int index, int made, long fillsMade, Map<String, Long> fromStock, @Nullable String reason) {
+        craftChunk(u, index, made, fillsMade, fromStock, reason, null);
+    }
+
+    /**
+     * As above; {@code madeKey} is the index key of the stack that was made (B3: the load of a rocket or star spec is planned under its pseudo id and the stack it
+     * came to has a key of its own), which the made load is then known by; null for any other load.
+     */
+    public void craftChunk(Unit u, int index, int made, long fillsMade, Map<String, Long> fromStock, @Nullable String reason, @Nullable String madeKey) {
         CraftLedger l = craftLedger;
         if (l == null || index < 0 || index >= u.lots.size() || !u.lots.get(index).craft()) return;
         Order.Lot lot = u.lots.get(index);
         int m = Math.max(0, Math.min(made, lot.count()));
         l.madeChunk(lot.key(), m, fillsMade, fromStock);
-        if (m >= lot.count()) u.lots.set(index, lot.made());
+        if (m >= lot.count()) u.lots.set(index, lot.madeAs(madeKey));
         else if (m > 0) {
-            u.lots.set(index, lot.withCount(m).made());
+            u.lots.set(index, lot.withCount(m).madeAs(madeKey));
             // The rest is another load of the bin; a shulker holds 27 stacks, so with no slot left for it the rest is short
             if (reason == null && u.lots.size() < Order.SLOTS) u.lots.add(index + 1, lot.withCount(lot.count() - m));
             else l.addShort(lot.key(), lot.count() - m, reason == null ? CraftOrder.INVENTORY_FULL : reason);
@@ -1231,6 +1245,24 @@ public final class OrderFlow {
             l.addShort(lot.key(), lot.count(), reason);
         }
         saveCraft(u);
+    }
+
+    /**
+     * Every craft load still to make of this line (B3: a rocket or star spec, by its pseudo id) is short with this reason: what the table made was not what
+     * the order names, so making more of it would only fail again (CRAFT-CONTRACT-v1.2.md 15).
+     */
+    public void craftShortRef(String ref, String reason) {
+        CraftLedger l = craftLedger;
+        if (l == null) return;
+        for (Unit u : units) {
+            for (int i = u.lots.size() - 1; i >= 0; i--) {
+                Order.Lot lot = u.lots.get(i);
+                if (!lot.craft() || !lot.key().equals(ref)) continue;
+                u.lots.remove(i);
+                l.addShort(lot.key(), lot.count(), reason);
+            }
+        }
+        saveCraft(null);
     }
 
     /** The craft load at {@code index} can't be made: it is short with this reason, and the bin goes on without it. */

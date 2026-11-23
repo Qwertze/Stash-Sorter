@@ -119,6 +119,8 @@ public final class CraftSub {
         final Set<String> allowed;
         final Limits limits;
         final @Nullable Smelting smelting;
+        /** The special steps of the block (B3: rockets, stars), as recipes by plan id: a rocket or star is a pseudo id (item id and spec, see {@link Pseudo}). */
+        final Map<String, Recipes.Recipe> special;
         Map<String, Long> pool, surplus, taken = new LinkedHashMap<>();
         final List<Raw> steps = new ArrayList<>();
         Set<Lock> locks = new HashSet<>();
@@ -147,7 +149,17 @@ public final class CraftSub {
          */
         public Session(Recipes table, @Nullable Set<String> allowed, Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus, Limits limits,
                        @Nullable Smelting smelting) {
+            this(table, allowed, estPool, pool, surplus, limits, smelting, Map.of());
+        }
+
+        /**
+         * As above, with the block's special steps (B3): each is a recipe with the exact cells of its grid (spec'd cells and results are pseudo ids), listed
+         * in {@code allowed} by {@link FireworkSpecs#planId} like any other step. The pool and the surplus may hold pseudo ids too.
+         */
+        public Session(Recipes table, @Nullable Set<String> allowed, Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus, Limits limits,
+                       @Nullable Smelting smelting, Map<String, Recipes.Recipe> special) {
             this.limits = limits;
+            this.special = special;
             this.table = table;
             this.allowed = allowed;
             this.smelting = smelting;
@@ -175,6 +187,7 @@ public final class CraftSub {
         Recipes.@Nullable Recipe recipeById(String id) {
             Recipes.Recipe r = table.byId(id);
             if (r == null && smelting != null) r = smelting.asRecipe(id);
+            if (r == null) r = special.get(id);
             return r;
         }
 
