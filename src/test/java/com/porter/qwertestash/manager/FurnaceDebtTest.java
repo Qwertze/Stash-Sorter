@@ -44,11 +44,36 @@ class FurnaceDebtTest {
         assertEquals("", FurnaceDebt.toSaved("d", 1, 2, 3, closed));
         SmeltJournal fresh = new SmeltJournal();
         fresh.open();
-        assertEquals("", FurnaceDebt.toSaved("d", 1, 2, 3, fresh), "opened, nothing put in yet");
+        // An open journal is a record even while empty: a crash between the first click and the first entry still leaves the furnace on record
+        FurnaceDebt empty = FurnaceDebt.parse(FurnaceDebt.toSaved("d", 1, 2, 3, fresh));
+        assertNotNull(empty);
+        assertEquals(1, empty.x());
+        assertTrue(empty.journal().isOpen());
+        assertTrue(empty.ids().isEmpty());
         assertNull(FurnaceDebt.parse(""));
         assertNull(FurnaceDebt.parse(null));
         assertNull(FurnaceDebt.parse("not json"));
         assertNull(FurnaceDebt.parse("{\"dimension\":\"d\"}"));
+    }
+
+    @Test
+    void aBigJournalIsCutToAboutEightKiBAndSaysSo() {
+        SmeltJournal big = new SmeltJournal();
+        big.open();
+        for (int i = 0; i < 400; i++) {
+            big.placed("minecraft:some_long_item_name_number_" + i + "_" + "x".repeat(60), i + 1);
+            big.collected("minecraft:other_long_item_name_number_" + i + "_" + "y".repeat(60), i + 1);
+        }
+        assertTrue(FurnaceDebt.truncates(big));
+        String saved = FurnaceDebt.toSaved("minecraft:overworld", 1, 2, 3, big);
+        assertTrue(saved.length() <= FurnaceDebt.MAX_LENGTH, "length " + saved.length());
+        FurnaceDebt d = FurnaceDebt.parse(saved);
+        assertNotNull(d, "still readable");
+        assertTrue(d.journal().placed().size() <= FurnaceDebt.MAX_ENTRIES);
+        assertEquals(1, d.x());
+        assertFalse(FurnaceDebt.truncates(journal()));
+        // A record far beyond the cap is not read at all
+        assertNull(FurnaceDebt.parse("x".repeat(3 * FurnaceDebt.MAX_LENGTH)));
     }
 
     @Test

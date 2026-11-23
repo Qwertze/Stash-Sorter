@@ -96,6 +96,20 @@ class FurnaceFinderTest {
     }
 
     @Test
+    void onlyAFurnaceTheCraftLimitsRuleOutIsOutOfLimits() {
+        assertTrue(FurnaceFinder.outOfLimits(CraftBounds.TOO_FAR));
+        assertTrue(FurnaceFinder.outOfLimits(CraftBounds.WRONG_DIMENSION));
+        assertFalse(FurnaceFinder.outOfLimits(null), "inside the limits");
+        assertFalse(FurnaceFinder.outOfLimits(CraftBounds.NO_AREA), "no area known: no verdict");
+        assertFalse(FurnaceFinder.outOfLimits(CraftBounds.NO_DIMENSION));
+        // The same verdicts CraftBounds gives for a furnace spot: inside the area widened by 64, and far outside it
+        CraftBounds.StashArea area = new CraftBounds.StashArea(new int[] {0, 60, 0, 20, 70, 20}, List.of(), 0, 0);
+        assertFalse(FurnaceFinder.outOfLimits(CraftBounds.areaWhy("overworld", area, new CraftSettings.Table(10, 64, 10, "overworld"), 64)));
+        assertTrue(FurnaceFinder.outOfLimits(CraftBounds.areaWhy("overworld", area, new CraftSettings.Table(5000, 64, 10, "overworld"), 64)));
+        assertTrue(FurnaceFinder.outOfLimits(CraftBounds.areaWhy("overworld", area, new CraftSettings.Table(10, 64, 10, "the_nether"), 64)));
+    }
+
+    @Test
     void aFurnaceKnownToBeEmptyWinsOverANearerOneNobodyLookedInto() {
         BlockPos near = new BlockPos(2, 64, 2), empty = new BlockPos(9, 64, 9);
         BlockPos from = new BlockPos(0, 64, 0);

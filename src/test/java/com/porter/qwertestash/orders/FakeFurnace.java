@@ -17,7 +17,7 @@ final class FakeFurnace implements FurnaceTrip.Port {
     int cook = 200, burnLeft, progress, tick, closeAt = -1, opens;
     final Map<String, Integer> burnTicks = new HashMap<>(Map.of("minecraft:coal", 1600, "minecraft:charcoal", 1600));
     final Map<String, String> smelts = new HashMap<>(Map.of("minecraft:sand", "minecraft:glass", "minecraft:red_sand", "minecraft:glass"));
-    boolean refuseOpen, refuseOpenAfterClose, burnOnlyWhileSmelting, open, noRoom, frozen, arrived = true;
+    boolean gone, refuseOpen, refuseOpenAfterClose, burnOnlyWhileSmelting, open, noRoom, frozen, arrived = true;
     int xp = 0;
 
     FakeFurnace put(int slot, String k, int n) {
@@ -78,6 +78,11 @@ final class FakeFurnace implements FurnaceTrip.Port {
     @Override
     public boolean walk() {
         return true;
+    }
+
+    @Override
+    public boolean furnaceStands() {
+        return !gone;
     }
 
     @Override

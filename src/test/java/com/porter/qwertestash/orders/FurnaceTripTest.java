@@ -202,11 +202,19 @@ public class FurnaceTripTest {
     }
 
     @Test
-    void leftoversNoJournalEntryAccountsForAreNotTheBotsEvenInItsOwnFurnace() {
+    void leftoversOfSmeltingAreTheBotsInItsOwnFurnaceEvenWithNoJournalEntryButNeverInAFoundOne() {
+        // A crash between a click and its journal entry leaves what smelting uses in the furnace: in the bot's own furnace that is its own
         FakeFurnace f = new FakeFurnace().carry(SAND, 5).carry(COAL, 2).put(1, COAL, 3);
-        FurnaceTrip.Outcome o = run(trip(f, glass(5, 1), new SmeltJournal(), true), f, 2000);
-        assertEquals(CraftOrder.FURNACE_BUSY, o.failure());
-        assertEquals(3, f.count[1], "not taken");
+        FurnaceTrip.Outcome o = run(trip(f, glass(5, 1), new SmeltJournal(), true), f, 20_000);
+        assertNull(o.failure(), o.detail());
+        assertEquals(5, f.inventory.get(GLASS));
+        // In a furnace found standing it is somebody else's
+        FakeFurnace found = new FakeFurnace().carry(SAND, 5).carry(COAL, 2).put(1, COAL, 3);
+        assertEquals(CraftOrder.FURNACE_BUSY, run(trip(found, glass(5, 1), new SmeltJournal(), false), found, 2000).failure());
+        assertEquals(3, found.count[1], "not taken");
+        // And what smelting does not use is nobody's of ours even in an own furnace (the iron ore case above)
+        FakeFurnace odd = new FakeFurnace().carry(SAND, 5).carry(COAL, 2).put(1, "minecraft:diamond", 3);
+        assertEquals(CraftOrder.FURNACE_BUSY, run(trip(odd, glass(5, 1), new SmeltJournal(), true), odd, 2000).failure());
     }
 
     @Test
@@ -220,6 +228,61 @@ public class FurnaceTripTest {
         FakeFurnace found = new FakeFurnace().carry(SAND, 5).carry(COAL, 2).put(1, COAL, 3);
         FurnaceTrip.Outcome b = run(trip(found, glass(5, 1), new SmeltJournal(), false).withDebtIds(Set.of(COAL)), found, 2000);
         assertEquals(CraftOrder.FURNACE_BUSY, b.failure());
+    }
+
+    @Test
+    void aFurnaceThatIsNoLongerThereIsNoFurnaceNotBlocked() {
+        SmeltJournal j = new SmeltJournal();
+        j.open();
+        // Gone when the bot arrives
+        FakeFurnace f = new FakeFurnace().carry(SAND, 5).carry(COAL, 1);
+        f.gone = true;
+        FurnaceTrip.Outcome o = run(trip(f, glass(5, 1), j, false), f, 2000);
+        assertEquals(CraftOrder.NO_FURNACE, o.failure());
+        assertEquals(FurnaceTrip.GONE, o.detail());
+        assertFalse(o.retry());
+        assertEquals(0, f.opens, "never opened");
+        assertEquals(5, f.inventory.get(SAND));
+        // Gone while it is being opened (it never opens, then the block is found missing)
+        FakeFurnace g = new FakeFurnace().carry(SAND, 5).carry(COAL, 1);
+        g.refuseOpen = true;
+        FurnaceTrip t = trip(g, glass(5, 1), j, false);
+        for (int i = 0; i < 200; i++) {
+            g.tick();
+            t.tick();
+        }
+        g.gone = true;
+        FurnaceTrip.Outcome o2 = run(t, g, 2000);
+        assertEquals(CraftOrder.NO_FURNACE, o2.failure());
+        // A recovery trip says the same, so the host drops the record
+        FakeFurnace r = new FakeFurnace();
+        r.gone = true;
+        FurnaceTrip.Outcome o3 = run(FurnaceTrip.recover(r, j, () -> { }, 200, true, Set.of(SAND)), r, 2000);
+        assertEquals(CraftOrder.NO_FURNACE, o3.failure());
+    }
+
+    @Test
+    void aSmeltGoingOnInTheBotsOwnFurnaceIsLeftAloneAndAClearOnKnownIdsIsSaid() {
+        // Input and fuel both there, nothing in the journal: somebody else's cook (or a run that is still going): not touched
+        FakeFurnace cooking = new FakeFurnace().carry(SAND, 5).carry(COAL, 2).put(0, SAND, 8).put(1, COAL, 3);
+        FurnaceTrip.Outcome busy = run(trip(cooking, glass(5, 1), new SmeltJournal(), true), cooking, 2000);
+        assertEquals(CraftOrder.FURNACE_BUSY, busy.failure());
+        assertTrue(cooking.count[0] >= 7 && cooking.count[1] >= 2, "still cooking, nothing taken");
+        assertEquals(5, cooking.inventory.get(SAND));
+        // Only leftover fuel and output: cleared on the known-id basis, and the trip says so
+        FakeFurnace left = new FakeFurnace().carry(SAND, 5).carry(COAL, 2).put(1, COAL, 3).put(2, GLASS, 4);
+        FurnaceTrip t = trip(left, glass(5, 1), new SmeltJournal(), true);
+        FurnaceTrip.Outcome o = run(t, left, 20_000);
+        assertNull(o.failure(), o.detail());
+        assertTrue(t.clearedOnKnownIds());
+        // Leftovers the journal accounts for are not "on that basis"
+        FakeFurnace own = new FakeFurnace().carry(SAND, 5).carry(COAL, 2).put(1, COAL, 3);
+        SmeltJournal j = new SmeltJournal();
+        j.open();
+        j.placed(COAL, 3);
+        FurnaceTrip t2 = trip(own, glass(5, 1), j, true);
+        assertNull(run(t2, own, 20_000).failure());
+        assertFalse(t2.clearedOnKnownIds());
     }
 
     @Test

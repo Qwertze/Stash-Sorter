@@ -50,6 +50,11 @@ public final class FurnaceTrip {
             return false;
         }
 
+        /** The block at the furnace is still a furnace (true while its chunk is not loaded: nothing is concluded from a guess). */
+        default boolean furnaceStands() {
+            return true;
+        }
+
         default void opened() {
         }
 
@@ -139,7 +144,7 @@ public final class FurnaceTrip {
 
     public static final String NOT_REACHED = "couldn't reach the furnace", NOT_OPENED = "couldn't open the furnace", CLOSED = "the furnace closed before it was done",
         NO_PROGRESS = "the furnace made nothing in time", NOT_TAKEN = "the furnace didn't give the output", NO_ROOM = "no room in the inventory for what the furnace made",
-        MISSING = "the inputs aren't all in the inventory", TOO_LONG = "smelting took too long", BUSY = "something else is in the furnace";
+        GONE = "the furnace is not there any more", MISSING = "the inputs aren't all in the inventory", TOO_LONG = "smelting took too long", BUSY = "something else is in the furnace";
 
     /** The furnace's slots. */
     public static final int INPUT = 0, FUEL = 1, OUTPUT = 2;
@@ -156,7 +161,7 @@ public final class FurnaceTrip {
     private Step step = Step.Walk;
     private int ticks, stepTicks, sinceClick, tries, idx, reopens, places, takes, stows, settleLeft;
     private int lastProgress, lastIn = -1, lastOut = -1, fuelBase = -1, batchGot;
-    private boolean fuelDone, inputDone, ours, wasEmpty;
+    private boolean fuelDone, inputDone, ours, wasEmpty, clearedOnKnownIds;
     private int takeSlot, takeN;
     private @Nullable String takeId;
     private Step afterTake = Step.Wait;
@@ -247,6 +252,11 @@ public final class FurnaceTrip {
     /** The furnace was seen empty when the trip opened it (so a later trip may prefer it). */
     public boolean wasEmpty() {
         return wasEmpty;
+    }
+
+    /** The furnace's leftovers were cleared only because they were things smelting uses, in the bot's own furnace (the journal did not say they were its own). */
+    public boolean clearedOnKnownIds() {
+        return clearedOnKnownIds;
     }
 
     public int batchIndex() {
@@ -346,6 +356,12 @@ public final class FurnaceTrip {
         }
         switch (step) {
             case Walk -> {
+                if (port.arrived() && !port.furnaceStands()) {
+                    // Arrived, and there is no furnace: no_furnace, and the record of it is dropped by the host
+                    pend(CraftOrder.NO_FURNACE, GONE, false);
+                    go(Step.Close);
+                    return;
+                }
                 if (port.arrived()) {
                     go(Step.Open);
                     sinceClick = OPEN_RETRY_TICKS;
@@ -359,6 +375,11 @@ public final class FurnaceTrip {
                 if (!port.pathing()) port.walk();
             }
             case Open -> {
+                if (!port.furnaceOpen() && !port.furnaceStands()) {
+                    pend(CraftOrder.NO_FURNACE, GONE, false);
+                    go(Step.Close);
+                    return;
+                }
                 if (port.furnaceOpen()) {
                     port.opened();
                     if (resumeStep != null) {
@@ -424,8 +445,17 @@ public final class FurnaceTrip {
                     go(Step.Fuel);
                     return;
                 }
-                if (ownFurnace && leftoverIsOurs()) {
+                if (ownFurnace && leftoverIsOurs(false)) {
                     ours = true;
+                    afterTake = Step.Clear;
+                    go(Step.Clear);
+                    return;
+                }
+                // The bot's own furnace, leftovers of what smelting uses, nothing in the journal: cleared on that basis, unless a smelt is going on in it
+                // (input and fuel both there: somebody else's cook is left alone)
+                if (ownFurnace && leftoverIsOurs(true) && !(port.itemAt(INPUT) != null && port.itemAt(FUEL) != null)) {
+                    ours = true;
+                    clearedOnKnownIds = true;
                     afterTake = Step.Clear;
                     go(Step.Clear);
                     return;
@@ -682,11 +712,14 @@ public final class FurnaceTrip {
         return -1;
     }
 
-    private boolean leftoverIsOurs() {
+    private boolean leftoverIsOurs(boolean includeKnown) {
         for (int s = INPUT; s <= OUTPUT; s++) {
             String k = port.itemAt(s);
             // Only what the journal says the bot put in or took out is its own (the leftovers of a stopped run); anything else is somebody else's
-            if (k != null && !journal.placed().containsKey(idOf(k)) && !journal.produced().containsKey(idOf(k)) && !debtIds.contains(idOf(k))) return false;
+            // (a furnace of the bot's own: also what smelting uses, so leftovers of a crash between a click and its journal entry are not taken for somebody else's)
+            if (k == null) continue;
+            boolean mine = journal.placed().containsKey(idOf(k)) || journal.produced().containsKey(idOf(k)) || debtIds.contains(idOf(k)) || (includeKnown && ownFurnace && known.contains(idOf(k)));
+            if (!mine) return false;
         }
         return true;
     }

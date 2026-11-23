@@ -13856,6 +13856,8 @@ public class StashSorter extends AbstractFieldModule {
         long fillsMade;
         /** Items taken out of the furnace for this chunk (B2): a smelt counts like a grid fill for what the chunk was charged and kept as surplus. */
         long smelted;
+        /** The chunk's plan has furnace steps (its journal is the only one it closes). */
+        boolean smelts;
         /** Carry slots the table's result went into on the chunk's trips (one slot: a chunk is never more than a stack). */
         final LinkedHashSet<Integer> resultSlots = new LinkedHashSet<>();
         boolean settled, splitSent;
@@ -14178,7 +14180,7 @@ public class StashSorter extends AbstractFieldModule {
         int idx = flow.nextCraftLot(u);
         if (ledger == null || idx < 0) return false;
         // A smelt that was stopped (a restart, a trip cut short) left something in the furnace: it is taken up before anything else is planned
-        if (ledger.journal().isOpen()) return startSmeltRecovery(u, ledger);
+        if (ledger.journal().isOpen() && startSmeltRecovery(u, ledger)) return true;
         // What an earlier order left in the furnace (its ledger is gone) is taken up before any furnace is used
         if (!CONFIG.craftFurnaceDebt.isEmpty() && startDebtRecovery(u)) return true;
         Order.Lot lot = u.lots.get(idx);
@@ -14278,6 +14280,14 @@ public class StashSorter extends AbstractFieldModule {
         CraftPlanner.Plan plan = choice.plan();
         // A plan with furnace steps needs a furnace (CRAFT-CONTRACT-v1.2.md 14): the one remembered, one standing in the stash area, one from the stash, or one crafted
         boolean smelts = CraftSegments.smelts(plan);
+        // An older debt that is waiting (not due yet, no smelting just now) is settled before any furnace is used or a journal opened: it is never overwritten
+        if (smelts && (ledger.journal().isOpen() || !CONFIG.craftFurnaceDebt.isEmpty())) {
+            // A furnace from an earlier order (or a stopped run) still holds items and could not be taken up just now: only this smelting load is short, at once,
+            // with furnace_busy (a closed reason of the server); loads that need no furnace go on
+            step(here + ": " + lot.count() + " " + Recipes.pretty(key) + " can't be smelted now: a furnace from an earlier order still holds items.");
+            flow.craftLotShort(u, idx, CraftOrder.FURNACE_BUSY);
+            return false;
+        }
         if (smelts) {
             String[] furnaceWhy = new String[1];
             switch (ensureFurnace(task, furnaceWhy)) {
@@ -14312,13 +14322,18 @@ public class StashSorter extends AbstractFieldModule {
 
         CraftRun run = new CraftRun(u, task, plan, gather);
         run.oc = new OrderChunk(lot, choice.count(), stackOf(key));
+        run.oc.smelts = smelts;
         run.oc.gathered = CraftCharge.gathered(gather);
         // The surplus carried from earlier chunks is the craft's to use
         for (int slot : orderCraftSurplus.keySet()) if (inventoryItem(slot) != null) run.owned.add(slot);
         // The saved ledger no longer lists surplus this chunk may consume: a restart before the chunk is recorded refunds nothing it used
         ledger.chunkStarted();
         // The smelt journal begins with the chunk's furnace work (saved with the ledger below): a restart in the middle of it finds it open
-        if (smelts) ledger.journal().open();
+        if (smelts) {
+            ledger.journal().open();
+            // Written at once, empty: a crash between the first click and the first entry still leaves the furnace on record
+            writeFurnaceDebt(ledger.journal());
+        }
         flow.craftLedgerChanged();
         if (website) CraftingTableSpot.useWebsite(websiteSpot(cs.table()));
         try {
@@ -14416,12 +14431,12 @@ public class StashSorter extends AbstractFieldModule {
         // The chunk's furnace work is over and accounted for here: what came out of the furnace is counted, and the journal is closed (saved with the report below)
         long smeltedNow = oc.smelted;
         CraftLedger smeltLedger = flow.craftLedger();
-        if (smeltLedger != null && smeltLedger.journal().isOpen() && r.stuck) {
+        if (smeltLedger != null && oc.smelts && smeltLedger.journal().isOpen() && (r.stuck || smeltLedger.journal().active() != null)) {
             // Items may still be in the furnace (it could not be emptied): the journal stays open, the next chunk takes the furnace up first, and what went in
             // is charged then (not here: it would be charged twice)
             smeltedNow = 0;
         }
-        else if (smeltLedger != null && smeltLedger.journal().isOpen()) {
+        else if (smeltLedger != null && oc.smelts && smeltLedger.journal().isOpen()) {
             long produced = 0;
             for (long n : smeltLedger.journal().produced().values()) produced += n;
             smeltedNow = Math.max(smeltedNow, produced);
@@ -16405,7 +16420,7 @@ public class StashSorter extends AbstractFieldModule {
             return FurnaceWay.Failed;
         }
         FurnaceSpot.Spot spot = FurnaceSpot.get();
-        if (spot != null && (!FurnaceSpot.here(spot) || furnaceSkip.contains(spot.pos()))) {
+        if (spot != null && (!FurnaceSpot.here(spot) || furnaceSkip.contains(spot.pos()) || furnaceOutOfBounds(spot))) {
             // Another dimension, or given up on: forgotten
             FurnaceSpot.clear();
             furnaceChanged();
@@ -16555,7 +16570,16 @@ public class StashSorter extends AbstractFieldModule {
             return craftGaveUp(r, "this bot can't smelt", false);
         }
         FurnaceSpot.Spot spot = FurnaceSpot.get();
-        if (spot == null || !FurnaceSpot.here(spot) || (Containers.isLoaded(spot.pos()) && !FurnaceSpot.isFurnace(spot.pos()))) {
+        if (spot != null && !FurnaceSpot.here(spot)) {
+            r.code = CraftOrder.INTERRUPTED;
+            return craftGaveUp(r, "the furnace is in another dimension", false);
+        }
+        if (spot != null && r.recovery && furnaceOutOfBounds(spot) && !outOfBoundsConfirmed(spot.dimension(), spot.x(), spot.y(), spot.z())) {
+            // Out of the limits, seen once: not walked to, not dropped yet
+            r.code = CraftOrder.INTERRUPTED;
+            return craftGaveUp(r, "the furnace is outside the stash area", false);
+        }
+        if (spot == null || furnaceOutOfBounds(spot) || (Containers.isLoaded(spot.pos()) && !FurnaceSpot.isFurnace(spot.pos()))) {
             // Gone since it was looked for: forgotten, and the trip is not made to a block that isn't there
             if (spot != null) giveUpFurnace();
             r.code = CraftOrder.NO_FURNACE;
@@ -16658,12 +16682,13 @@ public class StashSorter extends AbstractFieldModule {
             orderFurnaceBusy = true;
             giveUpFurnace();
         }
-        else if (CraftOrder.FURNACE_BLOCKED.equals(code)) giveUpFurnace();
+        else if (CraftOrder.FURNACE_BLOCKED.equals(code) || CraftOrder.NO_FURNACE.equals(code)) giveUpFurnace();
         if (outcome.stuck()) {
             r.stuck = true;
             if (FurnaceTrip.CLOSED.equals(outcome.detail())) alert("The furnace window wouldn't reopen and the bot's items may still be in the furnace. It is taken up again before the next smelt or when the bot is free; if that fails, take them out by hand.");
             else alert("Items are stuck in the furnace and the inventory has no free slot for them. The furnace is let go of and the order goes on short: make room, and take what is in it by hand.");
         }
+        if (finished != null && finished.clearedOnKnownIds()) info("Smelting: the furnace held leftovers of what smelting uses and no journal entry; they were cleared on that basis (the bot's own furnace, no smelt going on in it).");
         if (outcome.xpGained() > 0) info("Smelting: the furnace gave {} experience points.", String.format("%.1f", outcome.xpGained()));
         r.trips++;
         r.phase = CraftPhase.PutBack;
@@ -16700,11 +16725,17 @@ public class StashSorter extends AbstractFieldModule {
             String why = outcome.failure();
             boolean unreached = CraftOrder.FURNACE_BLOCKED.equals(why) || CraftOrder.FURNACE_BUSY.equals(why) || CraftOrder.INTERRUPTED.equals(why) || outcome.stuck();
             if (unreached && ++debtTries < 3) {
-                debtRetryAt = tickCount + 20 * 60;
+                retrySet("debt", 20 * 60);
                 warn("Couldn't take up the items owed by the furnace ({}); trying again later.", why);
                 return;
             }
-            if (unreached) alert("Couldn't take up what a smelt left in the furnace ({}): it is given up on. Take it out by hand.", why);
+            if (unreached) {
+                // Items may still be in the furnace: the debt is never erased for that; it is tried again every 10 minutes
+                alert("Couldn't take up what a smelt left in the furnace ({}): it stays owed and is tried again every 10 minutes. Take it out by hand if you can.", why);
+                debtTries = 0;
+                retrySet("debt", 20 * 60 * 10);
+                return;
+            }
             debtTries = 0;
             r.debt.close();
             writeFurnaceDebt(r.debt);
@@ -16716,9 +16747,16 @@ public class StashSorter extends AbstractFieldModule {
         boolean unreached = CraftOrder.FURNACE_BLOCKED.equals(code) || CraftOrder.FURNACE_BUSY.equals(code) || CraftOrder.INTERRUPTED.equals(code) || outcome.stuck();
         if (unreached && ++orderRecoveryTries < 3) {
             warn("Couldn't take up what was left in the furnace ({}); trying again.", code);
+            retrySet("order:" + r.task, 20 * 30);
             return;
         }
-        if (unreached) alert("Couldn't take up what a stopped smelt left in the furnace ({}): it is given up on. Take it out by hand.", code);
+        if (unreached) {
+            // Items may still be in the furnace: the journal stays open (and the debt with it), tried again every 10 minutes
+            alert("Couldn't take up what a stopped smelt left in the furnace ({}): it stays owed and is tried again every 10 minutes. Take it out by hand if you can.", code);
+            orderRecoveryTries = 0;
+            retrySet("order:" + r.task, 20 * 60 * 10);
+            return;
+        }
         SmeltJournal j = ledger.journal();
         SmeltJournal.Settlement s = unreached ? new SmeltJournal.Settlement(Map.of(), Map.of()) : j.settle(outcome.returned(), looseCountsById());
         ledger.charge(s.charge());
@@ -16734,19 +16772,89 @@ public class StashSorter extends AbstractFieldModule {
     /** The smelting of a recovery run is over: what was left in the furnace is settled in the ledger, and what else is carried goes back. */
     private void finishSmeltRecovery(CraftRun r) {
         CraftingTableSpot.useWebsite(null);
+        if (r.trips == 0) {
+            // The trip never ran (no furnace to go to, no smelting): not asked again at once
+            CraftLedger l = orders.flow.craftLedger();
+            if (CraftOrder.NO_FURNACE.equals(r.code)) {
+                // The furnace is gone or out of bounds: what was in it is gone with it (or not ours to reach), so the record is dropped
+                dropFurnaceDebt(r.debt != null ? r.debt : l == null ? null : l.journal(), "the furnace is gone or outside the stash area");
+                if (l != null && r.debt == null) orders.flow.craftLedgerChanged();
+            }
+            else {
+                retrySet(r.debt != null ? "debt" : "order:" + r.task, 20 * 30);
+            }
+        }
         step("smelting: the furnace is taken up; carrying on with the order.");
     }
 
     private int debtTries;
-    private long debtRetryAt;
+    // When a recovery may be tried again, per owner ("debt", or "order:<id>" for an order's journal): one owner's wait never holds another's
+    private final Map<String, Long> recoveryRetry = new HashMap<>();
+    // When a furnace was first seen outside the craft limits, by position: a record is dropped only when it is seen so twice, a minute apart
+    private final Map<String, Long> outOfBoundsSince = new HashMap<>();
+
+    private boolean retryDue(String owner) {
+        return tickCount >= recoveryRetry.getOrDefault(owner, 0L);
+    }
+
+    private void retrySet(String owner, long ticks) {
+        recoveryRetry.put(owner, tickCount + ticks);
+    }
+
+    /** The furnace is outside the limits, and was seen so at least a minute ago too (the first look only notes it). */
+    private boolean outOfBoundsConfirmed(String dimension, int x, int y, int z) {
+        String key = x + "," + y + "," + z;
+        if (!furnaceOutOfBounds(dimension, x, y, z)) {
+            outOfBoundsSince.remove(key);
+            return false;
+        }
+        Long since = outOfBoundsSince.get(key);
+        if (since == null) {
+            outOfBoundsSince.put(key, tickCount);
+            return false;
+        }
+        return tickCount - since >= 20 * 60;
+    }
+    // The journal whose record the furnace debt is: no other journal overwrites or clears it (a pending debt of an older run is never lost to a newer one)
+    private @Nullable SmeltJournal debtOwner;
+
+    /** The furnace is outside the craft limits (too far from the stash area, or in another dimension than the stash): never walked to or opened. */
+    private boolean furnaceOutOfBounds(String dimension, int x, int y, int z) {
+        Stash st = orders.st();
+        if (st == null) return false;
+        return FurnaceFinder.outOfLimits(CraftBounds.areaWhy(effectiveDimension(st), stashArea(st), new CraftSettings.Table(x, y, z, dimension), 64));
+    }
+
+    private boolean furnaceOutOfBounds(FurnaceSpot.Spot s) {
+        return furnaceOutOfBounds(s.dimension(), s.x(), s.y(), s.z());
+    }
+
+    /** The debt and the journal it was are over (the furnace is gone or out of bounds): both are dropped. */
+    private void dropFurnaceDebt(@Nullable SmeltJournal j, String why) {
+        boolean had = j != null && (!j.placed().isEmpty() || !j.produced().isEmpty() || j.active() != null);
+        if (had) alert("Dropping what a smelt left in the furnace ({}): items the bot put in it are not taken up.", why);
+        else warn("Dropping what a smelt left in the furnace: {}.", why);
+        if (j != null) j.close();
+        CONFIG.craftFurnaceDebt = "";
+        debtOwner = null;
+        try {
+            com.aquarius.Globals.saveConfigAsync();
+        } catch (RuntimeException | LinkageError e) {
+            // Kept in memory at least
+        }
+    }
 
     /** Writes (or clears) the bot-level furnace debt from a journal: the furnace and what was put in and taken out. Saved with the settings. */
     private void writeFurnaceDebt(SmeltJournal j) {
         FurnaceSpot.Spot spot = FurnaceSpot.get();
-        String next = spot == null ? "" : FurnaceDebt.toSaved(spot.dimension(), spot.x(), spot.y(), spot.z(), j);
+        // A pending debt of another journal is never overwritten or cleared by this one
+        if (debtOwner != null && debtOwner != j && !CONFIG.craftFurnaceDebt.isEmpty()) return;
         // A journal without a furnace to point at keeps what was written before (the furnace was forgotten meanwhile): only a closed one clears it
         if (spot == null && j.isOpen()) return;
+        String next = spot == null ? "" : FurnaceDebt.toSaved(spot.dimension(), spot.x(), spot.y(), spot.z(), j);
+        if (FurnaceDebt.truncates(j)) warn("The furnace debt has more than {} items listed: the record is cut.", FurnaceDebt.MAX_ENTRIES);
         if (next.equals(CONFIG.craftFurnaceDebt)) return;
+        debtOwner = next.isEmpty() ? null : j;
         CONFIG.craftFurnaceDebt = next;
         try {
             com.aquarius.Globals.saveConfigAsync();
@@ -16757,14 +16865,21 @@ public class StashSorter extends AbstractFieldModule {
 
     /** Starts taking up the furnace of the debt record (an order left items in it and is over). @return true when a trip was started */
     private boolean startDebtRecovery(@Nullable Unit u) {
-        if (craft != null || anvilRun != null || tickCount < debtRetryAt || !orders.gate()) return false;
+        if (craft != null || anvilRun != null || !retryDue("debt") || !orders.gate()) return false;
         FurnaceDebt d = FurnaceDebt.parse(CONFIG.craftFurnaceDebt);
         if (d == null) {
             CONFIG.craftFurnaceDebt = "";
             return false;
         }
+        // Out of the craft limits (or the stash's dimension): never walked to or opened; the record is dropped
+        if (furnaceOutOfBounds(d.dimension(), d.x(), d.y(), d.z())) {
+            // Never walked to; dropped only when seen outside the limits twice, a minute apart
+            if (outOfBoundsConfirmed(d.dimension(), d.x(), d.y(), d.z())) dropFurnaceDebt(d.journal(), "the furnace is outside the stash area");
+            return false;
+        }
         String here = Stash.currentDimension();
         if (here != null && !com.porter.qwertestash.orders.OrderBlocker.sameDimension(here, d.dimension())) return false;
+        // No smelting tables (switched off, the extras gone): the debt stays, it is not erased
         if (Smelting.of(com.porter.qwertestash.manager.Extras.current()) == null) return false;
         // The furnace the debt is for is the one used, whatever was remembered
         FurnaceSpot.Spot now = FurnaceSpot.get();
@@ -16774,6 +16889,7 @@ public class StashSorter extends AbstractFieldModule {
         CraftRun run = new CraftRun(u, "furnace debt", none, List.of());
         run.recovery = true;
         run.debt = d.journal();
+        debtOwner = run.debt;
         tableRunDim = here;
         craft = run;
         craftCard = "Smelting: taking up the furnace";
@@ -16788,14 +16904,37 @@ public class StashSorter extends AbstractFieldModule {
     private boolean startSmeltRecovery(Unit u, CraftLedger ledger) {
         furnaceOrderBegins(String.valueOf(orders.flow.orderId()));
         FurnaceSpot.Spot spot = FurnaceSpot.get();
-        if (spot == null || !FurnaceSpot.here(spot)) {
-            // No furnace to go to: what was in it can't be taken up, and the journal is dropped
-            warn("A stopped smelt left items in a furnace that is not known any more: they are not taken up.");
-            ledger.journal().close();
-            writeFurnaceDebt(ledger.journal());
+        FurnaceDebt owed = FurnaceDebt.parse(CONFIG.craftFurnaceDebt);
+        // No furnace remembered (given up on, say) but the debt knows where it is: that one is used
+        if (spot == null && owed != null) {
+            if (furnaceOutOfBounds(owed.dimension(), owed.x(), owed.y(), owed.z())) {
+                if (outOfBoundsConfirmed(owed.dimension(), owed.x(), owed.y(), owed.z())) {
+                    dropFurnaceDebt(ledger.journal(), "the furnace is outside the stash area");
+                    orders.flow.craftLedgerChanged();
+                }
+                return false;
+            }
+            FurnaceSpot.remember(owed.dimension(), owed.x(), owed.y(), owed.z(), FurnaceFinder.FOUND);
+            spot = FurnaceSpot.get();
+        }
+        if (spot != null && furnaceOutOfBounds(spot)) {
+            if (outOfBoundsConfirmed(spot.dimension(), spot.x(), spot.y(), spot.z())) {
+                dropFurnaceDebt(ledger.journal(), "the furnace is outside the stash area");
+                orders.flow.craftLedgerChanged();
+            }
+            return false;
+        }
+        if (spot == null) {
+            // Nowhere to go: said, then dropped (there is nothing that could be done with it)
+            SmeltJournal j = ledger.journal();
+            if (!j.placed().isEmpty() || !j.produced().isEmpty()) alert("A stopped smelt left items in a furnace the bot has no record of any more: they are not taken up.");
+            dropFurnaceDebt(j, "no furnace is known");
             orders.flow.craftLedgerChanged();
             return false;
         }
+        // Another dimension, or a retry that is not due yet: waited for, never dropped
+        if (!FurnaceSpot.here(spot) || !retryDue("order:" + orders.flow.orderId())) return false;
+        debtOwner = ledger.journal();
         CraftPlanner.Plan none = new CraftPlanner.Plan("", 0, List.of(), Map.of(), 0, null);
         CraftRun run = new CraftRun(u, String.valueOf(orders.flow.orderId()), none, List.of());
         run.recovery = true;
@@ -16835,6 +16974,12 @@ public class StashSorter extends AbstractFieldModule {
         @Override
         public boolean pathing() {
             return activity.ownPathing();
+        }
+
+        @Override
+        public boolean furnaceStands() {
+            FurnaceSpot.Spot spot = FurnaceSpot.get();
+            return spot == null || !Containers.isLoaded(spot.pos()) || FurnaceSpot.isFurnace(spot.pos());
         }
 
         @Override

@@ -15,21 +15,45 @@ import java.util.Set;
  * stash by the usual put-back. Never shown on the website (it holds a position). Pure.
  */
 public record FurnaceDebt(String dimension, int x, int y, int z, SmeltJournal journal) {
-    /** The record as the settings keep it, or "" when the journal holds nothing (nothing was put in or taken out yet, or it is closed). */
+    /** The most entries of placed and produced a saved record keeps each, and the longest the saved text may be (about 8 KiB). */
+    public static final int MAX_ENTRIES = 48, MAX_LENGTH = 8 * 1024;
+
+    /** The record as the settings keep it, or "" for a closed journal. An open journal is a record even while empty: the furnace may hold what a crash left before the first entry. */
     public static String toSaved(String dimension, int x, int y, int z, SmeltJournal journal) {
-        if (!journal.isOpen() || (journal.placed().isEmpty() && journal.produced().isEmpty() && journal.active() == null)) return "";
-        JsonObject o = new JsonObject();
-        o.addProperty("dimension", dimension);
-        o.addProperty("x", x);
-        o.addProperty("y", y);
-        o.addProperty("z", z);
-        o.add("journal", journal.toJson());
-        return o.toString();
+        if (!journal.isOpen()) return "";
+        SmeltJournal j = journal;
+        for (int keep = MAX_ENTRIES; ; keep = keep / 2) {
+            if (keep < MAX_ENTRIES || journal.placed().size() > MAX_ENTRIES || journal.produced().size() > MAX_ENTRIES) j = trimmed(journal, keep);
+            JsonObject o = new JsonObject();
+            o.addProperty("dimension", dimension);
+            o.addProperty("x", x);
+            o.addProperty("y", y);
+            o.addProperty("z", z);
+            o.add("journal", j.toJson());
+            String text = o.toString();
+            if (text.length() <= MAX_LENGTH || keep == 0) return text;
+        }
+    }
+
+    /** The journal has more entries than a saved record keeps (it is cut: the host logs it). */
+    public static boolean truncates(SmeltJournal journal) {
+        return journal.placed().size() > MAX_ENTRIES || journal.produced().size() > MAX_ENTRIES;
+    }
+
+    private static SmeltJournal trimmed(SmeltJournal src, int keep) {
+        SmeltJournal j = new SmeltJournal();
+        j.open();
+        int n = 0;
+        for (var e : src.placed().entrySet()) if (n++ < keep) j.placed(e.getKey(), e.getValue());
+        n = 0;
+        for (var e : src.produced().entrySet()) if (n++ < keep) j.collected(e.getKey(), e.getValue());
+        if (src.active() != null) j.loaded(src.active());
+        return j;
     }
 
     /** The record read back, or null for none or one that can't be read. */
     public static @Nullable FurnaceDebt parse(@Nullable String saved) {
-        if (saved == null || saved.isBlank()) return null;
+        if (saved == null || saved.isBlank() || saved.length() > 2 * MAX_LENGTH) return null;
         try {
             JsonObject o = JsonParser.parseString(saved).getAsJsonObject();
             SmeltJournal j = SmeltJournal.fromJson(o.get("journal"));

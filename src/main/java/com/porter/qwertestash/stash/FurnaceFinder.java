@@ -71,6 +71,14 @@ public final class FurnaceFinder {
         return new Decision(Step.FAIL, null, "", NONE, forget);
     }
 
+    /**
+     * A furnace the craft limits rule out (CraftBounds.areaWhy says too far, or another dimension than the stash's): never walked to or opened, and a debt or a
+     * remembered furnace there is dropped. No verdict (no area known, no dimension known) is not out of limits.
+     */
+    public static boolean outOfLimits(@Nullable String areaWhy) {
+        return CraftBounds.TOO_FAR.equals(areaWhy) || CraftBounds.WRONG_DIMENSION.equals(areaWhy);
+    }
+
     /** The block name of a plain furnace (not a blast furnace or a smoker). */
     public static boolean isFurnaceName(@Nullable String blockName) {
         return "furnace".equals(blockName);
