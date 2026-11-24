@@ -315,6 +315,14 @@ final class OrderSim implements OrderFlow.Host {
         return specials;
     }
 
+    /** The tables of milestone B5 of the bot's extras (the armour colours, the dyeable items), or null. */
+    DyedSpecs.@Nullable Tables dyes;
+
+    @Override
+    public DyedSpecs.@Nullable Tables craftDyed() {
+        return dyes;
+    }
+
     /** What the stash holds per key: loose stacks, what lies in shulkers and the plain stock craft orders take from. */
     @Override
     public @Nullable Map<String, Long> preflightStock() {
@@ -328,7 +336,7 @@ final class OrderSim implements OrderFlow.Host {
 
     @Override
     public int maxStack(String id) {
-        return craftStack.getOrDefault(id, 64);
+        return craftStack.getOrDefault(id, craftStack.getOrDefault(Pseudo.base(id), 64));
     }
 
     /** What is carried of crafted items beyond the loads still waiting for their bin. */
@@ -413,7 +421,7 @@ final class OrderSim implements OrderFlow.Host {
     }
 
     private int stackOfId(String id) {
-        return craftStack.getOrDefault(id, 64);
+        return craftStack.getOrDefault(id, craftStack.getOrDefault(Pseudo.base(id), 64));
     }
 
     @Override

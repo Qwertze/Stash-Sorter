@@ -107,6 +107,11 @@ public final class OrderFlow {
             return null;
         }
 
+        /** The tables of milestone B5 of the extras this bot holds (the 16 armour colours, the dyeable items), or null: dyed armour of a block is then refused. */
+        default DyedSpecs.@Nullable Tables craftDyed() {
+            return null;
+        }
+
         /** The most items one craft order may smelt ({@code craftOrders.maxSmelt} of the heartbeat, B2), 0 when this bot doesn't smelt. */
         default int craftMaxSmelt() {
             return 0;
@@ -1019,7 +1024,7 @@ public final class OrderFlow {
             return CraftLedger.refused(lines, Recipes.empty(), 0, CraftOrder.RECIPE_MISMATCH);
         }
         Smelting smelting = host.craftSmelting();
-        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan(), smelting, host.craftMaxSmelt(), host.craftFireworks(), host.craftSpecials());
+        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan(), smelting, host.craftMaxSmelt(), host.craftFireworks(), host.craftSpecials(), host.craftDyed());
         if (bad != null) {
             host.say("The order's craft lines are not crafted: " + bad + ".");
             return CraftLedger.refused(lines, table, host.craftMaxFills(), CraftOrder.RECIPE_MISMATCH);

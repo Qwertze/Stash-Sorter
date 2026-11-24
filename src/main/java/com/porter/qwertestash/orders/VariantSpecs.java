@@ -194,6 +194,7 @@ public final class VariantSpecs {
         if (spec.startsWith("tipped:")) return "tipped";
         if (spec.startsWith("stew:")) return "stew";
         if (spec.startsWith("copy:") || spec.startsWith("shield:")) return "copy";
+        if (spec.startsWith("dyed:")) return DyedSpecs.FEATURE;
         return null;
     }
 
@@ -295,7 +296,8 @@ public final class VariantSpecs {
     /** The recipe (or a plan id, {@link FireworkSpecs#planId}) is one of milestone B4's: its cells that are plain items take plain stacks only. */
     public static boolean isB4(String recipeOrPlanId) {
         int hash = recipeOrPlanId.indexOf('#');
-        return isRecipe(hash < 0 ? recipeOrPlanId : recipeOrPlanId.substring(0, hash));
+        // B5: the dyeing recipe is strict too: its item takes an undyed stack only, and its dyes plain dyes (a dyed item is never a base)
+        return isRecipe(hash < 0 ? recipeOrPlanId : recipeOrPlanId.substring(0, hash)) || DyedSpecs.isRecipe(recipeOrPlanId);
     }
 
     private static String baseRecipe(String recipeOrPlanId) {

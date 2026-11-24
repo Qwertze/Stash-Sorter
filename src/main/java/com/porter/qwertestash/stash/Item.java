@@ -71,7 +71,7 @@ public final class Item {
      * For a firework rocket or star with no component outside the grammar of CRAFT-CONTRACT-v1.2.md 3 (B3): its flight and explosions as the game stores them
      * ({@link FireworkItems}), from which its spec is derived against the extras' colour table. B4 ({@link VariantItems}): {@code T|<potion>} of a tipped
      * arrow or lingering potion, {@code W|<effect>|<ticks>} of a suspicious stew, {@code G<generation>} of a written book, {@code C} of a patterned banner, a
-     * filled map or a decorated shield. Null for everything else, for a stack with another component (a custom name, lore, ...), and for stacks saved before
+     * filled map or a decorated shield; B5: {@code D|<rrggbb>} of a stack whose patch is a {@code dyed_color} with the default tooltip flag and nothing else. Null for everything else, for a stack with another component (a custom name, lore, ...), and for stacks saved before
      * this existed (it is set when their container is read again).
      */
     public @Nullable String fw;

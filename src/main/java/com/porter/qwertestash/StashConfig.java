@@ -299,6 +299,8 @@ public class StashConfig {
     public boolean craftStew = true;
     /** Copy banners, maps and written books and decorate shields in craft orders (B4): {@code can: [..., "copy"]} when this is on and the extras list the four copy kinds. */
     public boolean craftCopy = true;
+    /** Dye leather armour, leather horse armour and wolf armour in craft orders (B5): {@code can: [..., "dyed"]} and index specs {@code dyed:<rrggbb>} on dyed items when this is on and the extras hold the armour colours and the dyeable list. */
+    public boolean craftDyed = true;
     /** Items one craft order may smelt (the {@code maxSmelt} the heartbeat says; the contract's cap is 256). */
     public int craftOrderMaxSmelt = 256;
     /** The furnace smelting uses (B2): the one found standing in the stash area, or put down from the stash or crafted; never shown on the website. Blank dimension: none. */

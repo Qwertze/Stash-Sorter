@@ -423,6 +423,22 @@ public class Stash {
     public String server;
     // Copy-on-write: searches and commands iterate it from other threads while the sorter adds and drops boxes
     public List<Box> boxes = new CopyOnWriteArrayList<>();
+    /**
+     * Saved with the stash: 1 once the containers were read again for the dyed kind (B5). A stash saved before it has the stacks' {@code fw} unset for dyed
+     * armour (the colour is not kept anywhere else), so the first time the bot says {@code dyed} every container is read again.
+     */
+    public int dyedSpecGen;
+
+    /**
+     * B5: the bot says {@code dyed} now. The first time for a stash saved before B5, every container is marked to be read again (as {@code stash rescan} does) so
+     * the colours of its dyed armour are kept. @return true when it did (the caller saves and bumps the stash version)
+     */
+    public boolean rescanForDyed(boolean dyedOn) {
+        if (!dyedOn || dyedSpecGen >= 1) return false;
+        dyedSpecGen = 1;
+        markAllStale();
+        return true;
+    }
     private transient boolean dirty;
 
     public Stash(String name, String server) {

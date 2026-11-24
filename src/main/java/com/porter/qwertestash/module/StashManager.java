@@ -1092,7 +1092,7 @@ public class StashManager extends Module {
         if (table == null) return "-" + kit;
         StashSorter s = sorter();
         // The extras hash is part of it: new extras (or none) send a heartbeat of their own (CRAFT-CONTRACT-v1.2.md 2.1)
-        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/x" + Extras.currentHash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + "/s" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt) + CONFIG.craftOrderMaxSmelt + s.botFurnace() + "/f" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy) + kit;
+        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/x" + Extras.currentHash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + "/s" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt) + CONFIG.craftOrderMaxSmelt + s.botFurnace() + "/f" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy, CONFIG.craftDyed) + kit;
     }
 
     /**
@@ -1116,7 +1116,7 @@ public class StashManager extends Module {
         // v 2 with the extras hash and the features (none in B1); an older server that refused the newer fields gets the 1.15.0 shape
         // B2: smelt in can when the setting is on and the extras hold the smelt and fuel tables; then maxSmelt, and the bot's own furnace in use
         // B3, B4: firework, tipped, stew and copy in can when their settings are on and the extras say so
-        orders = orders.withV2(Extras.currentHash(), ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy));
+        orders = orders.withV2(Extras.currentHash(), ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy, CONFIG.craftDyed));
         orders = orders.withSmelt(ManagerIndex.clampMaxSmelt(CONFIG.craftOrderMaxSmelt), s.botFurnace());
         if (craftLegacy) orders = orders.asLegacy();
         return new ManagerIndex.Craft(orders, cached == null ? null : cached.hash());
@@ -1507,12 +1507,18 @@ public class StashManager extends Module {
     private static com.porter.qwertestash.orders.Variants.Kinds specKinds() {
         Recipes table = Recipes.current();
         if (!com.porter.qwertestash.stash.CraftTableState.sendOrders(CONFIG.enableCrafting, CONFIG.craftOrders, table != null)) return com.porter.qwertestash.orders.Variants.Kinds.NONE;
-        return ManagerIndex.specKinds(Extras.current(), CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew);
+        return ManagerIndex.specKinds(Extras.current(), CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftDyed);
     }
 
     private void scan(Stash stash, String player) {
         if (building.get()) return;
         long now = System.currentTimeMillis();
+        // B5: a stash saved before the dyed kind has no colours for its dyed armour: the first time the bot says dyed every container is read again
+        if (specKinds().dyeable() != null && stash.rescanForDyed(true)) {
+            stash.save();
+            Stashes.version++;
+            Stashes.exploreVersion++;
+        }
         boolean include = CONFIG.managerIncludeExcluded;
         long fp = include ? 1 : 0;
         fp = fp * 31 + stash.server.hashCode();
@@ -1530,7 +1536,7 @@ public class StashManager extends Module {
         // B3: the index carries items[].spec while the bot says firework in its can (the setting, and the extras' firework tables): a change of either rebuilds it
         // B4: the same for tipped arrows, lingering potions and suspicious stew (their kinds are part of what is rebuilt)
         com.porter.qwertestash.orders.Variants.Kinds kinds = specKinds();
-        fp = fp * 31 + (kinds.any() ? 1 + Extras.currentHash().hashCode() + (kinds.fireworks() != null ? 2 : 0) + (kinds.tipped() ? 4 : 0) + (kinds.stew() ? 8 : 0) : 0);
+        fp = fp * 31 + (kinds.any() ? 1 + Extras.currentHash().hashCode() + (kinds.fireworks() != null ? 2 : 0) + (kinds.tipped() ? 4 : 0) + (kinds.stew() ? 8 : 0) + (kinds.dyeable() != null ? 16 + kinds.dyeable().hashCode() : 0) : 0);
         if (current != null && fp == fingerprint && now - lastBuild < REBUILD_MS) return;
 
         int gen = generation;

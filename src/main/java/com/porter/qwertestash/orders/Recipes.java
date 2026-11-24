@@ -220,7 +220,7 @@ public final class Recipes {
     public static String pretty(String id) {
         if (Pseudo.is(id)) {
             String spec = Pseudo.spec(id);
-            return pretty(Pseudo.base(id)) + " (" + (VariantSpecs.parse(spec) != null || spec.startsWith("src:") ? VariantSpecs.describe(spec) : FireworkSpecs.describe(spec)) + ")";
+            return pretty(Pseudo.base(id)) + " (" + (DyedSpecs.rgbOf(spec) >= 0 ? DyedSpecs.describe(spec) : VariantSpecs.parse(spec) != null || spec.startsWith("src:") ? VariantSpecs.describe(spec) : FireworkSpecs.describe(spec)) + ")";
         }
         String bare = id.startsWith("minecraft:") ? id.substring("minecraft:".length()) : id;
         return com.porter.qwertestash.stash.Item.prettyName(bare);

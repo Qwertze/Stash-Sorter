@@ -125,7 +125,21 @@ public final class CraftOrder {
      */
     public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
                                          int maxSmelt, FireworkSpecs.@Nullable Tables firework, VariantSpecs.@Nullable Tables special) {
-        String bad = checkRaw(craft, table, maxFills, extrasHash, can, smelting, maxSmelt, firework, special);
+        return check(craft, table, maxFills, extrasHash, can, smelting, maxSmelt, firework, special, null);
+    }
+
+    /**
+     * As above, for a bot that can also dye leather armour, leather horse armour and wolf armour (B5, CRAFT-CONTRACT-v1.2.md 3, 9, 11.1 and 15). A block that
+     * uses a {@code dyed:} spec passes only when the bot's {@code can} has {@code dyed}, {@code dyed} (its armour colours and dyeable items, from its own extras)
+     * can dye, {@code needs} lists {@code dyed} and the block names the bot's extras; then every dyeing step is checked by {@link DyedSpecs#checkStep} (its grid is
+     * rebuilt from the spec and the bot's own armour colours, and the colour it mixes must be the step's), the second coat of a two-coat colour must come from
+     * an earlier step ({@link DyedSpecs#checkChain}), a dyed spec on a line, take or leftover is canonical and on a dyeable item, and the lines are covered by
+     * what the steps make less the first coats the later steps use up.
+     * @param dyed the bot's B5 tables (from its extras), or null when it holds none
+     */
+    public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
+                                         int maxSmelt, FireworkSpecs.@Nullable Tables firework, VariantSpecs.@Nullable Tables special, DyedSpecs.@Nullable Tables dyed) {
+        String bad = checkRaw(craft, table, maxFills, extrasHash, can, smelting, maxSmelt, firework, special, dyed);
         // The words of a refusal are logged and said: they carry strings of the server's block, so they are cut to printable ASCII and a short length
         return bad == null ? null : safe(bad);
     }
@@ -145,7 +159,7 @@ public final class CraftOrder {
     }
 
     private static @Nullable String checkRaw(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
-                                             int maxSmelt, FireworkSpecs.@Nullable Tables firework, VariantSpecs.@Nullable Tables special) {
+                                             int maxSmelt, FireworkSpecs.@Nullable Tables firework, VariantSpecs.@Nullable Tables special, DyedSpecs.@Nullable Tables dyed) {
         if (craft == null) return "the order has craft lines but no craft block";
         if (craft.malformed()) return "the craft block can't be read";
         if (craft.v() != 1 && craft.v() != 2) return "craft version " + craft.v() + " is not 1 or 2";
@@ -164,6 +178,10 @@ public final class CraftOrder {
                         if (!can.contains("firework") || firework == null) return "the order uses rockets or stars, which this bot can't make";
                         if (!craft.needs().contains("firework")) return "the order uses rockets or stars but doesn't say it needs fireworks";
                     }
+                    else if (f.equals(DyedSpecs.FEATURE)) {
+                        if (!can.contains(f) || dyed == null || !dyed.can()) return "the order uses " + describeFeature(f) + ", which this bot can't make";
+                        if (!craft.needs().contains(f)) return "the order uses " + describeFeature(f) + " but doesn't say it needs " + f;
+                    }
                     else {
                         if (!can.contains(f) || special == null) return "the order uses " + describeFeature(f) + ", which this bot can't make";
                         if (!craft.needs().contains(f)) return "the order uses " + describeFeature(f) + " but doesn't say it needs " + f;
@@ -180,9 +198,10 @@ public final class CraftOrder {
                 // B3: a special step carries the exact grid of a rocket, star or fade; B4: of tipped arrows, stew, a copy or a shield; the bot builds it
                 // again from the spec and its own extras
                 boolean b4 = VariantSpecs.isRecipe(s.recipe());
-                String bad = b4 ? VariantSpecs.checkStep(s, special, can) : FireworkSpecs.checkStep(s, firework);
+                boolean b5 = DyedSpecs.isRecipe(s.recipe());
+                String bad = b5 ? DyedSpecs.checkStep(s, dyed, can) : b4 ? VariantSpecs.checkStep(s, special, can) : FireworkSpecs.checkStep(s, firework);
                 if (bad != null) return bad;
-                if (!b4 && !s.remainder().isEmpty()) return "recipe " + s.recipe() + " has a remainder, which it doesn't leave";
+                if (!b4 && !b5 && !s.remainder().isEmpty()) return "recipe " + s.recipe() + " has a remainder, which it doesn't leave";
                 fills += s.fills();
                 continue;
             }
@@ -213,7 +232,7 @@ public final class CraftOrder {
         }
         for (Order.Qty t : craft.take()) {
             if (t.count() < 1 || !plain(t.id())) return "a take id is not a plain item id";
-            String bad = checkSpecified(t.id(), t.spec(), "take");
+            String bad = checkSpecified(t.id(), t.spec(), "take", dyed);
             if (bad != null) return bad;
             if (t.spec() != null && !keyOf(t.id(), t.key())) return "a take of " + t.id() + " with a spec has no index key of that item";
             if (t.spec() == null && t.key() != null) return "a take of " + t.id() + " names a key but no spec";
@@ -222,27 +241,32 @@ public final class CraftOrder {
             if (v != null && v.kind().equals("copy") && !v.key().equals(t.key())) return "a take of " + t.id() + " names a key other than its copy spec's";
         }
         for (Order.Qty l : craft.leftovers()) {
-            String bad = checkSpecified(l.id(), l.spec(), "leftover");
+            // B5: a first coat is never left over (after an interruption it is only handed back, in the result's returned list)
+            if (l.spec() != null && l.spec().startsWith("dyed:")) return "a leftover has a dyed spec (a dyed piece is never left over)";
+            String bad = checkSpecified(l.id(), l.spec(), "leftover", dyed);
             if (bad != null) return bad;
         }
         for (Order.CraftStep s : craft.steps()) {
             for (Order.Qty q : s.remainder()) {
-                String bad = checkSpecified(q.id(), q.spec(), "remainder");
+                String bad = checkSpecified(q.id(), q.spec(), "remainder", dyed);
                 if (bad != null) return bad;
             }
         }
         if (craft.hasB4Steps()) {
-            String bad = checkInputsInHand(craft);
+            String bad = DyedSpecs.checkChain(craft);
+            if (bad == null) bad = checkInputsInHand(craft);
             if (bad == null) bad = checkTakeBound(craft);
             if (bad != null) return bad;
         }
         long total = 0;
         java.util.Map<String, Long> made = new java.util.HashMap<>(), taken = new java.util.HashMap<>();
         for (Order.CraftStep s : craft.steps()) made.merge(s.resultRef(), (long) s.count() * s.fills(), Long::sum);
+        // B5: the items a second coat is put on were made by an earlier step and are not what the order delivers
+        for (var e : DyedSpecs.coatsUsed(craft).entrySet()) made.merge(e.getKey(), -e.getValue(), Long::sum);
         for (Order.Qty t : craft.take()) taken.merge(t.stockRef(), (long) t.count(), Long::sum);
         for (Order.Qty l : craft.lines()) {
             if (l.count() < 1 || !plain(l.id())) return "a craft line key is not a plain item id";
-            String bad = checkSpecified(l.id(), l.spec(), "craft line");
+            String bad = checkSpecified(l.id(), l.spec(), "craft line", dyed);
             if (bad != null) return bad;
             if (l.count() > MAX_LINE) return "a craft line asks for " + l.count() + ", more than " + MAX_LINE;
             total += l.count();
@@ -265,8 +289,13 @@ public final class CraftOrder {
      * item it sits on: a line is of the variant itself, a take, leftover or remainder may also be a lingering potion with a tipped spec or a banner, map or book
      * with the copy spec of its own key. Null when there is none or it is fine.
      */
-    private static @Nullable String checkSpecified(String id, @Nullable String spec, String what) {
+    private static @Nullable String checkSpecified(String id, @Nullable String spec, String what, DyedSpecs.@Nullable Tables dyed) {
         if (spec == null) return null;
+        if (spec.startsWith("dyed:")) {
+            // B5: a canonical colour on an item the bot's own extras say is dyeable (a first coat is never a line, a take or a leftover: only the steps name it)
+            if (DyedSpecs.rgbOf(spec) < 0) return "a " + what + " has a spec that is not a canonical dyed spec";
+            return DyedSpecs.fitsItem(spec, id, dyed) ? null : "a " + what + " of " + id + " has a dyed spec but is not dyeable by this bot's extras";
+        }
         if (spec.startsWith("rocket:") || spec.startsWith("star:")) {
             FireworkSpecs.Parsed p = FireworkSpecs.parse(spec);
             if (p == null) return "a " + what + " has a spec that is not a canonical rocket or star spec";
@@ -284,6 +313,7 @@ public final class CraftOrder {
             case "tipped" -> "tipped arrows";
             case "stew" -> "suspicious stew";
             case "copy" -> "copies of banners, maps or books, or shields";
+            case "dyed" -> "dyed leather or wolf armour";
             default -> feature;
         };
     }
@@ -296,7 +326,8 @@ public final class CraftOrder {
     static @Nullable String checkTakeBound(Order.Craft craft) {
         java.util.Map<String, Long> use = new java.util.HashMap<>(), take = new java.util.LinkedHashMap<>();
         for (Order.CraftStep s : craft.steps()) {
-            for (Order.Qty q : s.inputs()) use.merge(q.stockRef(), (long) q.count(), Long::sum);
+            // B5: a dyed input is the first coat made by an earlier step, never stock: it justifies no take
+            for (Order.Qty q : s.inputs()) if (!isCoat(q)) use.merge(q.stockRef(), (long) q.count(), Long::sum);
             for (Order.Qty q : s.fuel()) use.merge(q.stockRef(), (long) q.count(), Long::sum);
         }
         for (Order.Qty l : craft.lines()) use.merge(l.ref(), (long) l.count(), Long::sum);
@@ -329,7 +360,7 @@ public final class CraftOrder {
             int crafts = copy ? Math.max(1, s.fills()) : 1;
             long result = copy ? s.count() : (long) s.count() * s.fills();
             java.util.Map<String, Long> in = new java.util.LinkedHashMap<>(), back = new java.util.LinkedHashMap<>();
-            for (Order.Qty q : s.inputs()) in.merge(q.stockRef(), (long) q.count(), Long::sum);
+            for (Order.Qty q : s.inputs()) in.merge(isCoat(q) ? COAT + q.stockRef() : q.stockRef(), (long) q.count(), Long::sum);
             for (Order.Qty q : s.fuel()) in.merge(q.stockRef(), (long) q.count(), Long::sum);
             for (Order.Qty q : s.remainder()) back.merge(q.stockRef(), (long) q.count(), Long::sum);
             for (var e : in.entrySet()) if (e.getValue() % crafts != 0) return "step " + n + " (" + s.recipe() + ") has " + e.getValue() + " " + e.getKey() + " for " + crafts + " crafts";
@@ -342,10 +373,19 @@ public final class CraftOrder {
                     bal.put(e.getKey(), have - need);
                 }
                 for (var e : back.entrySet()) bal.merge(e.getKey(), e.getValue() / crafts, Long::sum);
-                bal.merge(s.resultRef(), result, Long::sum);
+                // B5: what a dyeing step makes is kept apart from stock of the same colour: only it can be the first coat of a later step
+                bal.merge(DyedSpecs.isRecipe(s.recipe()) ? COAT + s.resultRef() : s.resultRef(), result, Long::sum);
             }
         }
         return null;
+    }
+
+    /** The balance key of the first coats (B5): items made by dyeing steps, never stock. */
+    private static final String COAT = "coat:";
+
+    /** An input with a dyed spec is the first coat of a second coat: the result of an earlier step. */
+    static boolean isCoat(Order.Qty q) {
+        return q.spec() != null && q.spec().startsWith("dyed:");
     }
 
     private static final Pattern KEY = Pattern.compile("^[a-z0-9_.-]+:[a-z0-9_./-]{1,128}(#[0-9a-f]{1,16})?$");

@@ -41,6 +41,7 @@ import com.porter.qwertestash.orders.AnvilNamer;
 import com.porter.qwertestash.orders.BaseSlots;
 import com.porter.qwertestash.orders.BinTracker;
 import com.porter.qwertestash.orders.ClickPlanner;
+import com.porter.qwertestash.orders.DyedSpecs;
 import com.porter.qwertestash.orders.FireworkSpecs;
 import com.porter.qwertestash.orders.GenerationPref;
 import com.porter.qwertestash.orders.VariantSpecs;
@@ -16791,6 +16792,14 @@ public class StashSorter extends AbstractFieldModule {
         return String.join("; ", parts);
     }
 
+    /** What `stash craftorders` says about dyed leather armour, leather horse armour and wolf armour (B5). */
+    public String craftDyedLine() {
+        DyedSpecs.Tables t = DyedSpecs.Tables.of(com.porter.qwertestash.manager.Extras.current());
+        if (!CONFIG.craftDyed) return "off (`stash craftorders dyed on`)";
+        if (t == null || !t.can()) return "on, but the server's extras don't hold the armour colours and the dyeable list";
+        return "on: " + t.dyeable().size() + " kinds of armour, any colour from the dyes (one coat, or two); a dyed piece is never the base of another colour";
+    }
+
     /** What `stash craftorders` says about rockets and stars (B3). */
     public String craftFireworkLine() {
         FireworkSpecs.Tables t = FireworkSpecs.Tables.of(com.porter.qwertestash.manager.Extras.current());
@@ -18748,7 +18757,12 @@ public class StashSorter extends AbstractFieldModule {
 
         @Override
         public Set<String> craftCan() {
-            return Set.copyOf(ManagerIndex.craftCan(com.porter.qwertestash.manager.Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy));
+            return Set.copyOf(ManagerIndex.craftCan(com.porter.qwertestash.manager.Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy, CONFIG.craftDyed));
+        }
+
+        @Override
+        public DyedSpecs.@Nullable Tables craftDyed() {
+            return CONFIG.craftDyed ? DyedSpecs.Tables.of(com.porter.qwertestash.manager.Extras.current()) : null;
         }
 
         @Override

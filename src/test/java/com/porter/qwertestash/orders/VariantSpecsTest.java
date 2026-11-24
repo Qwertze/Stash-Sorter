@@ -70,7 +70,7 @@ class VariantSpecsTest {
         assertEquals("firework", VariantSpecs.featureOf("rocket:1"));
         assertEquals("firework", VariantSpecs.featureOf("star:small_ball;red;;"));
         assertEquals("copy", VariantSpecs.featureOf("copy:" + K));
-        assertNull(VariantSpecs.featureOf("dyed:b02e26"));
+        assertEquals("dyed", VariantSpecs.featureOf("dyed:b02e26"), "B5: a dyed spec needs the dyed feature");
         assertNull(VariantSpecs.featureOf(null));
     }
 

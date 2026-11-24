@@ -432,6 +432,14 @@ public final class ManagerIndex {
      * lists all of {@code banner_copy}, {@code map_copy}, {@code book_copy} and {@code shield}. In this order: smelt, firework, tipped, stew, copy.
      */
     public static List<String> craftCan(@Nullable Extras extras, boolean smeltOn, boolean fireworkOn, boolean tippedOn, boolean stewOn, boolean copyOn) {
+        return craftCan(extras, smeltOn, fireworkOn, tippedOn, stewOn, copyOn, false);
+    }
+
+    /**
+     * As above, and {@code dyed} (B5, CRAFT-CONTRACT-v1.2.md 2.1 and 13.3) last, when {@code dyedOn} (the setting {@code craftDyed}) and the extras list the
+     * {@code dyed} special, give the armour colour of all 16 dyes and name at least one dyeable item ({@link com.porter.qwertestash.orders.DyedSpecs.Tables#can}).
+     */
+    public static List<String> craftCan(@Nullable Extras extras, boolean smeltOn, boolean fireworkOn, boolean tippedOn, boolean stewOn, boolean copyOn, boolean dyedOn) {
         List<String> out = new ArrayList<>();
         if (smeltOn && com.porter.qwertestash.orders.Smelting.of(extras) != null) out.add("smelt");
         if (fireworkOn && FireworkSpecs.Tables.of(extras) != null) out.add("firework");
@@ -441,6 +449,10 @@ public final class ManagerIndex {
             if (stewOn && t.canStew()) out.add("stew");
             if (copyOn && t.canCopy()) out.add("copy");
         }
+        if (dyedOn) {
+            com.porter.qwertestash.orders.DyedSpecs.Tables d = com.porter.qwertestash.orders.DyedSpecs.Tables.of(extras);
+            if (d != null && d.can()) out.add("dyed");
+        }
         return out;
     }
 
@@ -449,8 +461,15 @@ public final class ManagerIndex {
      * Null kinds ({@link Variants.Kinds#NONE}) when none.
      */
     public static Variants.Kinds specKinds(@Nullable Extras extras, boolean fireworkOn, boolean tippedOn, boolean stewOn) {
+        return specKinds(extras, fireworkOn, tippedOn, stewOn, false);
+    }
+
+    /** As above, and the dyed kind (B5) on the extras' dyeable items when the bot says {@code dyed}. */
+    public static Variants.Kinds specKinds(@Nullable Extras extras, boolean fireworkOn, boolean tippedOn, boolean stewOn, boolean dyedOn) {
         VariantSpecs.Tables t = VariantSpecs.Tables.of(extras);
-        return new Variants.Kinds(fireworkTables(extras, fireworkOn), tippedOn && t != null && t.canTipped(), stewOn && t != null && t.canStew());
+        Variants.Kinds k = new Variants.Kinds(fireworkTables(extras, fireworkOn), tippedOn && t != null && t.canTipped(), stewOn && t != null && t.canStew());
+        com.porter.qwertestash.orders.DyedSpecs.Tables d = dyedOn ? com.porter.qwertestash.orders.DyedSpecs.Tables.of(extras) : null;
+        return d != null && d.can() ? k.withDyeable(d.dyeable()) : k;
     }
 
     /** The most items one order may smelt, as {@code craftOrders.maxSmelt} says it: 1 to 256 (the setting, clamped). */
@@ -1009,7 +1028,7 @@ public final class ManagerIndex {
     private static @Nullable String specOf(Item item) {
         Variants.Kinds k = KINDS.get();
         if (k == null || item.fw == null) return null;
-        String spec = Variants.indexSpec(item.fw, k);
+        String spec = Variants.indexSpec(item.id, item.fw, k);
         return spec == null ? null : clamp(spec, FireworkSpecs.MAX_SPEC);
     }
 

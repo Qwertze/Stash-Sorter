@@ -1,11 +1,14 @@
 package com.porter.qwertestash.stash;
 
+import com.porter.qwertestash.QwerteStashPlugin;
+import com.porter.qwertestash.orders.DyedSpecs;
 import com.porter.qwertestash.orders.VariantSpecs;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.Effect;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponent;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentType;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponents;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DyedItemColor;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.PotionContents;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.SuspiciousStewEffect;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.WrittenBookContent;
@@ -22,7 +25,10 @@ import java.util.Map;
  *     <li>{@code T|<potion>}: a tipped arrow or lingering potion whose patch is a potion and nothing else (S17: {@code tipped:minecraft:long_poison});</li>
  *     <li>{@code W|<effect>|<ticks>}: a suspicious stew with exactly one effect and no other component (S19);</li>
  *     <li>{@code G<n>}: a written book of generation {@code n} (a copy is made only from generation 0);</li>
- *     <li>{@code C}: a banner with patterns, a filled map, or a shield with a banner's patterns (copied or decorated by key, never an index spec).</li>
+ *     <li>{@code C}: a banner with patterns, a filled map, or a shield with a banner's patterns (copied or decorated by key, never an index spec);</li>
+ *     <li>B5, {@code D|<rrggbb>}: a stack whose patch is a {@code dyed_color} (with the default tooltip flag) and nothing else (S14, S15: {@code dyed:b02e26},
+ *     {@code dyed:000000}). Only the patch counts, never the item's default: an undyed item has no spec (the contract's default 1), whatever a version's
+ *     default colour is. Whether the item may carry the spec is the extras' {@code dyeable} list's to say (S16: a wool with a colour has none).</li>
  * </ul>
  * Null for everything else, and for a stack outside the grammar (a custom colour, custom effects, a custom name, lore, enchantments, ...). A
  * {@code custom_data} component is left out of the judgement, as {@code ItemKeys} leaves it out of the key. Pure; any thread.
@@ -31,12 +37,15 @@ public final class VariantItems {
     private VariantItems() {
     }
 
+    private static final java.util.concurrent.atomic.AtomicBoolean ALPHA_SAID = new java.util.concurrent.atomic.AtomicBoolean();
+
     /**
      * @param id       the item id without a namespace
      * @param patch    the stack's component patch
      * @param defaults the item's default components (may lack the component)
      */
     public static @Nullable String dataOf(String id, @Nullable DataComponents patch, @Nullable DataComponents defaults) {
+        if (patch != null && DyedSpecs.allowed(id) && patch.get(DataComponentTypes.DYED_COLOR) != null) return dyed(patch);
         switch (id) {
             case "firework_rocket", "firework_star" -> {
                 return FireworkItems.dataOf(id, patch, defaults);
@@ -106,6 +115,18 @@ public final class VariantItems {
             if (c.getType() != own || c.getValue() == null) return true;
         }
         return false;
+    }
+
+    /** {@code D|<rrggbb>} of a patch that is a colour with the default tooltip flag and nothing else, else null. */
+    private static @Nullable String dyed(DataComponents patch) {
+        if (other(patch, DataComponentTypes.DYED_COLOR)) return null;
+        DyedItemColor c = patch.get(DataComponentTypes.DYED_COLOR);
+        if (c == null || !c.isShowInTooltip()) return null;
+        // The alpha channel is not part of the grammar's rgb: it is dropped (and said once), so the spec is the colour the item shows
+        if ((c.getRgb() & 0xFF000000) != 0 && ALPHA_SAID.compareAndSet(false, true) && QwerteStashPlugin.LOG != null) {
+            QwerteStashPlugin.LOG.warn("Qwerte Stash: a dyed item has a colour with an alpha channel; its dyed spec is the rgb part only (said once)");
+        }
+        return "D|" + String.format(Locale.ROOT, "%06x", c.getRgb() & 0xFFFFFF);
     }
 
     private static @Nullable String tipped(@Nullable DataComponents patch) {

@@ -311,7 +311,7 @@ public final class Order {
          * made. A block of B1 to B3 is judged as it always was.
          */
         public boolean hasB4Steps() {
-            for (CraftStep s : steps) if (VariantSpecs.isRecipe(s.recipe())) return true;
+            for (CraftStep s : steps) if (VariantSpecs.isRecipe(s.recipe()) || DyedSpecs.isRecipe(s.recipe())) return true;
             return false;
         }
     }
@@ -601,8 +601,8 @@ public final class Order {
      * ({@link Craft#usesSpecs}) and judged by {@link CraftOrder#check}, which refuses them for a bot that doesn't say {@code firework}.
      */
     static @Nullable String reservedField(JsonObject c) {
-        // B4 carries out the remainder of a copy ({@link CraftStep#remainder}): nothing is reserved any more. B5's fields (dyed specs) are not read by any
-        // milestone yet: CraftOrder#check refuses a spec of a kind it doesn't know.
+        // B4 carries out the remainder of a copy ({@link CraftStep#remainder}): nothing is reserved any more. B5's dyed specs, first-coat cells and inputs are
+        // read like any spec and judged by CraftOrder#check (DyedSpecs); a spec of a kind it doesn't know is refused there.
         return null;
     }
 
