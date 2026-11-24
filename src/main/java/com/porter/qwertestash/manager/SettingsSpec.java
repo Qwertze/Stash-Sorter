@@ -189,9 +189,9 @@ public final class SettingsSpec {
 
         String manager = "Stash Manager";
         add("manager", "Stash Manager", manager, "Send the stash index to the Stash Manager server and answer its rescans.").cmd("manager {v}");
-        add("dashboard", "Dashboard", manager, "Let the Stash Manager website show and change these settings and run commands.").cmd("manager dashboard {v}");
-        add("dashboardConsole", "Dashboard console", manager, "Let the website run console commands. Turn it on in the proxy terminal: `stash manager dashboard console on`.").locked("only the proxy terminal can change it");
-        add("dashboardProxy", "Dashboard proxy settings", manager, "Let the website change the proxy's and other plugins' settings. Turn it on in the proxy terminal: `stash manager dashboard proxy on`.").locked("only the proxy terminal can change it");
+        add("dashboard", "Dashboard", manager, "Let the Stash Manager website show and change editable Stash Sorter settings.").cmd("manager dashboard {v}");
+        add("dashboardConsole", "Dashboard console", manager, "Legacy switch. Remote console jobs are disabled.").locked("only the proxy terminal can change it");
+        add("dashboardProxy", "Dashboard proxy settings", manager, "Show masked, read-only proxy and plugin settings on the website.").locked("only the proxy terminal can change it");
         add("managerUrl", "Server address", manager, "Where the Stash Manager server is.").locked("change it with `stash manager url`");
         add("managerKey", "API key", manager, "The server's API key.").locked("secret");
         add("managerIncludeExcluded", "Include excluded", manager, "Also list containers excluded from sorting.").cmd("manager includeExcluded {v}");

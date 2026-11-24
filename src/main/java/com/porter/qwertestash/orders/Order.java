@@ -59,6 +59,7 @@ public final class Order {
     public static @Nullable Order parse(@Nullable JsonObject o) {
         if (o == null || !o.has("id") || !o.has("lines") || !o.get("lines").isJsonArray()) return null;
         List<Line> lines = new ArrayList<>();
+        Map<String, Integer> totals = new LinkedHashMap<>();
         JsonArray array = o.getAsJsonArray("lines");
         for (JsonElement e : array) {
             if (!e.isJsonObject()) continue;
@@ -66,8 +67,14 @@ public final class Order {
             try {
                 String type = l.get("type").getAsString();
                 String key = l.get("key").getAsString();
-                int count = l.get("count").getAsInt();
-                if ((type.equals(ITEM) || type.equals(SHULKER)) && !key.isEmpty() && count >= 1) lines.add(new Line(type, key, count));
+                JsonElement quantity = l.get("count");
+                if (quantity == null || !quantity.isJsonPrimitive()) continue;
+                int count = quantity.getAsBigDecimal().intValueExact();
+                if (!(type.equals(ITEM) || type.equals(SHULKER)) || key.isEmpty() || count < 1) continue;
+                int previous = totals.getOrDefault(key, 0);
+                if (count > Integer.MAX_VALUE - previous) return null;
+                totals.put(key, previous + count);
+                lines.add(new Line(type, key, count));
             } catch (RuntimeException ex) {
                 // A broken line is left out and shows up as undelivered
             }
@@ -85,7 +92,7 @@ public final class Order {
     /** The total asked for per line key, lines with the same key merged. */
     public Map<String, Integer> requested() {
         Map<String, Integer> out = new LinkedHashMap<>();
-        for (Line l : lines) out.merge(l.key(), l.count(), Integer::sum);
+        for (Line l : lines) out.merge(l.key(), l.count(), Math::addExact);
         return out;
     }
 

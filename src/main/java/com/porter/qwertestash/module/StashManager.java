@@ -185,7 +185,7 @@ public class StashManager extends Module {
         hook(list, () -> list.add(of(com.aquarius.event.update.UpdateAvailableEvent.class, e -> ActivityFeed.INSTANCE.event("Proxy", "info", "An update is available"))));
         // The live viewer: the chat ring (kept always, 50 lines) and the hint that a chunk's columns changed
         hook(list, () -> list.add(of(com.aquarius.event.chat.PublicChatEvent.class, e -> chat("public", name(e.sender()), null, e.message()))));
-        hook(list, () -> list.add(of(com.aquarius.event.chat.WhisperChatEvent.class, e -> chat("whisper", name(e.sender()), name(e.receiver()), e.message()))));
+        // Private whispers are never forwarded to the remote live viewer.
         hook(list, () -> list.add(of(com.aquarius.event.chat.SystemChatEvent.class, e -> chat("system", "", null, e.message()))));
         hook(list, () -> list.add(of(com.aquarius.event.chat.DeathMessageChatEvent.class, e -> chat("death", "", null, e.message()))));
         hook(list, () -> list.add(of(com.aquarius.event.client.ChunkDataEvent.class, e -> {
@@ -313,7 +313,10 @@ public class StashManager extends Module {
         try {
             boolean want = isEnabled() && CONFIG.manager && CONFIG.dashboard;
             if (want) {
-                if (link != null && link.isRunning()) return;
+                if (link != null) {
+                    if (link.isRunning()) return;
+                    link.stop();
+                }
                 link = new DashboardLink(new LinkHost());
                 link.start();
             }
@@ -570,10 +573,18 @@ public class StashManager extends Module {
             String scheme = uri.getScheme();
             if (uri.getHost() == null || scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) return null;
             if (uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getRawUserInfo() != null) return null;
+            // An HTTP request is readable in transit even though the payload is HMAC-signed.
+            // Permit plaintext ONLY for exact local loopback hosts (not DNS aliases or 127.*).
+            if (scheme.equalsIgnoreCase("http") && !isLiteralLoopback(uri.getHost())) return null;
             return uri;
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    private static boolean isLiteralLoopback(String host) {
+        return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)
+            || "[::1]".equalsIgnoreCase(host) || "::1".equals(host);
     }
 
     // The tick
@@ -609,7 +620,7 @@ public class StashManager extends Module {
             setStatus("bad url");
             if (!warnedUrl) {
                 warnedUrl = true;
-                LOG.warn("{}the server url must be a http or https address without a query, like http://127.0.0.1:8765 (`stash manager url <url>`).", PREFIX);
+                LOG.warn("{}use HTTPS for remote servers (HTTP only on localhost/127.0.0.1/[::1]); no query or credentials (`stash manager url <url>`).", PREFIX);
             }
             return;
         }

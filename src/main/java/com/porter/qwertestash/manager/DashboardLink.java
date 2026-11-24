@@ -16,8 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static com.porter.qwertestash.QwerteStashPlugin.LOG;
@@ -34,7 +33,7 @@ import static com.porter.qwertestash.QwerteStashPlugin.LOG;
  *       values every 3 s while watched and every 60 s otherwise (which also notices changes made from the terminal or
  *       Discord). The {@code plugin} scope is always pushed; the others (the proxy, other plugins) only once the server has
  *       asked for them, and then kept up to date.</li>
- *   <li>"dashboard-apply": one thread that runs the jobs one after another (settings changes and console commands) and
+ *   <li>"dashboard-apply": one thread that handles settings jobs in order, rejects unsupported jobs and
  *       posts the results.</li>
  * </ul>
  * Nothing here blocks the bot tick; every request has timeouts.
@@ -44,7 +43,7 @@ public final class DashboardLink {
     public static final String PLUGIN_SCOPE = "plugin";
     private static final long WATCHED_MS = 3_000, IDLE_MS = 60_000, RATE_LIMITED_MS = 3_000;
     private static final long BACKOFF_MIN_MS = 5_000, BACKOFF_MAX_MS = 60_000;
-    private static final int MAX_COMMAND = 500;
+    private static final int MAX_PENDING_JOBS = 32;
     /** A scope whose schema and values together are bigger than this is logged (the server takes at most 8 MiB). */
     private static final int BIG_STATE = 2 * 1024 * 1024;
 
@@ -75,10 +74,10 @@ public final class DashboardLink {
 
         String mcVersion();
 
-        /** Console commands may run: switched on in the proxy terminal. */
+        /** Legacy host switch retained for API compatibility. Console jobs are disabled. */
         boolean consoleAllowed();
 
-        /** Settings of the proxy and other plugins may change: switched on in the proxy terminal. */
+        /** Legacy host switch retained for API compatibility. Additional scopes are view only. */
         boolean proxyAllowed();
 
         /** The link keeps running only while this is true; checked between requests. */
@@ -93,11 +92,8 @@ public final class DashboardLink {
     private final Host host;
     private volatile boolean running;
     private volatile Thread poller, pusher;
-    private final ThreadPoolExecutor apply = new ThreadPoolExecutor(1, 1, 10, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
-        Thread t = new Thread(r, "dashboard-apply");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ArrayBlockingQueue<JsonObject> jobs = new ArrayBlockingQueue<>(MAX_PENDING_JOBS);
+    private volatile Thread worker;
     private volatile HttpURLConnection pollConn;
     /** The live viewer (its thread runs only while a browser watches). */
     private volatile @Nullable ViewerFeed viewer;
@@ -112,7 +108,6 @@ public final class DashboardLink {
     private final Set<String> active = ConcurrentHashMap.newKeySet();
     private volatile String helloPlayer = "";
     private volatile List<String> helloScopes = List.of();
-    private volatile String helloCaps = "";
     private volatile String status = "starting";
     private volatile @Nullable String lastError;
 
@@ -123,7 +118,6 @@ public final class DashboardLink {
 
     public DashboardLink(Host host) {
         this.host = host;
-        apply.allowCoreThreadTimeOut(true);
         ViewerFeed.Game game = host.viewerGame();
         if (game != null) viewer = new ViewerFeed(game, this::postViewer, host.botId(), () -> viewerWanted = null);
     }
@@ -198,6 +192,9 @@ public final class DashboardLink {
         pusher = new Thread(this::stateLoop, "dashboard-state");
         poller.setDaemon(true);
         pusher.setDaemon(true);
+        worker = new Thread(this::workLoop, "dashboard-apply");
+        worker.setDaemon(true);
+        worker.start();
         poller.start();
         pusher.start();
     }
@@ -221,11 +218,23 @@ public final class DashboardLink {
         if (pusher != null) pusher.interrupt();
         // Stopped by a job of its own (turning the dashboard or the manager off from the website): that thread finishes the job
         // and posts its result, so it is neither cut short nor waited for
-        if (Thread.currentThread().getName().equals("dashboard-apply")) return;
-        apply.shutdownNow();
+        jobs.clear();
+        if (Thread.currentThread() == worker) return;
+        if (worker != null) worker.interrupt();
         try {
             if (poller != null) poller.join(1000);
             if (pusher != null) pusher.join(1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void workLoop() {
+        try {
+            while (alive() && Thread.currentThread() == worker) {
+                JsonObject job = jobs.poll(1, TimeUnit.SECONDS);
+                if (job != null && alive()) runJob(job);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -268,8 +277,7 @@ public final class DashboardLink {
         JsonArray caps = new JsonArray();
         caps.add("settings");
         caps.add("activity");
-        if (host.consoleAllowed()) caps.add("console");
-        if (host.proxyAllowed()) caps.add("proxy");
+        // Remote console and cross-scope edits are disabled by this build.
         o.add("caps", caps);
         JsonArray scopeList = new JsonArray();
         List<String> names = scopeNames();
@@ -286,7 +294,6 @@ public final class DashboardLink {
             helloOk = true;
             helloPlayer = player;
             helloScopes = names;
-            helloCaps = capsKey();
             lastError = null;
             setStatus("linked");
             // The server hasn't seen this session: it gets everything it has asked for before, again
@@ -336,7 +343,7 @@ public final class DashboardLink {
         long backoff = 0;
         while (alive()) {
             try {
-                if (!helloOk || (!host.player().isBlank() && !Objects.equals(host.player(), helloPlayer)) || !scopeNames().equals(helloScopes) || !capsKey().equals(helloCaps)) {
+                if (!helloOk || (!host.player().isBlank() && !Objects.equals(host.player(), helloPlayer)) || !scopeNames().equals(helloScopes)) {
                     if (!sayHello()) {
                         stopViewer();
                         backoff = next(backoff);
@@ -418,7 +425,7 @@ public final class DashboardLink {
     }
 
     /** A 200 reply from bot/next: what the server wants to know, whether a browser is watching, and the jobs. */
-    private void take(String body) {
+    private void take(String body) throws InterruptedException {
         JsonObject o;
         try {
             JsonElement e = SafeJson.parse(body);
@@ -439,12 +446,8 @@ public final class DashboardLink {
         if (!o.has("jobs") || !o.get("jobs").isJsonArray()) return;
         for (JsonElement j : o.getAsJsonArray("jobs")) {
             if (!j.isJsonObject()) continue;
-            JsonObject job = j.getAsJsonObject();
-            try {
-                apply.execute(() -> runJob(job));
-            } catch (RuntimeException rejected) {
-                // Stopping: the job is dropped, the server expires it
-            }
+            if (!alive()) return;
+            jobs.put(j.getAsJsonObject());
         }
     }
 
@@ -461,10 +464,6 @@ public final class DashboardLink {
             else if ("values".equals(what)) needValues.add(scope);
             pushSoon = true;
         }
-    }
-
-    private String capsKey() {
-        return (host.consoleAllowed() ? "c" : "-") + (host.proxyAllowed() ? "p" : "-");
     }
 
     private List<String> scopeNames() {
@@ -510,9 +509,9 @@ public final class DashboardLink {
     private void set(JsonObject job, JsonObject result) {
         String scopeName = str(job, "scope");
         String path = str(job, "path");
-        if (scopeName != null && !PLUGIN_SCOPE.equals(scopeName) && !host.proxyAllowed()) {
+        if (scopeName != null && !PLUGIN_SCOPE.equals(scopeName)) {
             result.addProperty("ok", false);
-            result.addProperty("error", "disabled on the proxy: run `stash manager dashboard proxy on` in the proxy terminal");
+            result.addProperty("error", "editing proxy/other-plugin settings is disabled in this hardened build");
             return;
         }
         Scope scope = scopeName == null ? null : findScope(scopeName);
@@ -529,30 +528,10 @@ public final class DashboardLink {
     }
 
     private void command(String id, JsonObject job, JsonObject result) {
-        String command = str(job, "command");
-        if (!host.consoleAllowed()) {
-            result.addProperty("ok", false);
-            result.addProperty("error", "disabled on the proxy: run `stash manager dashboard console on` in the proxy terminal");
-            return;
-        }
-        if (command == null || command.isBlank() || command.length() > MAX_COMMAND || command.chars().anyMatch(Character::isISOControl)) {
-            result.addProperty("ok", false);
-            result.addProperty("error", command == null || command.isBlank() ? "no command" : "the command is too long or has control characters");
-            return;
-        }
-        ConsoleRunner.Outcome out = ConsoleRunner.run(command.trim(), late -> {
-            // Output the command logs after it has returned goes on the same job
-            JsonObject more = new JsonObject();
-            more.addProperty("id", id);
-            more.addProperty("ok", true);
-            more.addProperty("more", true);
-            more.add("output", late);
-            sendResults(List.of(more));
-        });
-        result.addProperty("ok", out.ok());
-        if (out.sensitive()) result.addProperty("sensitive", true);
-        if (out.error() != null) result.addProperty("error", out.error());
-        result.add("output", out.output());
+        // Intentionally fail closed: signed transport authenticates the server, not each
+        // dashboard user. Never run an owner-privileged proxy command from a remote job.
+        result.addProperty("ok", false);
+        result.addProperty("error", "remote console disabled in hardened build; use the local proxy terminal");
     }
 
     private void sendResults(List<JsonObject> results) {

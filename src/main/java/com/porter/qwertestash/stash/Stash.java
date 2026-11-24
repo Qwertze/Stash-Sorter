@@ -7,11 +7,12 @@ import com.porter.qwertestash.QwerteStashPlugin;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -384,18 +385,10 @@ public class Stash {
      * @return false if no copy could be made (the caller must not go on to remove anything)
      */
     public boolean backUp() {
-        Path path = file(name, server);
-        if (!Files.exists(path)) return true;
+        Path path = dataPath();
+        if (Files.notExists(path)) return true;
         try {
-            String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-            String prefix = path.getFileName() + ".prune-bak-";
-            Files.copy(path, path.resolveSibling(prefix + stamp), StandardCopyOption.REPLACE_EXISTING);
-            List<Path> copies = new ArrayList<>();
-            try (var files = Files.list(path.getParent())) {
-                files.filter(q -> q.getFileName().toString().startsWith(prefix)).forEach(copies::add);
-            }
-            copies.sort(Comparator.comparing((Path q) -> q.getFileName().toString()).reversed());
-            for (int i = 3; i < copies.size(); i++) Files.deleteIfExists(copies.get(i));
+            SnapshotFiles.backup(path, ".prune-bak-");
             return true;
         } catch (IOException | RuntimeException e) {
             QwerteStashPlugin.LOG.error("Qwerte Stash: couldn't back up the stash file {}", path.getFileName(), e);
@@ -419,11 +412,11 @@ public class Stash {
         return null;
     }
 
-    public void markDirty() {
+    public synchronized void markDirty() {
         dirty = true;
     }
 
-    public boolean isDirty() {
+    public synchronized boolean isDirty() {
         return dirty;
     }
 
@@ -528,6 +521,10 @@ public class Stash {
         return (server + "_" + name).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_");
     }
 
+    Path dataPath() {
+        return file(name, server);
+    }
+
     /** Where the readable list of what is in the stash is kept. */
     public Path indexPath() {
         return folder().resolve(baseName(name, server) + ".index.txt");
@@ -544,29 +541,36 @@ public class Stash {
 
     public static void delete(String name) {
         try {
-            Files.deleteIfExists(file(name, currentServer()));
+            String server = currentServer();
+            Path path = file(name, server);
+            StashIndex.forget(folder().resolve(baseName(name, server) + ".index.txt"));
+            Files.deleteIfExists(path);
         } catch (IOException e) {
-            QwerteStashPlugin.LOG.error("Couldn't delete stash {}", name, e);
+            throw new UncheckedIOException("Could not delete stash " + name, e);
         }
     }
 
-    public void save() {
+    /** Keep the old session's held slots stable across a failed disconnect or stash switch. */
+    synchronized boolean flushForRelease() {
+        if (!dirty) return true;
+        if (heldSource != null) {
+            held = new HashMap<>(heldSource.get());
+            heldSource = null;
+        }
+        save();
+        return !dirty;
+    }
+
+    public synchronized void save() {
         try {
-            Files.createDirectories(folder());
             Supplier<Map<Integer, String>> source = heldSource;
             if (source != null) held = new HashMap<>(source.get());
             // Written beside the file and moved over it, so a crash or a stop in the middle never leaves half a stash
-            Path target = file(name, server);
-            Path temp = target.resolveSibling(target.getFileName() + ".tmp");
-            Files.writeString(temp, GSON.toJson(this), StandardCharsets.UTF_8);
-            try {
-                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            SnapshotFiles.write(dataPath(), GSON.toJson(this));
             dirty = false;
             StashIndex.touch(this);
         } catch (IOException e) {
+            dirty = true;
             QwerteStashPlugin.LOG.error("Couldn't save stash {}", name, e);
         }
     }
@@ -597,18 +601,31 @@ public class Stash {
      * The stash called {@code name} on this server, or null if there isn't one saved.
      */
     public static @Nullable Stash load(String name) {
-        Path path = file(name, currentServer());
-        if (!Files.exists(path)) return null;
+        String server = currentServer();
+        try {
+            return load(file(name, server), name, server);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not read or preserve stash " + name, e);
+        }
+    }
+
+    static @Nullable Stash load(Path path, String name, String server) throws IOException {
 
         try {
             Stash stash = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Stash.class);
-            if (stash == null) return null;
+            if (stash == null) throw new com.google.gson.JsonParseException("empty stash document");
+            if ((stash.name != null && !stash.name.equalsIgnoreCase(name))
+                || (stash.server != null && !stash.server.equalsIgnoreCase(server))) {
+                throw new IOException("stash identity does not match its file");
+            }
+            stash.name = name;
+            stash.server = server;
             if (stash.orphans == null) stash.orphans = new ArrayList<>();
             stash.deliveryStorage = stash.deliveryStorage == null ? new CopyOnWriteArrayList<>() : new CopyOnWriteArrayList<>(stash.deliveryStorage);
             if (stash.held == null) stash.held = new HashMap<>();
             stash.normalizeInFlight();
             stash.boxes = stash.boxes == null ? new CopyOnWriteArrayList<>() : new CopyOnWriteArrayList<>(stash.boxes);
-            stash.boxes.removeIf(box -> box == null || box.parts == null || box.parts.isEmpty());
+            stash.boxes.removeIf(box -> box == null || box.pos == null || box.parts == null || box.parts.isEmpty());
             for (Box box : stash.boxes) {
                 if (box.labels == null) box.labels = new ArrayList<>();
                 if (box.contents != null) {
@@ -622,8 +639,10 @@ public class Stash {
                 }
             }
             return stash;
-        } catch (IOException | RuntimeException e) {
-            QwerteStashPlugin.LOG.error("Couldn't load stash {}", name, e);
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (MalformedInputException | RuntimeException e) {
+            QwerteStashPlugin.LOG.error("Couldn't decode stash {}", name, e);
             backUpBroken(path);
             return null;
         }
@@ -634,21 +653,9 @@ public class Stash {
      * (a failed load starts a new stash, which is written over the file the next time it is saved). The newest three
      * copies are kept.
      */
-    private static void backUpBroken(Path path) {
-        try {
-            String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-            Path copy = path.resolveSibling(path.getFileName() + ".bak-" + stamp);
-            Files.copy(path, copy, StandardCopyOption.REPLACE_EXISTING);
-            QwerteStashPlugin.LOG.error("Qwerte Stash: {} could not be read, a copy was saved as {}. A new empty stash replaces it the next time it is saved; restore the copy to get the old one back.", path.getFileName(), copy.getFileName());
-
-            List<Path> copies = new ArrayList<>();
-            try (var files = Files.list(path.getParent())) {
-                files.filter(p -> p.getFileName().toString().startsWith(path.getFileName() + ".bak-")).forEach(copies::add);
-            }
-            copies.sort(Comparator.comparing((Path p) -> p.getFileName().toString()).reversed());
-            for (int i = 3; i < copies.size(); i++) Files.deleteIfExists(copies.get(i));
-        } catch (IOException | RuntimeException e) {
-            QwerteStashPlugin.LOG.error("Qwerte Stash: couldn't back up the unreadable stash file {}", path.getFileName(), e);
-        }
+    private static void backUpBroken(Path path) throws IOException {
+        Path copy = SnapshotFiles.backup(path, ".bak-");
+        QwerteStashPlugin.LOG.error("Unreadable stash {} was preserved as {} before starting an empty stash.",
+            path.getFileName(), copy.getFileName());
     }
 }

@@ -142,8 +142,6 @@ public class StashSorter extends AbstractFieldModule {
     private static final int SORTER_PRIORITY = 1;
     // Requests for one container that fail before it is skipped as unreachable
     private static final int MAX_BOX_FAILURES = 3;
-    // Inventory index of the slot PearlManager moves pearls to: MoveToHotbarAction.SLOT_1, the first hotbar slot
-    private static final int PEARL_SLOT = 0;
     // Giving way: how long we try to close our own window (counted while the proxy refuses our requests); the longest
     // quiet time we ask of others; the window that interruptions are counted over; how many one job takes before it's
     // planned again; and the gaps between the messages about waiting
@@ -957,7 +955,7 @@ public class StashSorter extends AbstractFieldModule {
         breakRetries = 0;
         groundId = -1;
         groundFinishing = false;
-        exploreChunk = NO_CHUNK;
+        exploreChunk = PerimeterColumns.NONE;
 
         // Containers used by others that were waiting to be read again are marked, to be read on the next run
         for (Box held : deferredAccess.keySet()) staleBoxes.add(held.pos);
@@ -1060,30 +1058,20 @@ public class StashSorter extends AbstractFieldModule {
      */
     private boolean pickCarrySlots() {
         carry.clear();
-        Set<Integer> keep = keepSlots();
-        Set<Integer> chosen = parseSlots(CONFIG.carrySlots);
-        boolean designated = !CONFIG.carrySlots.isBlank();
-
-        for (int i = 0; i < 36; i++) {
-            if (keep.contains(i)) continue;
-            if (designated && !chosen.contains(i)) continue;
-            Item there = inventoryItem(i);
-            // Stacks from the stash still in the inventory from before (a reconnect, or sorting turned off and on) are
-            // carried again, so they are put away and not left behind as if they were the bot's own
-            if (there == null || there.id.equals(stashHeld.get(i))) carry.add(i);
-        }
-
-        if (designated && carry.size() < chosen.size()) {
-            warn("{} of the carry slots have items in them, they'll be left alone.", chosen.size() - carry.size());
+        var slots = configuredCarrySlots();
+        carry.addAll(slots.forSorting(this::inventoryItem, stashHeld));
+        int unavailable = slots.designatedCount() - carry.size();
+        if (unavailable > 0) {
+            warn("{} of the carry slots have items in them, they'll be left alone.", unavailable);
         }
 
         // Scan only moves nothing, so it needs no room; sorting looks again when it is switched on
         if (carry.isEmpty() && sorts()) {
             int filled = 0;
             for (int i = 0; i < 36; i++) if (inventoryItem(i) != null) filled++;
-            String slots = String.format(" The bot has %d of 36 inventory slots filled%s.", filled,
-                keep.isEmpty() ? "" : ", and " + keep.size() + " are keep slots");
-            fail((designated ? "The carry slots are all full or kept. Empty at least one of them." : "No empty inventory slot to carry items in.") + slots);
+            String inventorySummary = String.format(" The bot has %d of 36 inventory slots filled%s.", filled,
+                slots.keptCount() == 0 ? "" : ", and " + slots.keptCount() + " are keep slots");
+            fail((slots.isDesignated() ? "The carry slots are all full or kept. Empty at least one of them." : "No empty inventory slot to carry items in.") + inventorySummary);
             return false;
         }
         return true;
@@ -1092,21 +1080,8 @@ public class StashSorter extends AbstractFieldModule {
     /**
      * "1-9, 28-36" into inventory indexes. 1-9 is the hotbar and 10-36 the main inventory, matching index + 1.
      */
-    public static Set<Integer> parseSlots(String text) {
-        Set<Integer> slots = new HashSet<>();
-        for (String part : text.split(",")) {
-            part = part.trim();
-            if (part.isEmpty()) continue;
-            try {
-                String[] range = part.split("-");
-                int from = Integer.parseInt(range[0].trim());
-                int to = range.length > 1 ? Integer.parseInt(range[1].trim()) : from;
-                for (int n = Math.max(1, Math.min(from, to)); n <= Math.min(36, Math.max(from, to)); n++) slots.add(n - 1);
-            } catch (NumberFormatException ignored) {
-                // Skip anything that isn't a number or range
-            }
-        }
-        return slots;
+    public static Set<Integer> parseSlots(@Nullable String text) {
+        return CarrySlots.parse(text);
     }
 
     // The sorting loop
@@ -1305,13 +1280,7 @@ public class StashSorter extends AbstractFieldModule {
     // containers. It never digs or builds on the way (rules(false, false) on every request), and a column it can't get to
     // is skipped for good.
 
-    private static final int EXPLORE_WAYPOINT_TIMEOUT = 20 * 40;
-    private static final int EXPLORE_ARRIVED_TICKS = 40;
-    private static final int EXPLORE_REASK_TICKS = 60;
-    private static final int EXPLORE_PROGRESS_TICKS = 20 * 15;
-    private double exploreBest;
-    private int exploreProgressTicks;
-    private static final long NO_CHUNK = Long.MIN_VALUE;
+    private WaypointProgress waypointProgress = new WaypointProgress();
 
     private boolean exploreDone = true;
     private boolean exploreAnnounced;
@@ -1320,35 +1289,8 @@ public class StashSorter extends AbstractFieldModule {
     // Chunk columns of the box already read for containers, and the ones that couldn't be got within sight of
     private final Set<Long> exploredChunks = new HashSet<>();
     private final Set<Long> unreachableChunks = new HashSet<>();
-    private long exploreChunk = NO_CHUNK;
-    private int exploreWaypointTicks, exploreArrivedTicks;
-    private long exploreAskedAt;
+    private long exploreChunk = PerimeterColumns.NONE;
     private boolean exploreStartedInside;
-
-    private static long chunkKey(int cx, int cz) {
-        return ((long) cx << 32) | (cz & 0xffffffffL);
-    }
-
-    private static int chunkX(long key) {
-        return (int) (key >> 32);
-    }
-
-    private static int chunkZ(long key) {
-        return (int) key;
-    }
-
-    /**
-     * Every chunk column the box touches.
-     */
-    private static long[] areaChunks(int[] b) {
-        int width = (b[3] >> 4) - (b[0] >> 4) + 1, depth = (b[5] >> 4) - (b[2] >> 4) + 1;
-        long[] chunks = new long[width * depth];
-        int n = 0;
-        for (int cx = b[0] >> 4; cx <= b[3] >> 4; cx++) {
-            for (int cz = b[2] >> 4; cz <= b[5] >> 4; cz++) chunks[n++] = chunkKey(cx, cz);
-        }
-        return chunks;
-    }
 
     // The columns of the box in hand, worked out once per exploration, and when it began (ticks)
     private long[] exploreKeys = new long[0];
@@ -1362,7 +1304,7 @@ public class StashSorter extends AbstractFieldModule {
     private void resetExplore() {
         exploredChunks.clear();
         unreachableChunks.clear();
-        exploreChunk = NO_CHUNK;
+        exploreChunk = PerimeterColumns.NONE;
         discoverQueue.clear();
         nextDiscovery = 0;
         exploreAnnounced = false;
@@ -1626,11 +1568,11 @@ public class StashSorter extends AbstractFieldModule {
         if (b == null) return false;
         job = Job.Explore;
         target = null;
-        exploreChunk = NO_CHUNK;
+        exploreChunk = PerimeterColumns.NONE;
         exploreStartedInside = stash.inArea(playerFeet(), 2);
         if (!exploreAnnounced) {
             exploreAnnounced = true;
-            exploreKeys = areaChunks(b);
+            exploreKeys = PerimeterColumns.covering(b);
             exploreStartTick = tickCount;
             info("Exploring the stash area: {} chunks to look at.", exploreKeys.length);
         }
@@ -1640,7 +1582,7 @@ public class StashSorter extends AbstractFieldModule {
     private void endExplore() {
         activity.releaseOurPathing();
         restoreRules();
-        exploreChunk = NO_CHUNK;
+        exploreChunk = PerimeterColumns.NONE;
         job = null;
         target = null;
         wait = CONFIG.delayTicks;
@@ -1653,7 +1595,7 @@ public class StashSorter extends AbstractFieldModule {
             endExplore();
             return;
         }
-        if (exploreKeys.length == 0) exploreKeys = areaChunks(b);
+        if (exploreKeys.length == 0) exploreKeys = PerimeterColumns.covering(b);
         long[] chunks = exploreKeys;
 
         // One run is not allowed to go on for ever: what is known is what is used
@@ -1667,7 +1609,7 @@ public class StashSorter extends AbstractFieldModule {
         // A loaded column is read at once, one a tick
         for (long key : chunks) {
             if (exploredChunks.contains(key) || unreachableChunks.contains(key)) continue;
-            if (World.isChunkLoadedChunkPos(chunkX(key), chunkZ(key))) {
+            if (World.isChunkLoadedChunkPos(PerimeterColumns.x(key), PerimeterColumns.z(key))) {
                 scanChunk(key, b);
                 exploredChunks.add(key);
                 return;
@@ -1675,103 +1617,61 @@ public class StashSorter extends AbstractFieldModule {
         }
 
         // The column being walked to is in view now
-        if (exploreChunk != NO_CHUNK && exploredChunks.contains(exploreChunk)) {
+        if (exploreChunk != PerimeterColumns.NONE && exploredChunks.contains(exploreChunk)) {
             activity.releaseOurPathing();
             restoreRules();
-            exploreChunk = NO_CHUNK;
+            exploreChunk = PerimeterColumns.NONE;
         }
 
         // Between waypoints: containers within reach that haven't been read (or are stale) are read before moving on
-        if (exploreChunk == NO_CHUNK && nearbyUnread() != null) {
+        if (exploreChunk == PerimeterColumns.NONE && nearbyUnread() != null) {
             endExplore();
             return;
         }
 
-        if (exploreChunk == NO_CHUNK) {
+        if (exploreChunk == PerimeterColumns.NONE) {
             // The nearest column not yet seen
             BlockPos feet = playerFeet();
-            long nearest = NO_CHUNK;
-            double nearestDistance = Double.MAX_VALUE;
-            for (long key : chunks) {
-                if (exploredChunks.contains(key) || unreachableChunks.contains(key)) continue;
-                int[] w = waypoint(key, b);
-                double d = Math.hypot(w[0] - feet.x(), w[1] - feet.z());
-                if (d < nearestDistance) {
-                    nearestDistance = d;
-                    nearest = key;
-                }
-            }
-            if (nearest == NO_CHUNK) {
+            long nearest = PerimeterColumns.nearestPending(chunks, b, feet.x(), feet.z(), exploredChunks, unreachableChunks);
+            if (nearest == PerimeterColumns.NONE) {
                 finishExplore();
                 return;
             }
             exploreChunk = nearest;
             final long pick = nearest;
-            stepProgress("explore", exploredChunks.size(), chunks.length, () -> "exploring the area: " + exploredChunks.size() + "/" + chunks.length + " chunks; next: chunk at " + chunkX(pick) + " " + chunkZ(pick) + ".");
-            debug("Exploring: walking to the chunk at {}, {}, {} of {} seen, {} out of reach.", chunkX(pick), chunkZ(pick), exploredChunks.size(), chunks.length, unreachableChunks.size());
-            exploreBest = Double.MAX_VALUE;
-            exploreProgressTicks = 0;
-            exploreWaypointTicks = exploreArrivedTicks = 0;
-            exploreAskedAt = -1;
+            stepProgress("explore", exploredChunks.size(), chunks.length, () -> "exploring the area: " + exploredChunks.size() + "/" + chunks.length + " chunks; next: chunk at " + PerimeterColumns.x(pick) + " " + PerimeterColumns.z(pick) + ".");
+            debug("Exploring: walking to the chunk at {}, {}, {} of {} seen, {} out of reach.", PerimeterColumns.x(pick), PerimeterColumns.z(pick), exploredChunks.size(), chunks.length, unreachableChunks.size());
+            waypointProgress = new WaypointProgress();
         }
 
-        exploreWaypointTicks++;
-        int[] w = waypoint(exploreChunk, b);
+        var point = PerimeterColumns.waypoint(exploreChunk, b);
         BlockPos feet = playerFeet();
         if (exploreStartedInside && !stash.inArea(feet, 2)) {
-            warn("Skipping the chunk at {}: the way there leaves the stash area.", fmt(new BlockPos(w[0], feet.y(), w[1])));
+            warn("Skipping the chunk at {}: the way there leaves the stash area.", fmt(new BlockPos(point.x(), feet.y(), point.z())));
             skipChunk(null);
             return;
         }
-        if (exploreWaypointTicks > EXPLORE_WAYPOINT_TIMEOUT) {
-            skipChunk("it took longer than 40 seconds");
-            return;
+        double distance = Math.hypot(CACHE.getPlayerCache().getX() - (point.x() + 0.5),
+            CACHE.getPlayerCache().getZ() - (point.z() + 0.5));
+        switch (waypointProgress.advance(tickCount, distance, activity)) {
+            case WAIT -> { }
+            case TIMED_OUT -> skipChunk("it took longer than 40 seconds");
+            case NO_PATH -> skipChunk("no way there was found");
+            case STALLED -> skipChunk("no headway for 15 seconds");
+            case UNLOADED -> skipChunk("it never loaded");
+            case REQUEST_PATH -> {
+                rules(false, false);
+                GoalXZ walkTo = new GoalXZ(point.x(), point.z());
+                PathingRequestFuture future = BARITONE.pathTo(walkTo);
+                activity.notePath(future, BARITONE.getCustomGoalProcess(), walkTo, tickCount);
+            }
         }
-        // A failure only counts once this waypoint has been asked for: an earlier settled one is not about it
-        if (exploreAskedAt >= 0 && activity.ownFailureSettled()) {
-            skipChunk("no way there was found");
-            return;
-        }
-        double distance = Math.hypot(CACHE.getPlayerCache().getX() - (w[0] + 0.5), CACHE.getPlayerCache().getZ() - (w[1] + 0.5));
-        if (distance < exploreBest - 1) {
-            exploreBest = distance;
-            exploreProgressTicks = exploreWaypointTicks;
-        }
-        if (exploreWaypointTicks - exploreProgressTicks > EXPLORE_PROGRESS_TICKS) {
-            skipChunk("no headway for 15 seconds");
-            return;
-        }
-        if (distance <= 2) {
-            // At the spot and still not in view: there is nothing loaded there to look at
-            if (++exploreArrivedTicks > EXPLORE_ARRIVED_TICKS) skipChunk("it never loaded");
-            return;
-        }
-        exploreArrivedTicks = 0;
-
-        if (activity.mayRequest() && (exploreAskedAt < 0 || tickCount - exploreAskedAt > EXPLORE_REASK_TICKS)) {
-            exploreAskedAt = tickCount;
-            // Never dig or build to get there
-            rules(false, false);
-            GoalXZ walkTo = new GoalXZ(w[0], w[1]);
-            PathingRequestFuture future = BARITONE.pathTo(walkTo);
-            activity.notePath(future, BARITONE.getCustomGoalProcess(), walkTo, tickCount);
-        }
-    }
-
-    /**
-     * Where to stand to bring a chunk column into view: the middle of the part of it inside the box. The height isn't
-     * known for a column that isn't loaded, so the pathfinder is only given x and z.
-     */
-    private static int[] waypoint(long key, int[] b) {
-        int x0 = Math.max(b[0], chunkX(key) << 4), x1 = Math.min(b[3], (chunkX(key) << 4) + 15);
-        int z0 = Math.max(b[2], chunkZ(key) << 4), z1 = Math.min(b[5], (chunkZ(key) << 4) + 15);
-        return new int[] {(x0 + x1) / 2, (z0 + z1) / 2};
     }
 
     private void skipChunk(@Nullable String why) {
-        if (why != null) debug("Not exploring the chunk at {}, {}: {}.", chunkX(exploreChunk), chunkZ(exploreChunk), why);
+        if (why != null) debug("Not exploring the chunk at {}, {}: {}.", PerimeterColumns.x(exploreChunk), PerimeterColumns.z(exploreChunk), why);
         unreachableChunks.add(exploreChunk);
-        exploreChunk = NO_CHUNK;
+        exploreChunk = PerimeterColumns.NONE;
         activity.releaseOurPathing();
         restoreRules();
     }
@@ -1781,7 +1681,7 @@ public class StashSorter extends AbstractFieldModule {
      * column's block entities say where the chests and barrels are, so no block of the box is looked at but those.
      */
     private void scanChunk(long key, int[] b) {
-        int cx = chunkX(key), cz = chunkZ(key);
+        int cx = PerimeterColumns.x(key), cz = PerimeterColumns.z(key);
         var chunk = CACHE.getChunkCache().get(cx, cz);
         if (chunk == null) return;
 
@@ -1833,8 +1733,8 @@ public class StashSorter extends AbstractFieldModule {
         if (discoverQueue.isEmpty()) {
             if (tickCount < nextDiscovery) return;
             nextDiscovery = tickCount + DISCOVER_GAP_TICKS;
-            for (long key : areaChunks(b)) {
-                if (World.isChunkLoadedChunkPos(chunkX(key), chunkZ(key))) discoverQueue.add(key);
+            for (long key : PerimeterColumns.covering(b)) {
+                if (World.isChunkLoadedChunkPos(PerimeterColumns.x(key), PerimeterColumns.z(key))) discoverQueue.add(key);
             }
             scanAdded = scanRemoved = 0;
         }
@@ -8695,9 +8595,11 @@ public class StashSorter extends AbstractFieldModule {
      * where it wants its pearls.
      */
     private static Set<Integer> keepSlots() {
-        Set<Integer> keep = parseSlots(CONFIG.keepSlots);
-        if (CONFIG.reservePearlSlot) keep.add(PEARL_SLOT);
-        return keep;
+        return CarrySlots.kept(CONFIG.keepSlots, CONFIG.reservePearlSlot);
+    }
+
+    private static CarrySlots configuredCarrySlots() {
+        return new CarrySlots(CONFIG.carrySlots, CONFIG.keepSlots, CONFIG.reservePearlSlot);
     }
 
     /**
@@ -9384,14 +9286,7 @@ public class StashSorter extends AbstractFieldModule {
     /** Free inventory slots an order may carry in. Bot tick only. */
     public int freeOrderSlots() {
         if (!CACHE.getPlayerCache().isAlive() || CACHE.getPlayerCache().getPlayerInventory().size() < 45) return 0;
-        Set<Integer> keep = keepSlots();
-        Set<Integer> chosen = CONFIG.carrySlots.isBlank() ? null : parseSlots(CONFIG.carrySlots);
-        int free = 0;
-        for (int i = 0; i < 36; i++) {
-            if (keep.contains(i) || (chosen != null && !chosen.contains(i))) continue;
-            if (inventoryItem(i) == null) free++;
-        }
-        return free;
+        return configuredCarrySlots().freeCount(this::inventoryItem);
     }
 
     /** The stash holds, or the bot carries, a shulker box. Bot tick only. */

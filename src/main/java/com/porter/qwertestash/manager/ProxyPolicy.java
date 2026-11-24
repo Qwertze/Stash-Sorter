@@ -59,12 +59,12 @@ public final class ProxyPolicy implements ConfigSchema.Policy {
 
     @Override
     public @Nullable String lock(String path) {
-        if (!proxy) return null;
+        if (!proxy) return "view only in this build";
         for (Map.Entry<String, String> e : LOCKED.entrySet()) {
             String p = e.getKey();
             if (path.equals(p) || path.startsWith(p + ".")) return e.getValue();
         }
-        return null;
+        return "view only in this build";
     }
 
     /** The first part of the path, and for the modules under client.extra their name, so the page can group by module. */
@@ -88,6 +88,7 @@ public final class ProxyPolicy implements ConfigSchema.Policy {
     /** Another plugin's text settings could hold anything (addresses, logins): they are shown as set-only. */
     @Override
     public boolean hideStrings() {
-        return !proxy;
+        // Arbitrary proxy/plugin text fields may contain private URLs, coordinates or credentials.
+        return true;
     }
 }

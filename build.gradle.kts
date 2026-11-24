@@ -2,6 +2,8 @@ import java.io.File
 
 plugins {
     java
+    jacoco
+    id("org.owasp.dependencycheck") version "13.0.0"
     // Bundles the plugin (and any dependencies you choose to shade) into a single jar
     id("com.gradleup.shadow") version "9.4.1"
 }
@@ -26,9 +28,6 @@ java {
 
 repositories {
     mavenCentral()
-    // Repos used by AquariusProxy/ZenithProxy — only needed if you `shade` extra dependencies
-    maven("https://maven.2b2t.vc/releases")
-    maven("https://maven.2b2t.vc/remote")
 }
 
 // --- AquariusProxy API jar ----------------------------------------------------
@@ -48,7 +47,7 @@ dependencies {
 
     // Unit tests run against the same jar (gson, the item types) plus JUnit
     testImplementation(aquariusJar)
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
@@ -61,7 +60,7 @@ dependencies {
 val checkAquariusJar = tasks.register("checkAquariusJar") {
     val path = aquariusJarPath
     doFirst {
-        if (!File(path).exists()) {
+        if (!File(path).isFile) {
             throw GradleException(
                 "\nAquariusProxy API jar not found at:\n  $path\n\n" +
                 "Place the AquariusProxy fat jar (the one the launcher runs) at libs/AquariusProxy.jar,\n" +
@@ -93,21 +92,88 @@ sourceSets.named("main") {
     java.srcDir(generateTemplates.map { it.destinationDir })
 }
 
-tasks.test {
-    useJUnitPlatform()
-    // The integration test against a real Stash Manager server runs only when given a jar: -PstashManagerJar=<path>
-    providers.gradleProperty("stashManagerJar").orNull?.let { systemProperty("stashManagerJar", it) }
-    providers.gradleProperty("stashManagerPort").orNull?.let { systemProperty("stashManagerPort", it) }
-    providers.gradleProperty("stashManagerData").orNull?.let { systemProperty("stashManagerData", it) }
+tasks.withType<Test>().configureEach {
     testLogging {
         events("failed", "skipped")
-        showStandardStreams = false
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
 }
 
+tasks.test {
+    useJUnitPlatform { excludeTags("integration", "e2e") }
+}
+
+val integrationTest = tasks.register<Test>("integrationTest") {
+    group = "verification"
+    description = "Run loopback HTTP and temporary-filesystem integration tests"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("integration") }
+    shouldRunAfter(tasks.test)
+}
+
+val endToEndTest = tasks.register<Test>("endToEndTest") {
+    group = "verification"
+    description = "Start the supplied Stash Manager server and verify the order workflow"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("e2e") }
+    providers.gradleProperty("stashManagerJar").orNull?.let {
+        systemProperty("stashManagerJar", project.file(it).absolutePath)
+    }
+    providers.gradleProperty("stashManagerPort").orNull?.let { systemProperty("stashManagerPort", it) }
+    providers.gradleProperty("stashManagerData").orNull?.let {
+        systemProperty("stashManagerData", project.file(it).absolutePath)
+    }
+    outputs.upToDateWhen { false }
+    outputs.doNotCacheIf("external server fixture") { true }
+}
+
+// Preserve the previous invocation for developers who pass the server property to test.
+if (providers.gradleProperty("stashManagerJar").isPresent) {
+    tasks.test { dependsOn(endToEndTest) }
+}
+
+jacoco { toolVersion = "0.8.14" }
+val measuredClasses = sourceSets.main.get().output.classesDirs.asFileTree.matching {
+    exclude("com/porter/qwertestash/BuildConstants.class")
+}
+tasks.jacocoTestReport {
+    dependsOn(tasks.test, integrationTest)
+    executionData(tasks.test.get(), integrationTest.get())
+    classDirectories.setFrom(measuredClasses)
+    reports { xml.required.set(true); html.required.set(true) }
+}
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.jacocoTestReport)
+    executionData(tasks.test.get(), integrationTest.get())
+    classDirectories.setFrom(measuredClasses)
+    violationRules {
+        rule {
+            limit { counter = "LINE"; minimum = "0.90".toBigDecimal() }
+            limit { counter = "BRANCH"; minimum = "0.85".toBigDecimal() }
+        }
+        rule {
+            element = "CLASS"
+            includes = listOf("*.ManagerHttp", "*.SafeJson", "*.StockPlanner", "*.OrderFlow", "*.ConfigApplier", "*.ConfigSchema", "*.ProxyPolicy", "*.SnapshotFiles")
+            limit { counter = "LINE"; minimum = "0.95".toBigDecimal() }
+        }
+    }
+}
+tasks.check { dependsOn(integrationTest, tasks.jacocoTestReport) }
+
+dependencyCheck {
+    failBuildOnCVSS = 7.0F
+    failOnError = true
+    formats = listOf("HTML", "JSON")
+    scanBuildEnv = true
+    skipTestGroups = false
+    setScanSet(listOf(file(aquariusJarPath)))
+}
+
 tasks.withType<JavaCompile>().configureEach {
     dependsOn(checkAquariusJar)
+    options.compilerArgs.addAll(listOf("-Xlint:deprecation,unchecked", "-Werror"))
     options.encoding = "UTF-8"
     options.release = javaReleaseVersion
 }
@@ -118,6 +184,7 @@ tasks.named<Jar>("jar") {
 }
 
 tasks.named<Jar>("shadowJar") {
+    from("LICENSE")
     archiveBaseName = pluginName
     archiveClassifier = ""
     // If you shade dependencies, relocate them to avoid clashing with other plugins, e.g.:

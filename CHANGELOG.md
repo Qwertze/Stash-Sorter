@@ -5,6 +5,18 @@ All notable changes to Stash Sorter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.12.4] - 2026-11-23
+
+- The sorter uses one carry-slot policy for sorting, reconnect recovery and order capacity. Kept slots take precedence. An explicit carry list with no usable entries leaves every slot alone.
+- A separator-only entry such as `---` in the carry or keep setting is ignored. Valid entries in the same setting still apply.
+- Chunk selection and waypoint timing now have separate components. Tests cover retry spacing. The registered tick handler is exercised for unloaded chunks, path release and leaving the configured area.
+
+## [1.12.3] - 2026-11-20
+
+- Stash JSON, index and recovery writes create private files on POSIX. Failed reads and backups preserve the existing data. Forgetting a stash clears its index and invalidates queued index writes.
+- Orders validate exact integer counts, merged totals and slot capacity before allocation. Dashboard jobs apply in order through a bounded queue. Manager network JSON uses strict parsing.
+- Added integration suites, coverage reporting, build integrity checks and contributor documentation. See [the audit](docs/AUDIT_REPORT.md) for verification and remaining risks.
+
 ## [1.12.2] - 2026-11-06
 
 ### Added

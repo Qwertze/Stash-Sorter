@@ -3,7 +3,7 @@ package com.porter.qwertestash.orders;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.porter.qwertestash.manager.SafeJson;
 import org.jspecify.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
@@ -204,7 +204,7 @@ public final class OrderDriver {
         Order order = null;
         String id = null;
         try {
-            JsonElement e = JsonParser.parseString(body);
+            JsonElement e = SafeJson.parse(body);
             if (e.isJsonObject() && e.getAsJsonObject().has("order") && e.getAsJsonObject().get("order").isJsonObject()) {
                 JsonObject o = e.getAsJsonObject().getAsJsonObject("order");
                 if (o.has("id") && o.get("id").isJsonPrimitive()) id = o.get("id").getAsString();
@@ -239,7 +239,7 @@ public final class OrderDriver {
     /** The orders part of a heartbeat reply: how many wait, and which of ours were cancelled. */
     public void onHeartbeat(String body) {
         try {
-            JsonElement e = JsonParser.parseString(body);
+            JsonElement e = SafeJson.parse(body);
             if (!e.isJsonObject() || !e.getAsJsonObject().has("orders") || !e.getAsJsonObject().get("orders").isJsonObject()) {
                 pendingOrders = 0;
                 return;

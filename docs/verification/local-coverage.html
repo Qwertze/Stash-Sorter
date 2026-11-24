@@ -1,0 +1,76 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Stash Sorter coverage</title><style>body{font:16px system-ui;max-width:950px;margin:40px auto;padding:0 16px;color:#132737}table{border-collapse:collapse;width:100%}td,th{padding:6px;text-align:left;border-bottom:1px solid #ddd}thead{position:sticky;top:0;background:white}td+td{font-variant-numeric:tabular-nums}</style><main><h1>Stash Sorter coverage</h1><p>Offline method run, Linux and Java 21. Counts include all first-party production sources except generated BuildConstants. See the audit report for instrumentation, exclusions and run limitations.</p><p><b>All lines</b> 5,224 / 17,251 (30.28%) &nbsp; <b>All branch outcomes</b> 3,608 / 16,836 (21.43%)</p><table><thead><tr><th>Source</th><th>Lines reached</th><th>Branch outcomes reached</th></tr></thead><tbody><tr><td>ConsoleQuiet.java</td><td>13 / 19 (68.42%)</td><td>5 / 14 (35.71%)</td></tr>
+<tr><td>QwerteStashPlugin.java</td><td>13 / 15 (86.67%)</td><td>—</td></tr>
+<tr><td>StashConfig.java</td><td>67 / 67 (100.0%)</td><td>—</td></tr>
+<tr><td>command/StashCommand.java</td><td>1 / 908 (0.11%)</td><td>0 / 472 (0.0%)</td></tr>
+<tr><td>manager/ActivityFeed.java</td><td>66 / 126 (52.38%)</td><td>20 / 78 (25.64%)</td></tr>
+<tr><td>manager/ConfigApplier.java</td><td>67 / 124 (54.03%)</td><td>52 / 192 (27.08%)</td></tr>
+<tr><td>manager/ConfigSchema.java</td><td>174 / 215 (80.93%)</td><td>180 / 308 (58.44%)</td></tr>
+<tr><td>manager/ConsoleRunner.java</td><td>0 / 52 (0.0%)</td><td>0 / 40 (0.0%)</td></tr>
+<tr><td>manager/DashboardCommandSource.java</td><td>0 / 78 (0.0%)</td><td>0 / 52 (0.0%)</td></tr>
+<tr><td>manager/DashboardLink.java</td><td>240 / 395 (60.76%)</td><td>115 / 322 (35.71%)</td></tr>
+<tr><td>manager/DeliveryContents.java</td><td>151 / 153 (98.69%)</td><td>100 / 118 (84.75%)</td></tr>
+<tr><td>manager/GenericRules.java</td><td>24 / 33 (72.73%)</td><td>30 / 72 (41.67%)</td></tr>
+<tr><td>manager/ItemKeys.java</td><td>0 / 42 (0.0%)</td><td>0 / 32 (0.0%)</td></tr>
+<tr><td>manager/ManagerHttp.java</td><td>81 / 95 (85.26%)</td><td>61 / 104 (58.65%)</td></tr>
+<tr><td>manager/ManagerIndex.java</td><td>218 / 259 (84.17%)</td><td>98 / 182 (53.85%)</td></tr>
+<tr><td>manager/MapTiles.java</td><td>46 / 48 (95.83%)</td><td>25 / 28 (89.29%)</td></tr>
+<tr><td>manager/ProxyEnv.java</td><td>0 / 22 (0.0%)</td><td>0 / 4 (0.0%)</td></tr>
+<tr><td>manager/ProxyPolicy.java</td><td>34 / 34 (100.0%)</td><td>13 / 20 (65.0%)</td></tr>
+<tr><td>manager/ProxySources.java</td><td>83 / 211 (39.34%)</td><td>22 / 154 (14.29%)</td></tr>
+<tr><td>manager/SafeJson.java</td><td>23 / 25 (92.0%)</td><td>26 / 28 (92.86%)</td></tr>
+<tr><td>manager/Secrets.java</td><td>14 / 16 (87.5%)</td><td>11 / 20 (55.0%)</td></tr>
+<tr><td>manager/SettingsSpec.java</td><td>118 / 120 (98.33%)</td><td>—</td></tr>
+<tr><td>manager/ViewerFeed.java</td><td>352 / 371 (94.88%)</td><td>254 / 304 (83.55%)</td></tr>
+<tr><td>manager/ViewerGame.java</td><td>0 / 123 (0.0%)</td><td>0 / 114 (0.0%)</td></tr>
+<tr><td>module/Activity.java</td><td>8 / 121 (6.61%)</td><td>0 / 144 (0.0%)</td></tr>
+<tr><td>module/Alerts.java</td><td>0 / 56 (0.0%)</td><td>0 / 58 (0.0%)</td></tr>
+<tr><td>module/AutoDrop.java</td><td>6 / 331 (1.81%)</td><td>0 / 294 (0.0%)</td></tr>
+<tr><td>module/ContainerPacing.java</td><td>4 / 6 (66.67%)</td><td>4 / 4 (100.0%)</td></tr>
+<tr><td>module/Friends.java</td><td>8 / 10 (80.0%)</td><td>14 / 18 (77.78%)</td></tr>
+<tr><td>module/GroundItems.java</td><td>6 / 169 (3.55%)</td><td>0 / 152 (0.0%)</td></tr>
+<tr><td>module/ShulkerPickup.java</td><td>35 / 39 (89.74%)</td><td>42 / 44 (95.45%)</td></tr>
+<tr><td>module/ShulkerRecovery.java</td><td>53 / 59 (89.83%)</td><td>29 / 34 (85.29%)</td></tr>
+<tr><td>module/StashManager.java</td><td>38 / 670 (5.67%)</td><td>23 / 470 (4.89%)</td></tr>
+<tr><td>module/StashSorter.java</td><td>141 / 7,855 (1.8%)</td><td>0 / 8,638 (0.0%)</td></tr>
+<tr><td>module/StashTracker.java</td><td>8 / 210 (3.81%)</td><td>0 / 156 (0.0%)</td></tr>
+<tr><td>module/SurveyRetry.java</td><td>22 / 25 (88.0%)</td><td>5 / 6 (83.33%)</td></tr>
+<tr><td>orders/AnvilHealth.java</td><td>17 / 17 (100.0%)</td><td>23 / 24 (95.83%)</td></tr>
+<tr><td>orders/AnvilNamer.java</td><td>114 / 124 (91.94%)</td><td>93 / 135 (68.89%)</td></tr>
+<tr><td>orders/BinStep.java</td><td>39 / 41 (95.12%)</td><td>69 / 70 (98.57%)</td></tr>
+<tr><td>orders/BinTracker.java</td><td>76 / 78 (97.44%)</td><td>77 / 84 (91.67%)</td></tr>
+<tr><td>orders/ChestStack.java</td><td>72 / 75 (96.0%)</td><td>106 / 124 (85.48%)</td></tr>
+<tr><td>orders/ClickPlanner.java</td><td>65 / 67 (97.01%)</td><td>60 / 68 (88.24%)</td></tr>
+<tr><td>orders/CraftGrid.java</td><td>43 / 45 (95.56%)</td><td>44 / 46 (95.65%)</td></tr>
+<tr><td>orders/CraftHealth.java</td><td>22 / 24 (91.67%)</td><td>25 / 32 (78.12%)</td></tr>
+<tr><td>orders/CraftPlanner.java</td><td>144 / 156 (92.31%)</td><td>107 / 152 (70.39%)</td></tr>
+<tr><td>orders/CraftPool.java</td><td>45 / 50 (90.0%)</td><td>29 / 34 (85.29%)</td></tr>
+<tr><td>orders/CraftSlots.java</td><td>22 / 24 (91.67%)</td><td>26 / 28 (92.86%)</td></tr>
+<tr><td>orders/CraftTrip.java</td><td>181 / 212 (85.38%)</td><td>182 / 249 (73.09%)</td></tr>
+<tr><td>orders/DeliveryBook.java</td><td>133 / 137 (97.08%)</td><td>123 / 144 (85.42%)</td></tr>
+<tr><td>orders/DeliveryRoom.java</td><td>6 / 6 (100.0%)</td><td>—</td></tr>
+<tr><td>orders/Order.java</td><td>56 / 59 (94.92%)</td><td>39 / 44 (88.64%)</td></tr>
+<tr><td>orders/OrderBlocker.java</td><td>26 / 28 (92.86%)</td><td>45 / 48 (93.75%)</td></tr>
+<tr><td>orders/OrderDriver.java</td><td>169 / 174 (97.13%)</td><td>133 / 180 (73.89%)</td></tr>
+<tr><td>orders/OrderFlow.java</td><td>508 / 545 (93.21%)</td><td>378 / 475 (79.58%)</td></tr>
+<tr><td>orders/Recipes.java</td><td>69 / 71 (97.18%)</td><td>58 / 68 (85.29%)</td></tr>
+<tr><td>orders/ShulkerMatch.java</td><td>21 / 24 (87.5%)</td><td>59 / 71 (83.1%)</td></tr>
+<tr><td>orders/ShulkerNames.java</td><td>46 / 47 (97.87%)</td><td>58 / 66 (87.88%)</td></tr>
+<tr><td>orders/SourcePicker.java</td><td>14 / 16 (87.5%)</td><td>12 / 12 (100.0%)</td></tr>
+<tr><td>orders/SourceRules.java</td><td>133 / 137 (97.08%)</td><td>133 / 178 (74.72%)</td></tr>
+<tr><td>orders/StockPlanner.java</td><td>129 / 132 (97.73%)</td><td>76 / 88 (86.36%)</td></tr>
+<tr><td>orders/Unit.java</td><td>7 / 7 (100.0%)</td><td>—</td></tr>
+<tr><td>stash/AnvilFinder.java</td><td>108 / 112 (96.43%)</td><td>83 / 90 (92.22%)</td></tr>
+<tr><td>stash/AnvilSpot.java</td><td>1 / 44 (2.27%)</td><td>7 / 38 (18.42%)</td></tr>
+<tr><td>stash/Categories.java</td><td>399 / 668 (59.73%)</td><td>34 / 466 (7.3%)</td></tr>
+<tr><td>stash/Containers.java</td><td>0 / 165 (0.0%)</td><td>0 / 203 (0.0%)</td></tr>
+<tr><td>stash/CraftingTableFinder.java</td><td>37 / 40 (92.5%)</td><td>46 / 50 (92.0%)</td></tr>
+<tr><td>stash/CraftingTableSpot.java</td><td>0 / 44 (0.0%)</td><td>0 / 32 (0.0%)</td></tr>
+<tr><td>stash/DeliverySpot.java</td><td>0 / 30 (0.0%)</td><td>0 / 16 (0.0%)</td></tr>
+<tr><td>stash/GoneBoxes.java</td><td>28 / 30 (93.33%)</td><td>51 / 66 (77.27%)</td></tr>
+<tr><td>stash/GoneWatch.java</td><td>33 / 37 (89.19%)</td><td>25 / 32 (78.12%)</td></tr>
+<tr><td>stash/Item.java</td><td>20 / 129 (15.5%)</td><td>23 / 233 (9.87%)</td></tr>
+<tr><td>stash/PlaceSearch.java</td><td>57 / 59 (96.61%)</td><td>78 / 84 (92.86%)</td></tr>
+<tr><td>stash/SnapshotFiles.java</td><td>30 / 37 (81.08%)</td><td>10 / 16 (62.5%)</td></tr>
+<tr><td>stash/Stash.java</td><td>170 / 252 (67.46%)</td><td>147 / 262 (56.11%)</td></tr>
+<tr><td>stash/StashIndex.java</td><td>70 / 155 (45.16%)</td><td>20 / 100 (20.0%)</td></tr>
+<tr><td>stash/Stashes.java</td><td>0 / 51 (0.0%)</td><td>0 / 52 (0.0%)</td></tr></tbody></table></main></html>

@@ -7,6 +7,7 @@ import com.google.gson.JsonPrimitive;
 import org.jspecify.annotations.Nullable;
 
 import java.lang.reflect.Field;
+import java.math.BigDecimal;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -150,17 +151,7 @@ public final class ConfigApplier {
             }
             case "int", "long", "double" -> {
                 if (!p.isNumber()) throw new IllegalArgumentException("a number is required");
-                double d = p.getAsDouble();
-                if (Double.isNaN(d) || Double.isInfinite(d)) throw new IllegalArgumentException("a finite number is required");
-                boolean whole = !kind.equals("double") || spec.whole;
-                if (whole && d != Math.rint(d)) throw new IllegalArgumentException("a whole number is required");
-                double[] range = ConfigSchema.range(kind, spec);
-                if (d < range[0] || d > range[1]) throw new IllegalArgumentException("must be between " + fmt(range[0]) + " and " + fmt(range[1]));
-                return switch (kind) {
-                    case "int" -> convert(type, (long) d);
-                    case "long" -> (Object) (long) d;
-                    default -> type == float.class || type == Float.class ? (Object) (float) d : (Object) d;
-                };
+                return number(type, kind, spec, p.getAsBigDecimal());
             }
             case "enum" -> {
                 if (!p.isString()) throw new IllegalArgumentException("one of the listed options is required");
@@ -181,10 +172,29 @@ public final class ConfigApplier {
         }
     }
 
-    private static Object convert(Class<?> type, long v) {
-        if (type == short.class) return (short) v;
-        if (type == byte.class) return (byte) v;
-        return (int) v;
+    private static Number number(Class<?> type, String kind, SettingsSpec.Spec spec, BigDecimal value) {
+        double[] range = ConfigSchema.range(kind, spec);
+        if ((Double.isFinite(range[0]) && value.compareTo(BigDecimal.valueOf(range[0])) < 0)
+            || (Double.isFinite(range[1]) && value.compareTo(BigDecimal.valueOf(range[1])) > 0)) {
+            throw new IllegalArgumentException("must be between " + fmt(range[0]) + " and " + fmt(range[1]));
+        }
+        try {
+            if (type == byte.class) return value.byteValueExact();
+            if (type == short.class) return value.shortValueExact();
+            if (kind.equals("int")) return value.intValueExact();
+            if (kind.equals("long")) return value.longValueExact();
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("a whole number within the field's range is required", e);
+        }
+        if (spec.whole && value.stripTrailingZeros().scale() > 0) throw new IllegalArgumentException("a whole number is required");
+        if (type == float.class || type == Float.class) {
+            float f = value.floatValue();
+            if (Float.isFinite(f)) return f;
+        } else {
+            double d = value.doubleValue();
+            if (Double.isFinite(d)) return d;
+        }
+        throw new IllegalArgumentException("a finite number within the field's range is required");
     }
 
     private static String text(JsonElement e) {

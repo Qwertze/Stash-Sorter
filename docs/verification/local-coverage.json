@@ -1,0 +1,1812 @@
+{
+  "method": "Offline JVM bytecode probes on ordinary test-method runs. Line and conditional/switch edge counts. The Gradle JaCoCo baseline is pending.",
+  "stages": {
+    "base": {
+      "overall": {
+        "line": {
+          "covered": 4239,
+          "total": 17177,
+          "percent": 24.68
+        },
+        "branch": {
+          "covered": 3189,
+          "total": 16776,
+          "percent": 19.01
+        }
+      },
+      "test_methods_passed": {
+        "unit": 454,
+        "integration": 0
+      },
+      "files": {
+        "com/porter/qwertestash/ConsoleQuiet.java": {
+          "line": {
+            "covered": 0,
+            "total": 19,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 14,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/QwerteStashPlugin.java": {
+          "line": {
+            "covered": 0,
+            "total": 15,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/StashConfig.java": {
+          "line": {
+            "covered": 67,
+            "total": 67,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/command/StashCommand.java": {
+          "line": {
+            "covered": 0,
+            "total": 903,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 472,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ActivityFeed.java": {
+          "line": {
+            "covered": 14,
+            "total": 126,
+            "percent": 11.11
+          },
+          "branch": {
+            "covered": 6,
+            "total": 78,
+            "percent": 7.69
+          }
+        },
+        "com/porter/qwertestash/manager/ConfigApplier.java": {
+          "line": {
+            "covered": 0,
+            "total": 117,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 198,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ConfigSchema.java": {
+          "line": {
+            "covered": 152,
+            "total": 215,
+            "percent": 70.7
+          },
+          "branch": {
+            "covered": 148,
+            "total": 308,
+            "percent": 48.05
+          }
+        },
+        "com/porter/qwertestash/manager/ConsoleRunner.java": {
+          "line": {
+            "covered": 0,
+            "total": 52,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 40,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/DashboardCommandSource.java": {
+          "line": {
+            "covered": 0,
+            "total": 78,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 52,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/DashboardLink.java": {
+          "line": {
+            "covered": 0,
+            "total": 394,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 320,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/DeliveryContents.java": {
+          "line": {
+            "covered": 147,
+            "total": 153,
+            "percent": 96.08
+          },
+          "branch": {
+            "covered": 102,
+            "total": 118,
+            "percent": 86.44
+          }
+        },
+        "com/porter/qwertestash/manager/GenericRules.java": {
+          "line": {
+            "covered": 0,
+            "total": 33,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 72,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ItemKeys.java": {
+          "line": {
+            "covered": 0,
+            "total": 42,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 32,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ManagerHttp.java": {
+          "line": {
+            "covered": 0,
+            "total": 95,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 100,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ManagerIndex.java": {
+          "line": {
+            "covered": 218,
+            "total": 259,
+            "percent": 84.17
+          },
+          "branch": {
+            "covered": 98,
+            "total": 182,
+            "percent": 53.85
+          }
+        },
+        "com/porter/qwertestash/manager/MapTiles.java": {
+          "line": {
+            "covered": 46,
+            "total": 48,
+            "percent": 95.83
+          },
+          "branch": {
+            "covered": 25,
+            "total": 28,
+            "percent": 89.29
+          }
+        },
+        "com/porter/qwertestash/manager/ProxyEnv.java": {
+          "line": {
+            "covered": 0,
+            "total": 22,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 4,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ProxyPolicy.java": {
+          "line": {
+            "covered": 21,
+            "total": 34,
+            "percent": 61.76
+          },
+          "branch": {
+            "covered": 2,
+            "total": 20,
+            "percent": 10.0
+          }
+        },
+        "com/porter/qwertestash/manager/ProxySources.java": {
+          "line": {
+            "covered": 0,
+            "total": 211,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 154,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/SafeJson.java": {
+          "line": {
+            "covered": 14,
+            "total": 20,
+            "percent": 70.0
+          },
+          "branch": {
+            "covered": 17,
+            "total": 22,
+            "percent": 77.27
+          }
+        },
+        "com/porter/qwertestash/manager/Secrets.java": {
+          "line": {
+            "covered": 10,
+            "total": 16,
+            "percent": 62.5
+          },
+          "branch": {
+            "covered": 5,
+            "total": 20,
+            "percent": 25.0
+          }
+        },
+        "com/porter/qwertestash/manager/SettingsSpec.java": {
+          "line": {
+            "covered": 118,
+            "total": 120,
+            "percent": 98.33
+          }
+        },
+        "com/porter/qwertestash/manager/ViewerFeed.java": {
+          "line": {
+            "covered": 352,
+            "total": 371,
+            "percent": 94.88
+          },
+          "branch": {
+            "covered": 254,
+            "total": 304,
+            "percent": 83.55
+          }
+        },
+        "com/porter/qwertestash/manager/ViewerGame.java": {
+          "line": {
+            "covered": 0,
+            "total": 123,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 114,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/Activity.java": {
+          "line": {
+            "covered": 0,
+            "total": 121,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 144,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/Alerts.java": {
+          "line": {
+            "covered": 0,
+            "total": 56,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 58,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/AutoDrop.java": {
+          "line": {
+            "covered": 0,
+            "total": 331,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 294,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/ContainerPacing.java": {
+          "line": {
+            "covered": 4,
+            "total": 6,
+            "percent": 66.67
+          },
+          "branch": {
+            "covered": 4,
+            "total": 4,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/module/Friends.java": {
+          "line": {
+            "covered": 8,
+            "total": 10,
+            "percent": 80.0
+          },
+          "branch": {
+            "covered": 14,
+            "total": 18,
+            "percent": 77.78
+          }
+        },
+        "com/porter/qwertestash/module/GroundItems.java": {
+          "line": {
+            "covered": 0,
+            "total": 169,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 152,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/ShulkerPickup.java": {
+          "line": {
+            "covered": 35,
+            "total": 39,
+            "percent": 89.74
+          },
+          "branch": {
+            "covered": 42,
+            "total": 44,
+            "percent": 95.45
+          }
+        },
+        "com/porter/qwertestash/module/ShulkerRecovery.java": {
+          "line": {
+            "covered": 51,
+            "total": 59,
+            "percent": 86.44
+          },
+          "branch": {
+            "covered": 29,
+            "total": 34,
+            "percent": 85.29
+          }
+        },
+        "com/porter/qwertestash/module/StashManager.java": {
+          "line": {
+            "covered": 11,
+            "total": 668,
+            "percent": 1.65
+          },
+          "branch": {
+            "covered": 23,
+            "total": 470,
+            "percent": 4.89
+          }
+        },
+        "com/porter/qwertestash/module/StashSorter.java": {
+          "line": {
+            "covered": 0,
+            "total": 7855,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 8638,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/StashTracker.java": {
+          "line": {
+            "covered": 0,
+            "total": 210,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 156,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/SurveyRetry.java": {
+          "line": {
+            "covered": 22,
+            "total": 25,
+            "percent": 88.0
+          },
+          "branch": {
+            "covered": 5,
+            "total": 6,
+            "percent": 83.33
+          }
+        },
+        "com/porter/qwertestash/orders/AnvilHealth.java": {
+          "line": {
+            "covered": 17,
+            "total": 17,
+            "percent": 100.0
+          },
+          "branch": {
+            "covered": 23,
+            "total": 24,
+            "percent": 95.83
+          }
+        },
+        "com/porter/qwertestash/orders/AnvilNamer.java": {
+          "line": {
+            "covered": 114,
+            "total": 124,
+            "percent": 91.94
+          },
+          "branch": {
+            "covered": 93,
+            "total": 135,
+            "percent": 68.89
+          }
+        },
+        "com/porter/qwertestash/orders/BinStep.java": {
+          "line": {
+            "covered": 39,
+            "total": 41,
+            "percent": 95.12
+          },
+          "branch": {
+            "covered": 69,
+            "total": 70,
+            "percent": 98.57
+          }
+        },
+        "com/porter/qwertestash/orders/BinTracker.java": {
+          "line": {
+            "covered": 76,
+            "total": 78,
+            "percent": 97.44
+          },
+          "branch": {
+            "covered": 77,
+            "total": 84,
+            "percent": 91.67
+          }
+        },
+        "com/porter/qwertestash/orders/ChestStack.java": {
+          "line": {
+            "covered": 72,
+            "total": 75,
+            "percent": 96.0
+          },
+          "branch": {
+            "covered": 106,
+            "total": 124,
+            "percent": 85.48
+          }
+        },
+        "com/porter/qwertestash/orders/ClickPlanner.java": {
+          "line": {
+            "covered": 65,
+            "total": 67,
+            "percent": 97.01
+          },
+          "branch": {
+            "covered": 60,
+            "total": 68,
+            "percent": 88.24
+          }
+        },
+        "com/porter/qwertestash/orders/CraftGrid.java": {
+          "line": {
+            "covered": 43,
+            "total": 45,
+            "percent": 95.56
+          },
+          "branch": {
+            "covered": 44,
+            "total": 46,
+            "percent": 95.65
+          }
+        },
+        "com/porter/qwertestash/orders/CraftHealth.java": {
+          "line": {
+            "covered": 22,
+            "total": 24,
+            "percent": 91.67
+          },
+          "branch": {
+            "covered": 25,
+            "total": 32,
+            "percent": 78.12
+          }
+        },
+        "com/porter/qwertestash/orders/CraftPlanner.java": {
+          "line": {
+            "covered": 144,
+            "total": 156,
+            "percent": 92.31
+          },
+          "branch": {
+            "covered": 107,
+            "total": 152,
+            "percent": 70.39
+          }
+        },
+        "com/porter/qwertestash/orders/CraftPool.java": {
+          "line": {
+            "covered": 45,
+            "total": 50,
+            "percent": 90.0
+          },
+          "branch": {
+            "covered": 29,
+            "total": 34,
+            "percent": 85.29
+          }
+        },
+        "com/porter/qwertestash/orders/CraftSlots.java": {
+          "line": {
+            "covered": 22,
+            "total": 24,
+            "percent": 91.67
+          },
+          "branch": {
+            "covered": 26,
+            "total": 28,
+            "percent": 92.86
+          }
+        },
+        "com/porter/qwertestash/orders/CraftTrip.java": {
+          "line": {
+            "covered": 181,
+            "total": 212,
+            "percent": 85.38
+          },
+          "branch": {
+            "covered": 182,
+            "total": 249,
+            "percent": 73.09
+          }
+        },
+        "com/porter/qwertestash/orders/DeliveryBook.java": {
+          "line": {
+            "covered": 133,
+            "total": 137,
+            "percent": 97.08
+          },
+          "branch": {
+            "covered": 123,
+            "total": 144,
+            "percent": 85.42
+          }
+        },
+        "com/porter/qwertestash/orders/DeliveryRoom.java": {
+          "line": {
+            "covered": 6,
+            "total": 6,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/orders/Order.java": {
+          "line": {
+            "covered": 49,
+            "total": 52,
+            "percent": 94.23
+          },
+          "branch": {
+            "covered": 34,
+            "total": 38,
+            "percent": 89.47
+          }
+        },
+        "com/porter/qwertestash/orders/OrderBlocker.java": {
+          "line": {
+            "covered": 26,
+            "total": 28,
+            "percent": 92.86
+          },
+          "branch": {
+            "covered": 45,
+            "total": 48,
+            "percent": 93.75
+          }
+        },
+        "com/porter/qwertestash/orders/OrderDriver.java": {
+          "line": {
+            "covered": 169,
+            "total": 174,
+            "percent": 97.13
+          },
+          "branch": {
+            "covered": 133,
+            "total": 180,
+            "percent": 73.89
+          }
+        },
+        "com/porter/qwertestash/orders/OrderFlow.java": {
+          "line": {
+            "covered": 506,
+            "total": 545,
+            "percent": 92.84
+          },
+          "branch": {
+            "covered": 378,
+            "total": 475,
+            "percent": 79.58
+          }
+        },
+        "com/porter/qwertestash/orders/Recipes.java": {
+          "line": {
+            "covered": 69,
+            "total": 71,
+            "percent": 97.18
+          },
+          "branch": {
+            "covered": 58,
+            "total": 68,
+            "percent": 85.29
+          }
+        },
+        "com/porter/qwertestash/orders/ShulkerMatch.java": {
+          "line": {
+            "covered": 21,
+            "total": 24,
+            "percent": 87.5
+          },
+          "branch": {
+            "covered": 59,
+            "total": 71,
+            "percent": 83.1
+          }
+        },
+        "com/porter/qwertestash/orders/ShulkerNames.java": {
+          "line": {
+            "covered": 46,
+            "total": 47,
+            "percent": 97.87
+          },
+          "branch": {
+            "covered": 58,
+            "total": 66,
+            "percent": 87.88
+          }
+        },
+        "com/porter/qwertestash/orders/SourcePicker.java": {
+          "line": {
+            "covered": 14,
+            "total": 16,
+            "percent": 87.5
+          },
+          "branch": {
+            "covered": 12,
+            "total": 12,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/orders/SourceRules.java": {
+          "line": {
+            "covered": 133,
+            "total": 137,
+            "percent": 97.08
+          },
+          "branch": {
+            "covered": 133,
+            "total": 178,
+            "percent": 74.72
+          }
+        },
+        "com/porter/qwertestash/orders/StockPlanner.java": {
+          "line": {
+            "covered": 125,
+            "total": 128,
+            "percent": 97.66
+          },
+          "branch": {
+            "covered": 74,
+            "total": 84,
+            "percent": 88.1
+          }
+        },
+        "com/porter/qwertestash/orders/Unit.java": {
+          "line": {
+            "covered": 7,
+            "total": 7,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/stash/AnvilFinder.java": {
+          "line": {
+            "covered": 108,
+            "total": 112,
+            "percent": 96.43
+          },
+          "branch": {
+            "covered": 83,
+            "total": 90,
+            "percent": 92.22
+          }
+        },
+        "com/porter/qwertestash/stash/AnvilSpot.java": {
+          "line": {
+            "covered": 1,
+            "total": 44,
+            "percent": 2.27
+          },
+          "branch": {
+            "covered": 7,
+            "total": 38,
+            "percent": 18.42
+          }
+        },
+        "com/porter/qwertestash/stash/Categories.java": {
+          "line": {
+            "covered": 399,
+            "total": 668,
+            "percent": 59.73
+          },
+          "branch": {
+            "covered": 34,
+            "total": 466,
+            "percent": 7.3
+          }
+        },
+        "com/porter/qwertestash/stash/Containers.java": {
+          "line": {
+            "covered": 0,
+            "total": 165,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 203,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/stash/CraftingTableFinder.java": {
+          "line": {
+            "covered": 37,
+            "total": 40,
+            "percent": 92.5
+          },
+          "branch": {
+            "covered": 46,
+            "total": 50,
+            "percent": 92.0
+          }
+        },
+        "com/porter/qwertestash/stash/CraftingTableSpot.java": {
+          "line": {
+            "covered": 0,
+            "total": 44,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 32,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/stash/DeliverySpot.java": {
+          "line": {
+            "covered": 0,
+            "total": 30,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 16,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/stash/GoneBoxes.java": {
+          "line": {
+            "covered": 28,
+            "total": 30,
+            "percent": 93.33
+          },
+          "branch": {
+            "covered": 51,
+            "total": 66,
+            "percent": 77.27
+          }
+        },
+        "com/porter/qwertestash/stash/GoneWatch.java": {
+          "line": {
+            "covered": 33,
+            "total": 37,
+            "percent": 89.19
+          },
+          "branch": {
+            "covered": 25,
+            "total": 32,
+            "percent": 78.12
+          }
+        },
+        "com/porter/qwertestash/stash/Item.java": {
+          "line": {
+            "covered": 20,
+            "total": 129,
+            "percent": 15.5
+          },
+          "branch": {
+            "covered": 23,
+            "total": 233,
+            "percent": 9.87
+          }
+        },
+        "com/porter/qwertestash/stash/PlaceSearch.java": {
+          "line": {
+            "covered": 57,
+            "total": 59,
+            "percent": 96.61
+          },
+          "branch": {
+            "covered": 78,
+            "total": 84,
+            "percent": 92.86
+          }
+        },
+        "com/porter/qwertestash/stash/Stash.java": {
+          "line": {
+            "covered": 122,
+            "total": 257,
+            "percent": 47.47
+          },
+          "branch": {
+            "covered": 120,
+            "total": 260,
+            "percent": 46.15
+          }
+        },
+        "com/porter/qwertestash/stash/StashIndex.java": {
+          "line": {
+            "covered": 0,
+            "total": 149,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 86,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/stash/Stashes.java": {
+          "line": {
+            "covered": 0,
+            "total": 46,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 40,
+            "percent": 0.0
+          }
+        }
+      }
+    },
+    "final": {
+      "overall": {
+        "line": {
+          "covered": 5224,
+          "total": 17251,
+          "percent": 30.28
+        },
+        "branch": {
+          "covered": 3608,
+          "total": 16836,
+          "percent": 21.43
+        }
+      },
+      "test_methods_passed": {
+        "unit": 463,
+        "integration": 13
+      },
+      "files": {
+        "com/porter/qwertestash/ConsoleQuiet.java": {
+          "line": {
+            "covered": 13,
+            "total": 19,
+            "percent": 68.42
+          },
+          "branch": {
+            "covered": 5,
+            "total": 14,
+            "percent": 35.71
+          }
+        },
+        "com/porter/qwertestash/QwerteStashPlugin.java": {
+          "line": {
+            "covered": 13,
+            "total": 15,
+            "percent": 86.67
+          }
+        },
+        "com/porter/qwertestash/StashConfig.java": {
+          "line": {
+            "covered": 67,
+            "total": 67,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/command/StashCommand.java": {
+          "line": {
+            "covered": 1,
+            "total": 908,
+            "percent": 0.11
+          },
+          "branch": {
+            "covered": 0,
+            "total": 472,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ActivityFeed.java": {
+          "line": {
+            "covered": 66,
+            "total": 126,
+            "percent": 52.38
+          },
+          "branch": {
+            "covered": 20,
+            "total": 78,
+            "percent": 25.64
+          }
+        },
+        "com/porter/qwertestash/manager/ConfigApplier.java": {
+          "line": {
+            "covered": 67,
+            "total": 124,
+            "percent": 54.03
+          },
+          "branch": {
+            "covered": 52,
+            "total": 192,
+            "percent": 27.08
+          }
+        },
+        "com/porter/qwertestash/manager/ConfigSchema.java": {
+          "line": {
+            "covered": 174,
+            "total": 215,
+            "percent": 80.93
+          },
+          "branch": {
+            "covered": 180,
+            "total": 308,
+            "percent": 58.44
+          }
+        },
+        "com/porter/qwertestash/manager/ConsoleRunner.java": {
+          "line": {
+            "covered": 0,
+            "total": 52,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 40,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/DashboardCommandSource.java": {
+          "line": {
+            "covered": 0,
+            "total": 78,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 52,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/DashboardLink.java": {
+          "line": {
+            "covered": 240,
+            "total": 395,
+            "percent": 60.76
+          },
+          "branch": {
+            "covered": 115,
+            "total": 322,
+            "percent": 35.71
+          }
+        },
+        "com/porter/qwertestash/manager/DeliveryContents.java": {
+          "line": {
+            "covered": 151,
+            "total": 153,
+            "percent": 98.69
+          },
+          "branch": {
+            "covered": 100,
+            "total": 118,
+            "percent": 84.75
+          }
+        },
+        "com/porter/qwertestash/manager/GenericRules.java": {
+          "line": {
+            "covered": 24,
+            "total": 33,
+            "percent": 72.73
+          },
+          "branch": {
+            "covered": 30,
+            "total": 72,
+            "percent": 41.67
+          }
+        },
+        "com/porter/qwertestash/manager/ItemKeys.java": {
+          "line": {
+            "covered": 0,
+            "total": 42,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 32,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ManagerHttp.java": {
+          "line": {
+            "covered": 81,
+            "total": 95,
+            "percent": 85.26
+          },
+          "branch": {
+            "covered": 61,
+            "total": 104,
+            "percent": 58.65
+          }
+        },
+        "com/porter/qwertestash/manager/ManagerIndex.java": {
+          "line": {
+            "covered": 218,
+            "total": 259,
+            "percent": 84.17
+          },
+          "branch": {
+            "covered": 98,
+            "total": 182,
+            "percent": 53.85
+          }
+        },
+        "com/porter/qwertestash/manager/MapTiles.java": {
+          "line": {
+            "covered": 46,
+            "total": 48,
+            "percent": 95.83
+          },
+          "branch": {
+            "covered": 25,
+            "total": 28,
+            "percent": 89.29
+          }
+        },
+        "com/porter/qwertestash/manager/ProxyEnv.java": {
+          "line": {
+            "covered": 0,
+            "total": 22,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 4,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/manager/ProxyPolicy.java": {
+          "line": {
+            "covered": 34,
+            "total": 34,
+            "percent": 100.0
+          },
+          "branch": {
+            "covered": 13,
+            "total": 20,
+            "percent": 65.0
+          }
+        },
+        "com/porter/qwertestash/manager/ProxySources.java": {
+          "line": {
+            "covered": 83,
+            "total": 211,
+            "percent": 39.34
+          },
+          "branch": {
+            "covered": 22,
+            "total": 154,
+            "percent": 14.29
+          }
+        },
+        "com/porter/qwertestash/manager/SafeJson.java": {
+          "line": {
+            "covered": 23,
+            "total": 25,
+            "percent": 92.0
+          },
+          "branch": {
+            "covered": 26,
+            "total": 28,
+            "percent": 92.86
+          }
+        },
+        "com/porter/qwertestash/manager/Secrets.java": {
+          "line": {
+            "covered": 14,
+            "total": 16,
+            "percent": 87.5
+          },
+          "branch": {
+            "covered": 11,
+            "total": 20,
+            "percent": 55.0
+          }
+        },
+        "com/porter/qwertestash/manager/SettingsSpec.java": {
+          "line": {
+            "covered": 118,
+            "total": 120,
+            "percent": 98.33
+          }
+        },
+        "com/porter/qwertestash/manager/ViewerFeed.java": {
+          "line": {
+            "covered": 352,
+            "total": 371,
+            "percent": 94.88
+          },
+          "branch": {
+            "covered": 254,
+            "total": 304,
+            "percent": 83.55
+          }
+        },
+        "com/porter/qwertestash/manager/ViewerGame.java": {
+          "line": {
+            "covered": 0,
+            "total": 123,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 114,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/Activity.java": {
+          "line": {
+            "covered": 8,
+            "total": 121,
+            "percent": 6.61
+          },
+          "branch": {
+            "covered": 0,
+            "total": 144,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/Alerts.java": {
+          "line": {
+            "covered": 0,
+            "total": 56,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 58,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/AutoDrop.java": {
+          "line": {
+            "covered": 6,
+            "total": 331,
+            "percent": 1.81
+          },
+          "branch": {
+            "covered": 0,
+            "total": 294,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/ContainerPacing.java": {
+          "line": {
+            "covered": 4,
+            "total": 6,
+            "percent": 66.67
+          },
+          "branch": {
+            "covered": 4,
+            "total": 4,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/module/Friends.java": {
+          "line": {
+            "covered": 8,
+            "total": 10,
+            "percent": 80.0
+          },
+          "branch": {
+            "covered": 14,
+            "total": 18,
+            "percent": 77.78
+          }
+        },
+        "com/porter/qwertestash/module/GroundItems.java": {
+          "line": {
+            "covered": 6,
+            "total": 169,
+            "percent": 3.55
+          },
+          "branch": {
+            "covered": 0,
+            "total": 152,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/ShulkerPickup.java": {
+          "line": {
+            "covered": 35,
+            "total": 39,
+            "percent": 89.74
+          },
+          "branch": {
+            "covered": 42,
+            "total": 44,
+            "percent": 95.45
+          }
+        },
+        "com/porter/qwertestash/module/ShulkerRecovery.java": {
+          "line": {
+            "covered": 53,
+            "total": 59,
+            "percent": 89.83
+          },
+          "branch": {
+            "covered": 29,
+            "total": 34,
+            "percent": 85.29
+          }
+        },
+        "com/porter/qwertestash/module/StashManager.java": {
+          "line": {
+            "covered": 38,
+            "total": 670,
+            "percent": 5.67
+          },
+          "branch": {
+            "covered": 23,
+            "total": 470,
+            "percent": 4.89
+          }
+        },
+        "com/porter/qwertestash/module/StashSorter.java": {
+          "line": {
+            "covered": 141,
+            "total": 7855,
+            "percent": 1.8
+          },
+          "branch": {
+            "covered": 0,
+            "total": 8638,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/StashTracker.java": {
+          "line": {
+            "covered": 8,
+            "total": 210,
+            "percent": 3.81
+          },
+          "branch": {
+            "covered": 0,
+            "total": 156,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/module/SurveyRetry.java": {
+          "line": {
+            "covered": 22,
+            "total": 25,
+            "percent": 88.0
+          },
+          "branch": {
+            "covered": 5,
+            "total": 6,
+            "percent": 83.33
+          }
+        },
+        "com/porter/qwertestash/orders/AnvilHealth.java": {
+          "line": {
+            "covered": 17,
+            "total": 17,
+            "percent": 100.0
+          },
+          "branch": {
+            "covered": 23,
+            "total": 24,
+            "percent": 95.83
+          }
+        },
+        "com/porter/qwertestash/orders/AnvilNamer.java": {
+          "line": {
+            "covered": 114,
+            "total": 124,
+            "percent": 91.94
+          },
+          "branch": {
+            "covered": 93,
+            "total": 135,
+            "percent": 68.89
+          }
+        },
+        "com/porter/qwertestash/orders/BinStep.java": {
+          "line": {
+            "covered": 39,
+            "total": 41,
+            "percent": 95.12
+          },
+          "branch": {
+            "covered": 69,
+            "total": 70,
+            "percent": 98.57
+          }
+        },
+        "com/porter/qwertestash/orders/BinTracker.java": {
+          "line": {
+            "covered": 76,
+            "total": 78,
+            "percent": 97.44
+          },
+          "branch": {
+            "covered": 77,
+            "total": 84,
+            "percent": 91.67
+          }
+        },
+        "com/porter/qwertestash/orders/ChestStack.java": {
+          "line": {
+            "covered": 72,
+            "total": 75,
+            "percent": 96.0
+          },
+          "branch": {
+            "covered": 106,
+            "total": 124,
+            "percent": 85.48
+          }
+        },
+        "com/porter/qwertestash/orders/ClickPlanner.java": {
+          "line": {
+            "covered": 65,
+            "total": 67,
+            "percent": 97.01
+          },
+          "branch": {
+            "covered": 60,
+            "total": 68,
+            "percent": 88.24
+          }
+        },
+        "com/porter/qwertestash/orders/CraftGrid.java": {
+          "line": {
+            "covered": 43,
+            "total": 45,
+            "percent": 95.56
+          },
+          "branch": {
+            "covered": 44,
+            "total": 46,
+            "percent": 95.65
+          }
+        },
+        "com/porter/qwertestash/orders/CraftHealth.java": {
+          "line": {
+            "covered": 22,
+            "total": 24,
+            "percent": 91.67
+          },
+          "branch": {
+            "covered": 25,
+            "total": 32,
+            "percent": 78.12
+          }
+        },
+        "com/porter/qwertestash/orders/CraftPlanner.java": {
+          "line": {
+            "covered": 144,
+            "total": 156,
+            "percent": 92.31
+          },
+          "branch": {
+            "covered": 107,
+            "total": 152,
+            "percent": 70.39
+          }
+        },
+        "com/porter/qwertestash/orders/CraftPool.java": {
+          "line": {
+            "covered": 45,
+            "total": 50,
+            "percent": 90.0
+          },
+          "branch": {
+            "covered": 29,
+            "total": 34,
+            "percent": 85.29
+          }
+        },
+        "com/porter/qwertestash/orders/CraftSlots.java": {
+          "line": {
+            "covered": 22,
+            "total": 24,
+            "percent": 91.67
+          },
+          "branch": {
+            "covered": 26,
+            "total": 28,
+            "percent": 92.86
+          }
+        },
+        "com/porter/qwertestash/orders/CraftTrip.java": {
+          "line": {
+            "covered": 181,
+            "total": 212,
+            "percent": 85.38
+          },
+          "branch": {
+            "covered": 182,
+            "total": 249,
+            "percent": 73.09
+          }
+        },
+        "com/porter/qwertestash/orders/DeliveryBook.java": {
+          "line": {
+            "covered": 133,
+            "total": 137,
+            "percent": 97.08
+          },
+          "branch": {
+            "covered": 123,
+            "total": 144,
+            "percent": 85.42
+          }
+        },
+        "com/porter/qwertestash/orders/DeliveryRoom.java": {
+          "line": {
+            "covered": 6,
+            "total": 6,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/orders/Order.java": {
+          "line": {
+            "covered": 56,
+            "total": 59,
+            "percent": 94.92
+          },
+          "branch": {
+            "covered": 39,
+            "total": 44,
+            "percent": 88.64
+          }
+        },
+        "com/porter/qwertestash/orders/OrderBlocker.java": {
+          "line": {
+            "covered": 26,
+            "total": 28,
+            "percent": 92.86
+          },
+          "branch": {
+            "covered": 45,
+            "total": 48,
+            "percent": 93.75
+          }
+        },
+        "com/porter/qwertestash/orders/OrderDriver.java": {
+          "line": {
+            "covered": 169,
+            "total": 174,
+            "percent": 97.13
+          },
+          "branch": {
+            "covered": 133,
+            "total": 180,
+            "percent": 73.89
+          }
+        },
+        "com/porter/qwertestash/orders/OrderFlow.java": {
+          "line": {
+            "covered": 508,
+            "total": 545,
+            "percent": 93.21
+          },
+          "branch": {
+            "covered": 378,
+            "total": 475,
+            "percent": 79.58
+          }
+        },
+        "com/porter/qwertestash/orders/Recipes.java": {
+          "line": {
+            "covered": 69,
+            "total": 71,
+            "percent": 97.18
+          },
+          "branch": {
+            "covered": 58,
+            "total": 68,
+            "percent": 85.29
+          }
+        },
+        "com/porter/qwertestash/orders/ShulkerMatch.java": {
+          "line": {
+            "covered": 21,
+            "total": 24,
+            "percent": 87.5
+          },
+          "branch": {
+            "covered": 59,
+            "total": 71,
+            "percent": 83.1
+          }
+        },
+        "com/porter/qwertestash/orders/ShulkerNames.java": {
+          "line": {
+            "covered": 46,
+            "total": 47,
+            "percent": 97.87
+          },
+          "branch": {
+            "covered": 58,
+            "total": 66,
+            "percent": 87.88
+          }
+        },
+        "com/porter/qwertestash/orders/SourcePicker.java": {
+          "line": {
+            "covered": 14,
+            "total": 16,
+            "percent": 87.5
+          },
+          "branch": {
+            "covered": 12,
+            "total": 12,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/orders/SourceRules.java": {
+          "line": {
+            "covered": 133,
+            "total": 137,
+            "percent": 97.08
+          },
+          "branch": {
+            "covered": 133,
+            "total": 178,
+            "percent": 74.72
+          }
+        },
+        "com/porter/qwertestash/orders/StockPlanner.java": {
+          "line": {
+            "covered": 129,
+            "total": 132,
+            "percent": 97.73
+          },
+          "branch": {
+            "covered": 76,
+            "total": 88,
+            "percent": 86.36
+          }
+        },
+        "com/porter/qwertestash/orders/Unit.java": {
+          "line": {
+            "covered": 7,
+            "total": 7,
+            "percent": 100.0
+          }
+        },
+        "com/porter/qwertestash/stash/AnvilFinder.java": {
+          "line": {
+            "covered": 108,
+            "total": 112,
+            "percent": 96.43
+          },
+          "branch": {
+            "covered": 83,
+            "total": 90,
+            "percent": 92.22
+          }
+        },
+        "com/porter/qwertestash/stash/AnvilSpot.java": {
+          "line": {
+            "covered": 1,
+            "total": 44,
+            "percent": 2.27
+          },
+          "branch": {
+            "covered": 7,
+            "total": 38,
+            "percent": 18.42
+          }
+        },
+        "com/porter/qwertestash/stash/Categories.java": {
+          "line": {
+            "covered": 399,
+            "total": 668,
+            "percent": 59.73
+          },
+          "branch": {
+            "covered": 34,
+            "total": 466,
+            "percent": 7.3
+          }
+        },
+        "com/porter/qwertestash/stash/Containers.java": {
+          "line": {
+            "covered": 0,
+            "total": 165,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 203,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/stash/CraftingTableFinder.java": {
+          "line": {
+            "covered": 37,
+            "total": 40,
+            "percent": 92.5
+          },
+          "branch": {
+            "covered": 46,
+            "total": 50,
+            "percent": 92.0
+          }
+        },
+        "com/porter/qwertestash/stash/CraftingTableSpot.java": {
+          "line": {
+            "covered": 0,
+            "total": 44,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 32,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/stash/DeliverySpot.java": {
+          "line": {
+            "covered": 0,
+            "total": 30,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 16,
+            "percent": 0.0
+          }
+        },
+        "com/porter/qwertestash/stash/GoneBoxes.java": {
+          "line": {
+            "covered": 28,
+            "total": 30,
+            "percent": 93.33
+          },
+          "branch": {
+            "covered": 51,
+            "total": 66,
+            "percent": 77.27
+          }
+        },
+        "com/porter/qwertestash/stash/GoneWatch.java": {
+          "line": {
+            "covered": 33,
+            "total": 37,
+            "percent": 89.19
+          },
+          "branch": {
+            "covered": 25,
+            "total": 32,
+            "percent": 78.12
+          }
+        },
+        "com/porter/qwertestash/stash/Item.java": {
+          "line": {
+            "covered": 20,
+            "total": 129,
+            "percent": 15.5
+          },
+          "branch": {
+            "covered": 23,
+            "total": 233,
+            "percent": 9.87
+          }
+        },
+        "com/porter/qwertestash/stash/PlaceSearch.java": {
+          "line": {
+            "covered": 57,
+            "total": 59,
+            "percent": 96.61
+          },
+          "branch": {
+            "covered": 78,
+            "total": 84,
+            "percent": 92.86
+          }
+        },
+        "com/porter/qwertestash/stash/SnapshotFiles.java": {
+          "line": {
+            "covered": 30,
+            "total": 37,
+            "percent": 81.08
+          },
+          "branch": {
+            "covered": 10,
+            "total": 16,
+            "percent": 62.5
+          }
+        },
+        "com/porter/qwertestash/stash/Stash.java": {
+          "line": {
+            "covered": 170,
+            "total": 252,
+            "percent": 67.46
+          },
+          "branch": {
+            "covered": 147,
+            "total": 262,
+            "percent": 56.11
+          }
+        },
+        "com/porter/qwertestash/stash/StashIndex.java": {
+          "line": {
+            "covered": 70,
+            "total": 155,
+            "percent": 45.16
+          },
+          "branch": {
+            "covered": 20,
+            "total": 100,
+            "percent": 20.0
+          }
+        },
+        "com/porter/qwertestash/stash/Stashes.java": {
+          "line": {
+            "covered": 0,
+            "total": 51,
+            "percent": 0.0
+          },
+          "branch": {
+            "covered": 0,
+            "total": 52,
+            "percent": 0.0
+          }
+        }
+      },
+      "changed_executable_lines": {
+        "covered": 151,
+        "total": 194,
+        "percent": 77.84
+      }
+    }
+  }
+}

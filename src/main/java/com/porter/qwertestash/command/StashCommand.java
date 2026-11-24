@@ -399,7 +399,13 @@ public class StashCommand extends Command {
                     + " A shulker of ours still standing is left where it is and listed with the orphaned shulkers.").primaryColor();
             }))
             .then(literal("forget").executes(c -> {
-                Stashes.forget();
+                try {
+                    Stashes.forget();
+                } catch (java.io.UncheckedIOException | IllegalStateException e) {
+                    c.getSource().getEmbed().title("Could Not Forget Stash").description("Check the stash directory permissions and retry.").errorColor();
+                    com.porter.qwertestash.QwerteStashPlugin.LOG.warn("Could not delete the selected stash", e);
+                    return;
+                }
                 c.getSource().getEmbed().title("Stash Forgotten").description("Deleted \"" + CONFIG.stashName + "\", including excluded and drop-off marks.");
             }))
             .then(literal("autoDrop")
@@ -483,7 +489,7 @@ public class StashCommand extends Command {
                     String url = getString(c, "url").trim();
                     URI parsed = StashManager.parse(url);
                     if (parsed == null) {
-                        c.getSource().getEmbed().title("Bad Server Address").description("Use a http or https address without a query, fragment or login, like http://127.0.0.1:8765.").errorColor();
+                        c.getSource().getEmbed().title("Bad Server Address").description("Use HTTPS for remote servers; HTTP is only permitted on localhost/127.0.0.1/[::1]. No query, fragment or login.").errorColor();
                         return;
                     }
                     CONFIG.managerUrl = parsed.toString();
@@ -491,7 +497,7 @@ public class StashCommand extends Command {
                 })))
                 .then(literal("key").then(argument("key", greedyString()).executes(c -> {
                     c.getSource().setSensitiveInput(true);
-                    // Never echoed: the reply only says it was set, and shows the last four characters
+                    // Never echoed: the reply only says whether it was set
                     CONFIG.managerKey = getString(c, "key").trim();
                     c.getSource().getEmbed().title("Stash Manager Key Set").description("Key " + StashManager.maskKey(CONFIG.managerKey) + ".").primaryColor();
                 })))
@@ -504,19 +510,19 @@ public class StashCommand extends Command {
                         CONFIG.dashboardConsole = getToggle(c, "toggle");
                         MODULE.get(StashManager.class).updateDashboard();
                         c.getSource().getEmbed().title("Dashboard Console " + toggleStrCaps(CONFIG.dashboardConsole))
-                            .description(CONFIG.dashboardConsole ? "The website can run console commands here, like the terminal (commands only the terminal may run still refuse it)." : "The website can not run console commands here.");
+                            .description(CONFIG.dashboardConsole ? "Hardened build blocks all remote console jobs regardless of this legacy setting." : "Hardened build blocks remote console jobs.");
                     })))
                     .then(literal("proxy").requires(c -> Command.validateCommandSource(c, CommandSources.TERMINAL)).then(argument("toggle", toggle()).executes(c -> {
                         CONFIG.dashboardProxy = getToggle(c, "toggle");
                         MODULE.get(StashManager.class).updateDashboard();
                         c.getSource().getEmbed().title("Dashboard Proxy Settings " + toggleStrCaps(CONFIG.dashboardProxy))
-                            .description(CONFIG.dashboardProxy ? "The website can change the proxy's and other plugins' settings." : "The website can not change the proxy's or other plugins' settings.");
+                            .description(CONFIG.dashboardProxy ? "The website can view masked proxy and plugin settings." : "Proxy and other plugin settings are hidden from the website.");
                     })))
                     .then(argument("toggle", toggle()).executes(c -> {
                     CONFIG.dashboard = getToggle(c, "toggle");
                     MODULE.get(StashManager.class).updateDashboard();
                     c.getSource().getEmbed().title("Stash Manager Dashboard " + toggleStrCaps(CONFIG.dashboard))
-                        .description(CONFIG.dashboard ? "The website can show and change these settings and run commands here, while the manager is on." : "The website no longer reaches this proxy.");
+                        .description(CONFIG.dashboard ? "The website can view and change editable Stash Sorter settings while the manager is on." : "The website no longer reaches this proxy.");
                     })))
                 .then(literal("scanInterval").then(argument("seconds", integer(2, 600)).executes(c -> {
                     CONFIG.managerScanInterval = getInteger(c, "seconds");
@@ -1192,7 +1198,7 @@ public class StashCommand extends Command {
             .addField("Last Error", error == null ? "none" : error)
             .addField("Include Excluded", toggleStr(CONFIG.managerIncludeExcluded))
             .addField("Scan Interval", CONFIG.managerScanInterval + " seconds")
-            .addField("Dashboard", toggleStr(CONFIG.dashboard) + " - " + manager.dashboardStatus() + "; console commands " + toggleStr(CONFIG.dashboardConsole) + ", proxy settings " + toggleStr(CONFIG.dashboardProxy) + " (both only change in the proxy terminal: `stash manager dashboard console|proxy on|off`)");
+            .addField("Dashboard", toggleStr(CONFIG.dashboard) + " - " + manager.dashboardStatus() + "; remote console disabled, proxy settings visibility " + toggleStr(CONFIG.dashboardProxy) + " (both only change in the proxy terminal: `stash manager dashboard console|proxy on|off`)");
     }
 
     private static String orphanLine() {

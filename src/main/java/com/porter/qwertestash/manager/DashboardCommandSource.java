@@ -41,7 +41,7 @@ public final class DashboardCommandSource implements CommandSource {
 
     @Override
     public boolean validateAccountOwner(CommandContext ctx) {
-        return true;
+        return false; // Remote dashboard sources are never account owners.
     }
 
     // No resolveSubject override: like the terminal and Discord, the dashboard gets the proxy's fully trusted subject, so

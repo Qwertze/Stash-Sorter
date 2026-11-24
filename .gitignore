@@ -13,3 +13,9 @@
 /*.json*
 *.tmp
 /.vscode
+/plugins/config/
+/plugins/qwerte-stash/stashes/
+/.env
+/.env.*
+!/.env.example
+__pycache__/

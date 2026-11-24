@@ -5,10 +5,8 @@ import com.porter.qwertestash.stash.Stash.Box;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -16,7 +14,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -37,11 +36,17 @@ public final class StashIndex {
     static {
         POOL.setKeepAliveTime(10, TimeUnit.SECONDS);
         POOL.allowCoreThreadTimeOut(true);
+        POOL.setRemoveOnCancelPolicy(true);
     }
 
-    // Per index file: the newest snapshot waiting to be written, when it was last written
-    private static final Map<Path, Snapshot> LATEST = new ConcurrentHashMap<>();
-    private static final Map<Path, Long> LAST_WRITE = new ConcurrentHashMap<>();
+    // Access under the StashIndex class lock. An old writer cannot publish after a forget.
+    private static final Map<Path, Pending> pending = new HashMap<>();
+    private static final class Pending {
+        Snapshot latest;
+        ScheduledFuture<?> task;
+        long lastStarted;
+        long sequence;
+    }
 
     private StashIndex() {
     }
@@ -79,38 +84,52 @@ public final class StashIndex {
         try {
             snap = snapshot(stash);
         } catch (RuntimeException e) {
+            QwerteStashPlugin.LOG.warn("Could not snapshot stash index for {}", stash.name, e);
             return;
         }
-        Path path = snap.path();
-        boolean scheduled = LATEST.put(path, snap) != null;
-        if (scheduled) return;
-
-        long wait = Math.max(0, MIN_GAP_MS - (System.currentTimeMillis() - LAST_WRITE.getOrDefault(path, 0L)));
-        POOL.schedule(() -> write(LATEST.remove(path)), wait, TimeUnit.MILLISECONDS);
+        schedule(snap, false);
     }
 
-    /**
-     * Rewritten as soon as the writer thread is free.
-     */
     public static void writeNow(Stash stash) {
-        Snapshot snap = snapshot(stash);
-        POOL.execute(() -> write(snap));
+        schedule(snapshot(stash), true);
     }
 
-    private static void write(@Nullable Snapshot snap) {
-        if (snap == null) return;
+    private static synchronized void schedule(Snapshot snap, boolean immediate) {
+        Path path = snap.path();
+        Pending state = pending.computeIfAbsent(path, ignored -> new Pending());
+        state.latest = snap;
+        if (state.task != null) {
+            if (!immediate || !state.task.cancel(false)) return;
+        }
+        long delay = immediate ? 0 : Math.max(0, MIN_GAP_MS - (System.currentTimeMillis() - state.lastStarted));
+        long sequence = ++state.sequence;
+        state.task = POOL.schedule(() -> write(path, state, sequence), delay, TimeUnit.MILLISECONDS);
+    }
+
+    static synchronized void forget(Path path) throws IOException {
+        Files.deleteIfExists(path);
+        Pending state = pending.remove(path);
+        if (state != null && state.task != null) state.task.cancel(false);
+    }
+
+    private static void write(Path path, Pending state, long sequence) {
+        Snapshot snap;
+        synchronized (StashIndex.class) {
+            if (pending.get(path) != state || state.sequence != sequence || state.latest == null) return;
+            snap = state.latest;
+            state.latest = null;
+            state.task = null;
+            state.lastStarted = System.currentTimeMillis();
+        }
         try {
-            Built built = build(snap);
-            Path path = snap.path();
-            Files.createDirectories(path.getParent());
-            Path temp = path.resolveSibling(path.getFileName() + ".tmp");
-            Files.writeString(temp, render(snap, built), StandardCharsets.UTF_8);
+            Path temp = SnapshotFiles.stage(path, render(snap, build(snap)));
             try {
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+                synchronized (StashIndex.class) {
+                    if (pending.get(path) == state) SnapshotFiles.replace(temp, path);
+                }
+            } finally {
+                Files.deleteIfExists(temp);
             }
-            LAST_WRITE.put(path, System.currentTimeMillis());
         } catch (IOException | RuntimeException e) {
             QwerteStashPlugin.LOG.warn("Couldn't write the stash index for {}", snap.name(), e);
         }

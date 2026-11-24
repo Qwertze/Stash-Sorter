@@ -38,7 +38,7 @@ repacking, and signs it writes for new categories (`stash autoLabel`).
 - Nothing else to install. The jar has no extra dependencies, and its settings file is created on first start.
 
 ## Install
-1. Download `StashSorter-<version>.jar` from [Releases](https://github.com/Qwertze/Stash-Sorter/releases).
+1. Use the JAR supplied with this hardened build, or build this checkout using the commands below.
 2. Stop the proxy.
 3. Put the jar in the proxy's `plugins` folder, removing any older Stash Sorter or `QwerteStash` jar.
 4. Start the proxy. `plugins` in the console should list `qwerte-stash`.
@@ -248,11 +248,11 @@ container is read again as usual. This also happens after `stash off` with a shu
 
 ## Stash Manager and orders
 The [Stash Manager server](https://github.com/Qwertze/Qwertze/tree/dev/stash-manager-server) is a small website for
-your network that shows the stash, takes orders and can show this plugin's settings and console. New in 1.6.0 and
+your network that shows the stash, takes orders and can show this plugin's settings. New in 1.6.0 and
 still being tested.
 
 1. Start the server and copy the API key from its console or its Link addon panel.
-2. `stash manager url http://<server>:8765`, `stash manager key <key>`, `stash manager on`.
+2. `stash manager url https://manager.example.org` (or `stash manager url http://127.0.0.1:8765` on the same machine), `stash manager key <key>`, `stash manager on`.
 3. For orders, with the bot looking at a chest or barrel run `stash delivery here` (or give `x y z`), then `stash orders on`. `stash orders`
    tells you what is stopping orders, if anything. `stash delivery x y z` refuses a position in the bot's dimension that is not
    loaded and more than 128 blocks from the bot (usually a position meant for another bot). Walk the bot near the chest and use
@@ -262,13 +262,15 @@ still being tested.
    `stash anvil <x> <y> <z> [dimension]`). `stash anvil` shows it and `stash anvil clear` removes it. The bot renames
    each shulker there before delivering it, for about 1 XP level each. Without an anvil, or without enough levels, the
    shulkers are delivered unnamed and the order says so. Like the delivery container, the anvil's position is only
-   shown in the proxy terminal and the website console. Since 1.8.1 setting one is optional: without one the bot looks
+   shown by this command in the proxy terminal. Since 1.8.1 setting one is optional: without one the bot looks
    for an anvil standing in the stash area, and failing that puts one down from the stash, and remembers it either way
    (`stash anvil` says whether it was set, found or placed). With no anvil anywhere the shulkers are delivered unnamed
    with "no anvils available to rename with".
 
-The website may run console commands only after `stash manager dashboard console on`, and change proxy settings only
-after `stash manager dashboard proxy on`; both can only be turned on in the proxy terminal.
+The dashboard can change documented settings for this plugin. Remote console commands are disabled. The local
+`stash manager dashboard proxy on` switch exposes masked, read-only settings from additional scopes. The
+legacy console switch is still accepted by the terminal. The manager receives stash and delivery data when enabled.
+
 
 ## Crafting shulker boxes
 New in 1.8.0, off by default. When an order needs an empty shulker (to build a shulker in, or for an empty-shulker line)
@@ -277,7 +279,7 @@ shells and a chest, the chest from 8 planks of any kind, the planks from logs. K
 
 1. With the bot looking at a crafting table run `stash craftingtable here` (or `stash craftingtable <x> <y> <z>
    [dimension]`). `stash craftingtable` shows it, `stash craftingtable clear` removes it. Its position is only shown in
-   the proxy terminal and the website console.
+   the proxy terminal.
 2. `stash crafting on`. `stash crafting` shows whether it is on, whether a table is set, and how many were crafted this
    hour.
 
@@ -294,8 +296,34 @@ When a shulker box can't be crafted, the order says why ("no empty shulker; coul
 "... shulker shells can't be crafted", "... not enough planks ...", "... cap reached ...").
 
 ## Building
-Needs JDK 25. Copy your proxy's `AquariusProxy.jar` into `libs/`, then run `./gradlew build`. The jar is in
-`build/libs/`.
+Install a JDK 25 and put a reviewed AquariusProxy Java 1.21.4 fat JAR at `libs/AquariusProxy.jar`.
+The build executes the annotation processor from that file. Verify its SHA-256 against your reviewed release.
+Python 3 is used for the repository checks. From the project root run:
+
+```sh
+python3 scripts/check_format.py
+./gradlew clean build
+python3 scripts/verify_artifact.py build/libs/StashSorter-1.12.4.jar
+```
+
+On Windows use `gradlew.bat` and `py -3`. A different API location can be supplied with
+`-Paquarius_jar=/absolute/path/AquariusProxy.jar`. The first Gradle run needs access to its distribution
+and dependency repositories. Build output targets Java 21. Run the proxy on the Java version its particular distribution requires.
+
+## Testing and troubleshooting
+
+- `./gradlew test integrationTest jacocoTestReport` runs the unit and local integration suites. Read the XML and HTML
+  reports under `build/reports/jacoco/test/`. The real manager suite has a separate fixture and command in [Testing](docs/TESTING.md).
+- If the plugin is missing from the proxy's `plugins` listing, verify the installation JAR, Java release channel,
+  Minecraft version and that only one copy of this plugin is installed.
+- If a manager address is rejected, use HTTPS remotely or an exact local loopback address for HTTP. Check the manager
+  key and the two machines' clocks when signatures fail.
+- A stash read or backup error can require disk space or permissions to be restored. The stash JSON, index and
+  recovery copies contain private data. Keep the proxy stopped while manually restoring a selected backup.
+- `stash forget` removes the selected JSON and index. Recovery and prune backups are retained.
+
+The [audit report](docs/AUDIT_REPORT.md) records what ran for this build. See [Architecture](docs/ARCHITECTURE.md),
+[Contributing](CONTRIBUTING.md) and [Security](SECURITY.md) for implementation and reporting details.
 
 ## License
 GPL-3.0, the same as [Qwerte](https://github.com/Qwertze/Qwerte), which this is ported from.

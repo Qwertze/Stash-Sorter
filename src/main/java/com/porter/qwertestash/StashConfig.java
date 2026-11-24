@@ -173,16 +173,16 @@ public class StashConfig {
     /** Seconds between checks of the stash for changes. Only changes are sent. */
     public int managerScanInterval = 10;
     /**
-     * With the manager on, also keep a link to the Stash Manager website's dashboard: it shows these settings and the
-     * console there and applies changes made on the website. Every connection is opened by this plugin.
+     * With the manager on, also keep a link to the Stash Manager website's dashboard: it shows settings and applies
+     * permitted changes to this plugin. Every connection is opened by this plugin.
      */
     public boolean dashboard = true;
     /**
-     * The website may run console commands here. Off unless turned on in the proxy terminal: it can not be changed from the
+     * Legacy compatibility flag. Hardened build always rejects dashboard commands. It cannot be changed from the
      * dashboard, Discord or in game, nor through a multi command from there.
      */
     public boolean dashboardConsole = false;
-    /** The website may change the proxy settings and other plugins settings. Same rule as dashboardConsole. */
+    /** Show masked, read-only settings for the proxy and other plugins. */
     public boolean dashboardProxy = false;
     /** Identifies this bot to the Stash Manager server. Generated the first time the dashboard link starts. */
     public String managerBotId = "";

@@ -19,7 +19,7 @@ import static com.aquarius.Globals.INVENTORY;
  * using them. The sorter remembers every request it makes, and what is going on that it didn't start is foreign.
  * Ticks are the sorter's own count.
  */
-final class Activity {
+final class Activity implements WaypointProgress.Pathing {
     enum Reason {
         Pathing("pathing"),
         Inventory("inventory actions"),
@@ -193,7 +193,8 @@ final class Activity {
     /**
      * Our request failed by itself, and long enough ago that nothing else has shown up since.
      */
-    boolean ownFailureSettled() {
+    @Override
+    public boolean ownFailureSettled() {
         return superseded() && !replacedByOther() && otherProcessActive() == null && now - failedAt >= FAILURE_LOOKBACK;
     }
 
@@ -201,7 +202,8 @@ final class Activity {
      * A new Baritone request of ours may be made: none of ours is outstanding, nothing else is running, and our last one
      * wasn't just taken over by another module (whose request would be replaced by ours).
      */
-    boolean mayRequest() {
+    @Override
+    public boolean mayRequest() {
         if (ownPathing() || BARITONE.isActive() || otherProcessActive() != null) return false;
         // Right after our request failed, nothing is asked for until the cause is clear and a few ticks have passed
         return !(superseded() && (replacedByOther() || now - failedAt < REREQUEST_GAP));

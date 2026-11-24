@@ -31,13 +31,14 @@ public final class Stashes {
     public static synchronized @Nullable Stash current() {
         String server = Stash.currentServer();
         String name = CONFIG.stashName;
-        if (stash != null && stash.name.equals(name) && stash.server.equals(server)) return stash;
+        if (stash != null && triedKey != null && stash.name.equals(name) && stash.server.equals(server)) return stash;
+        flushPrevious();
 
         // Only try the disk once per name and server, a missing stash isn't looked for again every tick
         String key = server + "/" + name;
         if (!key.equals(triedKey)) {
-            triedKey = key;
             stash = Stash.load(name);
+            triedKey = key;
         }
         else stash = null;
 
@@ -55,7 +56,16 @@ public final class Stashes {
         return stash;
     }
 
+    private static void flushPrevious() {
+        if (stash != null && !stash.flushForRelease()) {
+            throw new IllegalStateException("Cannot switch stashes until the previous snapshot has been saved");
+        }
+    }
+
     public static synchronized void forget() {
+        if (stash != null && !(stash.name.equals(CONFIG.stashName) && stash.server.equals(Stash.currentServer()))) {
+            flushPrevious();
+        }
         Stash.delete(CONFIG.stashName);
         stash = null;
         triedKey = null;
@@ -63,9 +73,8 @@ public final class Stashes {
     }
 
     public static synchronized void reset() {
-        if (stash != null && stash.isDirty()) stash.save();
-        stash = null;
         triedKey = null;
+        if (stash == null || stash.flushForRelease()) stash = null;
     }
 
     // Reading open containers

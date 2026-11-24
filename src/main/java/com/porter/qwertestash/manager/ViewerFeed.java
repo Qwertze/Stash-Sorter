@@ -95,7 +95,8 @@ public final class ViewerFeed {
         }
 
         public synchronized void add(String kind, @Nullable String sender, @Nullable String to, @Nullable String message) {
-            if (message == null) return;
+            // Defense in depth: never store private messages even if another caller adds them.
+            if (message == null || "whisper".equalsIgnoreCase(kind)) return;
             lines.addLast(new ChatLine(next++, clock.getAsLong(), kind, cut(sender == null ? "" : sender, 16), to == null ? null : cut(to, 16), cut(message, 256)));
             while (lines.size() > CHAT_RING) lines.removeFirst();
         }

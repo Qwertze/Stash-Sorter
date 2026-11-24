@@ -13,6 +13,8 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -27,7 +29,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Properties;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.net.ServerSocket;
+import java.net.InetAddress;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -42,9 +45,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * world is the fake one of {@link OrderSim}; everything else is the plugin's own code ({@link ManagerHttp},
  * {@link ManagerIndex#heartbeat}, {@link OrderDriver}, {@link OrderFlow}).
  * <p>
- * Runs only when given a server jar: {@code gradlew test -PstashManagerJar=<copy of stash-manager-server.jar> -PstashManagerPort=<free port>
+ * Runs only when given a server jar: {@code gradlew endToEndTest -PstashManagerJar=<copy of stash-manager-server.jar> -PstashManagerPort=<free port>
  * -PstashManagerData=<scratch dir>}. It starts the server with its own data directory and stops it afterwards.
  */
+@Tag("e2e")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class OrderServerIntegrationTest {
     private static final String SERVER = "2b2t.org", STASH = "it-stash", PLAYER = "ItBot", D = "minecraft:diamond", RED = "minecraft:red_shulker_box";
@@ -55,26 +59,33 @@ class OrderServerIntegrationTest {
     private static URI base;
     private static HttpClient http;
     private static String cookie = "";
-    private static final List<String> log = new CopyOnWriteArrayList<>();
+    @TempDir static Path scratch;
     private static volatile String setupCode;
 
     @BeforeAll
     static void start() throws Exception {
         String jar = System.getProperty("stashManagerJar");
-        Assumptions.assumeTrue(jar != null && Files.exists(Path.of(jar)), "pass -PstashManagerJar=<server jar> to run the server integration test");
-        port = Integer.parseInt(System.getProperty("stashManagerPort", "8791"));
-        Path data = System.getProperty("stashManagerData") != null ? Path.of(System.getProperty("stashManagerData")) : Files.createTempDirectory("sm-it");
-        Assumptions.assumeFalse(port == 8765, "never the user's port");
-        Files.createDirectories(data);
+        assertNotNull(jar, "Supply -PstashManagerJar=<manager server JAR>");
+        Path serverJar = Path.of(jar).toAbsolutePath();
+        assertTrue(Files.isRegularFile(serverJar), "Manager server JAR does not exist");
+        try (var available = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            port = Integer.parseInt(System.getProperty("stashManagerPort", Integer.toString(available.getLocalPort())));
+        }
+        assertTrue(port > 0 && port <= 65535 && port != 8765, "Use a free, non-production port");
+        Path parent = Path.of(System.getProperty("stashManagerData", scratch.toString()));
+        Files.createDirectories(parent);
+        Path data = Files.createTempDirectory(parent, "sm-it-");
         Files.writeString(data.resolve("config.properties"), "port=" + port + "\nbind=127.0.0.1\n");
 
-        process = new ProcessBuilder("java", "-jar", jar, "--data", data.toString()).redirectErrorStream(true).directory(data.toFile()).start();
+        Path javaBin = Path.of(System.getProperty("java.home"), "bin",
+            System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java");
+        process = new ProcessBuilder(javaBin.toString(), "-jar", serverJar.toString(), "--data", data.toAbsolutePath().toString())
+            .redirectErrorStream(true).directory(data.toFile()).start();
         Thread reader = new Thread(() -> {
             try (BufferedReader in = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 Pattern code = Pattern.compile("setup code:\\s*([A-Z0-9]{4}-[A-Z0-9]{4})");
                 while ((line = in.readLine()) != null) {
-                    log.add(line);
                     Matcher m = code.matcher(line);
                     if (m.find()) setupCode = m.group(1);
                 }
@@ -89,13 +100,15 @@ class OrderServerIntegrationTest {
         http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         long deadline = System.currentTimeMillis() + 40_000;
         while (System.currentTimeMillis() < deadline) {
+            assertTrue(process.isAlive(), "Manager server exited during startup");
             try {
                 if (get("/api/v1/auth/state").statusCode() == 200) break;
-            } catch (Exception e) {
-                Thread.sleep(300);
+            } catch (IOException e) {
+                // The server is still binding its port.
             }
+            Thread.sleep(300);
         }
-        assertEquals(200, get("/api/v1/auth/state").statusCode(), "the server did not start: " + log);
+        assertEquals(200, get("/api/v1/auth/state").statusCode(), "the server did not start");
 
         Properties config = new Properties();
         try (var propsIn = Files.newBufferedReader(data.resolve("config.properties"))) {
@@ -107,7 +120,7 @@ class OrderServerIntegrationTest {
         // The website password, set up from this PC with the one-time code
         long until = System.currentTimeMillis() + 10_000;
         while (setupCode == null && System.currentTimeMillis() < until) Thread.sleep(100);
-        assertNotNull(setupCode, "no setup code in " + log);
+        assertNotNull(setupCode, "setup code was not received");
         JsonObject setup = new JsonObject();
         setup.addProperty("password", "correct horse battery staple 42");
         setup.addProperty("code", setupCode);
@@ -120,11 +133,17 @@ class OrderServerIntegrationTest {
         if (process != null) {
             process.destroy();
             try {
-                if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) process.destroyForcibly();
+                if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS), "server did not stop");
+                }
             } catch (InterruptedException e) {
                 process.destroyForcibly();
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while stopping the fixture", e);
             }
         }
+        if (http != null) http.close();
     }
 
     // The browser
