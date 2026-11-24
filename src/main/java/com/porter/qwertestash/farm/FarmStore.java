@@ -1,5 +1,6 @@
 package com.porter.qwertestash.farm;
 
+import com.porter.qwertestash.manager.SafeJson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -226,7 +227,7 @@ public final class FarmStore {
             Seal.Result r = Seal.openLocations(k, file);
             if (!r.ok()) throw new FarmException(r.code());
             try {
-                JsonObject farms = JsonParser.parseString(new String(r.data(), StandardCharsets.UTF_8)).getAsJsonObject().getAsJsonObject("farms");
+                JsonObject farms = SafeJson.parse(new String(r.data(), StandardCharsets.UTF_8)).getAsJsonObject().getAsJsonObject("farms");
                 for (var e : farms.entrySet()) {
                     JsonObject o = e.getValue().getAsJsonObject();
                     JsonArray org = o.getAsJsonArray("origin");

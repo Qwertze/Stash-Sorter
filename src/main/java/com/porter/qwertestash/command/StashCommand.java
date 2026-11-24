@@ -524,8 +524,14 @@ public class StashCommand extends Command {
                     + " A shulker of ours still standing is left where it is and listed with the orphaned shulkers.").primaryColor();
             }))
             .then(literal("forget").executes(c -> {
-                Stashes.forget();
-                c.getSource().getEmbed().title("Stash Forgotten").description("Deleted \"" + CONFIG.stashName + "\", including excluded and drop-off marks.");
+                try {
+                    Stashes.forget();
+                } catch (java.io.IOException e) {
+                    // Nothing is claimed: the file is still there (or half deleted); the problem is in the log too
+                    c.getSource().getEmbed().title("Stash Not Forgotten").description("Couldn't delete \"" + CONFIG.stashName + "\" (" + e.getClass().getSimpleName() + "), see the log. It is still saved; try again.").errorColor();
+                    return;
+                }
+                c.getSource().getEmbed().title("Stash Forgotten").description("Deleted \"" + CONFIG.stashName + "\" and its index file, including excluded and drop-off marks.");
             }))
             .then(literal("autoDrop")
                 .then(literal("range").then(argument("blocks", integer(1, 64)).executes(c -> {
@@ -608,7 +614,7 @@ public class StashCommand extends Command {
                     String url = getString(c, "url").trim();
                     URI parsed = StashManager.parse(url);
                     if (parsed == null) {
-                        c.getSource().getEmbed().title("Bad Server Address").description("Use a http or https address without a query, fragment or login, like http://127.0.0.1:8765.").errorColor();
+                        c.getSource().getEmbed().title("Bad Server Address").description("Use an https address, or a plain http address of this machine or a private network (like http://127.0.0.1:8765), without a query, fragment or login.").errorColor();
                         return;
                     }
                     CONFIG.managerUrl = parsed.toString();

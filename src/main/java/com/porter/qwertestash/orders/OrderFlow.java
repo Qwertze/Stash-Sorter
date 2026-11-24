@@ -878,21 +878,21 @@ public final class OrderFlow {
             crafted = Math.max(0, saved.crafted);
             if (repair != null && saved.repair != null) {
                 try {
-                    repair = Repair.Report.fromSaved(com.google.gson.JsonParser.parseString(saved.repair).getAsJsonObject());
+                    repair = Repair.Report.fromSaved(com.porter.qwertestash.manager.SafeJson.parse(saved.repair).getAsJsonObject());
                 } catch (RuntimeException e) {
                     // A broken record is a fresh one: repairing never holds an order up
                 }
             }
             if (craftLedger != null && saved.craft != null) {
                 try {
-                    craftLedger.restore(com.google.gson.JsonParser.parseString(saved.craft).getAsJsonObject());
+                    craftLedger.restore(com.porter.qwertestash.manager.SafeJson.parse(saved.craft).getAsJsonObject());
                 } catch (RuntimeException e) {
                     // A broken record is a fresh ledger: the order goes on with its full budget
                 }
             }
             if (enchantLedger != null && saved.enchant != null) {
                 try {
-                    enchantLedger.restore(com.google.gson.JsonParser.parseString(saved.enchant).getAsJsonObject());
+                    enchantLedger.restore(com.porter.qwertestash.manager.SafeJson.parse(saved.enchant).getAsJsonObject());
                 } catch (RuntimeException e) {
                     // A broken record is a fresh ledger: the items are planned and gathered again from the start
                 }

@@ -4,6 +4,7 @@ import com.aquarius.cache.data.inventory.Container;
 import com.porter.qwertestash.stash.Stash.Box;
 import org.jspecify.annotations.Nullable;
 
+import java.io.IOException;
 import java.util.Objects;
 
 import static com.porter.qwertestash.QwerteStashPlugin.CONFIG;
@@ -18,6 +19,8 @@ public final class Stashes {
 
     private static @Nullable Stash stash;
     private static @Nullable String triedKey;
+    /** The file on disk for {@link #triedKey} could not be read and not be copied aside: a new stash made for it must not overwrite it (see {@link Stash#protectExistingFile}). */
+    private static boolean protectFile;
 
     /** Goes up whenever a container's contents or marks change, so stay-on sorting knows to look again. */
     public static volatile int version;
@@ -37,7 +40,15 @@ public final class Stashes {
         String key = server + "/" + name;
         if (!key.equals(triedKey)) {
             triedKey = key;
-            stash = Stash.load(name);
+            Stash.Loaded loaded;
+            try {
+                loaded = Stash.load(name);
+            } catch (RuntimeException e) {
+                // Never thrown out of the tick: the stash is left as not loaded, and the file is not to be overwritten
+                loaded = new Stash.Loaded(null, true);
+            }
+            stash = loaded.stash();
+            protectFile = loaded.protect();
         }
         else stash = null;
 
@@ -51,21 +62,33 @@ public final class Stashes {
         Stash existing = current();
         if (existing != null) return existing;
         stash = new Stash(CONFIG.stashName, Stash.currentServer());
+        if (protectFile) {
+            // The file on disk is kept: this stash stays dirty and saves nothing until a copy of the file exists (retried with a growing wait)
+            stash.protectExistingFile();
+            protectFile = false;
+        }
         triedKey = Stash.currentServer() + "/" + CONFIG.stashName;
         return stash;
     }
 
-    public static synchronized void forget() {
+    /**
+     * Deletes the saved stash and its index file. Nothing is forgotten in memory when a file could not be deleted: the caller reports it.
+     * @throws IOException when the stash file or its index could not be deleted
+     */
+    public static synchronized void forget() throws IOException {
         Stash.delete(CONFIG.stashName);
         stash = null;
         triedKey = null;
+        protectFile = false;
         version++;
     }
 
     public static synchronized void reset() {
-        if (stash != null && stash.isDirty()) stash.save();
+        // The last save before the stash is let go: a protected stash tries to release its file now, whatever the backoff
+        if (stash != null && stash.isDirty()) stash.save(true);
         stash = null;
         triedKey = null;
+        protectFile = false;
     }
 
     // Reading open containers

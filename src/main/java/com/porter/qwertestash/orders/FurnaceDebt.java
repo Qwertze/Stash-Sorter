@@ -1,5 +1,6 @@
 package com.porter.qwertestash.orders;
 
+import com.porter.qwertestash.manager.SafeJson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.jspecify.annotations.Nullable;
@@ -55,7 +56,7 @@ public record FurnaceDebt(String dimension, int x, int y, int z, SmeltJournal jo
     public static @Nullable FurnaceDebt parse(@Nullable String saved) {
         if (saved == null || saved.isBlank() || saved.length() > 2 * MAX_LENGTH) return null;
         try {
-            JsonObject o = JsonParser.parseString(saved).getAsJsonObject();
+            JsonObject o = SafeJson.parse(saved).getAsJsonObject();
             SmeltJournal j = SmeltJournal.fromJson(o.get("journal"));
             if (!j.isOpen()) return null;
             return new FurnaceDebt(o.get("dimension").getAsString(), o.get("x").getAsInt(), o.get("y").getAsInt(), o.get("z").getAsInt(), j);

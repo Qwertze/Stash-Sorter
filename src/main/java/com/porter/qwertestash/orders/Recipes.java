@@ -1,5 +1,6 @@
 package com.porter.qwertestash.orders;
 
+import com.porter.qwertestash.manager.SafeJson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -124,7 +125,7 @@ public final class Recipes {
     }
 
     public static Recipes parse(Reader reader) {
-        return fromJson(JsonParser.parseReader(reader).getAsJsonObject());
+        return fromJson(SafeJson.parse(reader).getAsJsonObject());
     }
 
     /** A table from its parsed JSON (the hash is computed from it). A missing {@code count} is 1, here and in {@link #tableHash}. */

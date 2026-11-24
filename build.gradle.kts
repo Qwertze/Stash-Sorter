@@ -26,9 +26,6 @@ java {
 
 repositories {
     mavenCentral()
-    // Repos used by AquariusProxy/ZenithProxy — only needed if you `shade` extra dependencies
-    maven("https://maven.2b2t.vc/releases")
-    maven("https://maven.2b2t.vc/remote")
 }
 
 // --- AquariusProxy API jar ----------------------------------------------------
@@ -48,7 +45,7 @@ dependencies {
 
     // Unit tests run against the same jar (gson, the item types) plus JUnit
     testImplementation(aquariusJar)
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation(platform("org.junit:junit-bom:5.14.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
@@ -98,6 +95,7 @@ tasks.test {
     // The integration test against a real Stash Manager server runs only when given a jar: -PstashManagerJar=<path>
     providers.gradleProperty("stashManagerJar").orNull?.let { systemProperty("stashManagerJar", it) }
     providers.gradleProperty("stashManagerPort").orNull?.let { systemProperty("stashManagerPort", it) }
+    providers.gradleProperty("stashManagerProtectedDir").orNull?.let { systemProperty("stashManagerProtectedDir", it) }
     providers.gradleProperty("stashManagerData").orNull?.let { systemProperty("stashManagerData", it) }
     providers.gradleProperty("patchedProxyJar").orNull?.let { systemProperty("patchedProxyJar", it) }
     testLogging {
@@ -142,6 +140,8 @@ tasks.withType<JavaCompile>().configureEach {
     if (name == "compileJava") dependsOn(checkQwerteCore)
     options.encoding = "UTF-8"
     options.release = javaReleaseVersion
+    // Warnings are listed, never fatal (no -Werror)
+    options.compilerArgs.add("-Xlint:deprecation,unchecked")
 }
 
 // --- Packaging ----------------------------------------------------------------

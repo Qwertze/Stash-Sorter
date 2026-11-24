@@ -75,7 +75,10 @@ class SpecialServerIntegrationTest {
         // Safety: a scratch server only. Never the user's port, jar or data
         Assumptions.assumeTrue(port >= 18000 && port != 8765, "the port must be 18000 or more and never 8765");
         String jarPath = Path.of(jar).toAbsolutePath().normalize().toString().replace((char) 92, '/').toLowerCase();
-        Assumptions.assumeFalse(jarPath.contains("/desktop/qwertze/stash-manager-server/build") || jarPath.matches(".*/desktop/qwertze/[^/]*[.]jar"),
+        // The folder of the user's own running server: -PstashManagerProtectedDir=<folder>, by default Desktop/Qwertze under the home folder
+        String protectedDir = Path.of(System.getProperty("stashManagerProtectedDir", Path.of(System.getProperty("user.home"), "Desktop", "Qwertze").toString()))
+            .toAbsolutePath().normalize().toString().replace((char) 92, '/').toLowerCase();
+        Assumptions.assumeFalse(jarPath.contains(protectedDir + "/stash-manager-server/build") || jarPath.matches(java.util.regex.Pattern.quote(protectedDir) + "/[^/]*[.]jar"),
             "never the user's running jar: pass a copy of it");
         try (java.net.ServerSocket probe = new java.net.ServerSocket(port, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
             // Free: the probe is closed again before the server starts

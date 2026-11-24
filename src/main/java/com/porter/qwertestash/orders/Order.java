@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -453,6 +454,8 @@ public final class Order {
     public static @Nullable Order parse(@Nullable JsonObject o) {
         if (o == null || !o.has("id") || !o.has("lines") || !o.get("lines").isJsonArray()) return null;
         List<Line> lines = new ArrayList<>();
+        // The merged total per key (what requested() adds up) must fit an int; an order that would overflow it is refused
+        Map<String, Integer> totals = new HashMap<>();
         JsonArray array = o.getAsJsonArray("lines");
         for (JsonElement e : array) {
             if (!e.isJsonObject()) continue;
@@ -460,11 +463,21 @@ public final class Order {
             try {
                 String type = l.get("type").getAsString();
                 String key = l.get("key").getAsString();
-                int count = l.get("count").getAsInt();
+                // A count is an exact whole number: 2.5, 1e30 or a non-number leaves the line out (it shows up as undelivered)
+                JsonElement quantity = l.get("count");
+                if (quantity == null || !quantity.isJsonPrimitive()) continue;
+                int count = quantity.getAsBigDecimal().intValueExact();
                 // B3: a craft line may name a variant of its item (a rocket or star spec); no other line has one
                 JsonElement sp = l.get("spec");
                 String spec = type.equals(CRAFT) && sp != null && sp.isJsonPrimitive() && sp.getAsJsonPrimitive().isString() && !sp.getAsString().isEmpty() ? sp.getAsString() : null;
-                if ((type.equals(ITEM) || type.equals(SHULKER) || type.equals(CRAFT) || type.equals(KIT) || type.equals(ENCHANT)) && !key.isEmpty() && count >= 1 && count <= MAX_LINE_COUNT) lines.add(new Line(type, key, count, type.equals(ITEM) && flag(l, "repair"), spec));
+                if ((type.equals(ITEM) || type.equals(SHULKER) || type.equals(CRAFT) || type.equals(KIT) || type.equals(ENCHANT)) && !key.isEmpty() && count >= 1 && count <= MAX_LINE_COUNT) {
+                    if (spec == null) {
+                        int previous = totals.getOrDefault(key, 0);
+                        if (count > Integer.MAX_VALUE - previous) return null;
+                        totals.put(key, previous + count);
+                    }
+                    lines.add(new Line(type, key, count, type.equals(ITEM) && flag(l, "repair"), spec));
+                }
             } catch (RuntimeException ex) {
                 // A broken line is left out and shows up as undelivered
             }
@@ -683,7 +696,7 @@ public final class Order {
     public Map<String, Integer> requested() {
         Map<String, Integer> out = new LinkedHashMap<>();
         // A craft line with a spec (B3) is delivered under the key of the stack that was made, which the plan can not know: the craft ledger accounts for it
-        for (Line l : lines) if (l.spec() == null) out.merge(l.key(), l.count(), Integer::sum);
+        for (Line l : lines) if (l.spec() == null) out.merge(l.key(), l.count(), Math::addExact);
         return out;
     }
 

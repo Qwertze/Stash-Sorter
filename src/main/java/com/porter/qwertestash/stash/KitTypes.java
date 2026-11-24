@@ -1,5 +1,6 @@
 package com.porter.qwertestash.stash;
 
+import com.porter.qwertestash.manager.SafeJson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -79,7 +80,7 @@ public final class KitTypes {
 
     public static KitTypes parse(Reader reader) throws Invalid {
         try {
-            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+            JsonObject root = SafeJson.parse(reader).getAsJsonObject();
             List<Type> types = new ArrayList<>();
             for (JsonElement e : root.getAsJsonArray("types")) {
                 JsonObject o = e.getAsJsonObject();

@@ -1,5 +1,6 @@
 package com.porter.qwertestash.farm;
 
+import com.porter.qwertestash.manager.SafeJson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -41,7 +42,7 @@ public final class SessionJournal {
     public synchronized State load() {
         try {
             if (Files.exists(file)) {
-                JsonObject o = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
+                JsonObject o = SafeJson.parse(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
                 state = new State(str(o, "farm"), str(o, "task"), num(o, "epoch"), num(o, "loops"), str(o, "anchor"), num(o, "tick"), num(o, "recoveries"),
                     o.has("stopped") && o.get("stopped").getAsBoolean(), o.has("localStop") && o.get("localStop").getAsBoolean());
             }

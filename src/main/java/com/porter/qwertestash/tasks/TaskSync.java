@@ -3,9 +3,9 @@ package com.porter.qwertestash.tasks;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.porter.qwertestash.farm.FarmCodes;
 import com.porter.qwertestash.manager.ManagerHttp;
+import com.porter.qwertestash.manager.SafeJson;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -335,7 +335,7 @@ public final class TaskSync {
 
     private static JsonObject parse(ManagerHttp.Response r) {
         try {
-            JsonElement e = JsonParser.parseString(r.body());
+            JsonElement e = SafeJson.parse(r.body());
             return e.isJsonObject() ? e.getAsJsonObject() : null;
         } catch (RuntimeException ex) {
             return null;

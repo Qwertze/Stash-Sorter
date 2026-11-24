@@ -1,5 +1,6 @@
 package com.porter.qwertestash.stash;
 
+import com.porter.qwertestash.manager.SafeJson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -65,7 +66,7 @@ public final class KitItems {
         try (InputStream in = KitItems.class.getResourceAsStream(RESOURCE)) {
             if (in == null) throw new IOException("resource missing");
             try (Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
-                KitItems table = parse(JsonParser.parseReader(reader));
+                KitItems table = parse(SafeJson.parse(reader));
                 if (QwerteStashPlugin.LOG != null) QwerteStashPlugin.LOG.debug("Qwerte Stash: kit items table loaded ({} OP items, {} groups, fingerprint {})", table.op.size(), table.groups.size(), table.fingerprint());
                 return table;
             }

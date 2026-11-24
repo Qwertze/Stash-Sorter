@@ -9,6 +9,7 @@ import com.github.rfresh2.EventConsumer;
 import com.porter.qwertestash.manager.ActivityFeed;
 import com.porter.qwertestash.manager.ConfigApplier;
 import com.porter.qwertestash.manager.ConfigSchema;
+import com.porter.qwertestash.manager.ManagerUrl;
 import com.porter.qwertestash.manager.ProxyEnv;
 import com.porter.qwertestash.manager.ProxyPolicy;
 import com.porter.qwertestash.manager.ConsoleRunner;
@@ -634,20 +635,12 @@ public class StashManager extends Module {
         return key == null || key.isBlank() ? "not set" : "set";
     }
 
-    /** A usable http or https base address without a query, fragment, credentials or trailing slash, else null. */
+    /**
+     * A usable base address without a query, fragment, credentials or trailing slash, else null: https for any host, plain http only for this machine or a
+     * private network ({@link ManagerUrl}).
+     */
     public static @Nullable URI parse(@Nullable String url) {
-        if (url == null) return null;
-        try {
-            String s = url.trim();
-            while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
-            URI uri = URI.create(s);
-            String scheme = uri.getScheme();
-            if (uri.getHost() == null || scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) return null;
-            if (uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getRawUserInfo() != null) return null;
-            return uri;
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        return ManagerUrl.parse(url);
     }
 
     // The tick
@@ -705,7 +698,7 @@ public class StashManager extends Module {
             setStatus("bad url");
             if (!warnedUrl) {
                 warnedUrl = true;
-                LOG.warn("{}the server url must be a http or https address without a query, like http://127.0.0.1:8765 (`stash manager url <url>`).", PREFIX);
+                LOG.warn("{}the server url must be an https address, or a plain http address of this machine or a private network (like http://127.0.0.1:8765), without a query (`stash manager url <url>`).", PREFIX);
             }
             return;
         }

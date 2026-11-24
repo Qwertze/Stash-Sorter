@@ -113,7 +113,7 @@ public final class ManagerHttp {
         } catch (NumberFormatException e) {
             return false;
         }
-        if (Math.abs(now - ts) > MAX_SKEW_MS) return false;
+        if (ts < 0 || now < 0 || Math.abs(now - ts) > MAX_SKEW_MS) return false;
         String input = "resp\n" + nonce + "\n" + status + "\n" + ts + "\n" + sha256Hex(body);
         byte[] expected = hex(hmac(k, input.getBytes(StandardCharsets.UTF_8))).getBytes(StandardCharsets.UTF_8);
         return MessageDigest.isEqual(expected, parts[2].toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.UTF_8));
@@ -193,13 +193,13 @@ public final class ManagerHttp {
         }
     }
 
-    private static byte[] read(InputStream in) throws IOException {
+    static byte[] read(InputStream in) throws IOException {
         try (in; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buf = new byte[8192];
             int n;
             while ((n = in.read(buf)) > 0) {
+                if (n > MAX_REPLY - out.size()) throw new IOException("reply too large");
                 out.write(buf, 0, n);
-                if (out.size() > MAX_REPLY) throw new IOException("reply too large");
             }
             return out.toByteArray();
         }

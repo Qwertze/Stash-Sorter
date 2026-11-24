@@ -5,10 +5,8 @@ import com.porter.qwertestash.stash.Stash.Box;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -16,7 +14,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -35,13 +34,21 @@ public final class StashIndex {
         return thread;
     });
     static {
+        POOL.setRemoveOnCancelPolicy(true);
         POOL.setKeepAliveTime(10, TimeUnit.SECONDS);
         POOL.allowCoreThreadTimeOut(true);
     }
 
-    // Per index file: the newest snapshot waiting to be written, when it was last written
-    private static final Map<Path, Snapshot> LATEST = new ConcurrentHashMap<>();
-    private static final Map<Path, Long> LAST_WRITE = new ConcurrentHashMap<>();
+    /** Per index file: the newest snapshot waiting to be written, the queued write, when the last one started. Touched only under the StashIndex lock. */
+    private static final class Pending {
+        @Nullable Snapshot latest;
+        @Nullable ScheduledFuture<?> task;
+        long lastStarted;
+        long sequence;
+    }
+
+    // Under the StashIndex class lock. Forgetting a stash removes its entry, so a write that was already queued or running can not bring the file back
+    private static final Map<Path, Pending> PENDING = new HashMap<>();
 
     private StashIndex() {
     }
@@ -81,38 +88,68 @@ public final class StashIndex {
         } catch (RuntimeException e) {
             return;
         }
-        Path path = snap.path();
-        boolean scheduled = LATEST.put(path, snap) != null;
-        if (scheduled) return;
-
-        long wait = Math.max(0, MIN_GAP_MS - (System.currentTimeMillis() - LAST_WRITE.getOrDefault(path, 0L)));
-        POOL.schedule(() -> write(LATEST.remove(path)), wait, TimeUnit.MILLISECONDS);
+        schedule(snap, false);
     }
 
     /**
      * Rewritten as soon as the writer thread is free.
      */
     public static void writeNow(Stash stash) {
-        Snapshot snap = snapshot(stash);
-        POOL.execute(() -> write(snap));
+        schedule(snapshot(stash), true);
     }
 
-    private static void write(@Nullable Snapshot snap) {
-        if (snap == null) return;
+    private static synchronized void schedule(Snapshot snap, boolean immediate) {
+        Path path = snap.path();
+        Pending state = PENDING.computeIfAbsent(path, p -> new Pending());
+        state.latest = snap;
+        if (state.task != null) {
+            // Already queued: it takes the newest snapshot when it runs, unless this one is wanted now and the queued one has not started
+            if (!immediate || !state.task.cancel(false)) return;
+        }
+        long delay = immediate ? 0 : Math.max(0, MIN_GAP_MS - (System.currentTimeMillis() - state.lastStarted));
+        long sequence = ++state.sequence;
+        state.task = POOL.schedule(() -> write(path, state, sequence), delay, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Deletes the index file of a forgotten stash and drops any write queued for it (a write that is running can not replace the file afterwards).
+     * @throws IOException when the file could not be deleted; the queued write is dropped all the same
+     */
+    static synchronized void forget(Path path) throws IOException {
+        Pending state = PENDING.remove(path);
+        if (state != null && state.task != null) state.task.cancel(false);
+        Files.deleteIfExists(path);
+    }
+
+    private static void write(Path path, Pending state, long sequence) {
+        Snapshot snap;
+        synchronized (StashIndex.class) {
+            if (PENDING.get(path) != state || state.sequence != sequence || state.latest == null) return;
+            snap = state.latest;
+            state.latest = null;
+            state.task = null;
+            state.lastStarted = System.currentTimeMillis();
+        }
+        Path temp = null;
         try {
-            Built built = build(snap);
-            Path path = snap.path();
-            Files.createDirectories(path.getParent());
-            Path temp = path.resolveSibling(path.getFileName() + ".tmp");
-            Files.writeString(temp, render(snap, built), StandardCharsets.UTF_8);
-            try {
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+            temp = SnapshotFiles.stage(path, render(snap, build(snap)));
+            // The move is made outside the class lock (a slow disk must not hold up forget or the next schedule); whether the stash was forgotten meanwhile
+            // is checked after it, under the lock, and the file is taken away again if so (forget deletes under the same lock, so one of the two does)
+            SnapshotFiles.replace(temp, path);
+            synchronized (StashIndex.class) {
+                // Only when nothing is registered for the path any more (forgotten): a newer state for it is a stash made again, whose index this is
+                if (PENDING.get(path) == null) Files.deleteIfExists(path);
             }
-            LAST_WRITE.put(path, System.currentTimeMillis());
         } catch (IOException | RuntimeException e) {
             QwerteStashPlugin.LOG.warn("Couldn't write the stash index for {}", snap.name(), e);
+        } finally {
+            if (temp != null) {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException ignored) {
+                    // Nothing more to do
+                }
+            }
         }
     }
 

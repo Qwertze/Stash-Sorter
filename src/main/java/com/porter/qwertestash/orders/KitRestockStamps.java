@@ -1,5 +1,6 @@
 package com.porter.qwertestash.orders;
 
+import com.porter.qwertestash.manager.SafeJson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -39,7 +40,7 @@ public final class KitRestockStamps {
     private void load() {
         try {
             if (!Files.isRegularFile(file) || Files.size(file) > 64 * 1024) return;
-            JsonElement e = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+            JsonElement e = SafeJson.parse(Files.readString(file, StandardCharsets.UTF_8));
             if (!e.isJsonArray()) return;
             for (JsonElement x : e.getAsJsonArray()) {
                 if (stamps.size() >= MAX) break;

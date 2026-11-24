@@ -3,15 +3,16 @@ package com.porter.qwertestash.stash;
 import com.aquarius.mc.block.BlockPos;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParseException;
 import com.porter.qwertestash.QwerteStashPlugin;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.charset.MalformedInputException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -403,15 +404,7 @@ public class Stash {
         Path path = file(name, server);
         if (!Files.exists(path)) return true;
         try {
-            String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-            String prefix = path.getFileName() + ".prune-bak-";
-            Files.copy(path, path.resolveSibling(prefix + stamp), StandardCopyOption.REPLACE_EXISTING);
-            List<Path> copies = new ArrayList<>();
-            try (var files = Files.list(path.getParent())) {
-                files.filter(q -> q.getFileName().toString().startsWith(prefix)).forEach(copies::add);
-            }
-            copies.sort(Comparator.comparing((Path q) -> q.getFileName().toString()).reversed());
-            for (int i = 3; i < copies.size(); i++) Files.deleteIfExists(copies.get(i));
+            SnapshotFiles.backup(path, ".prune-bak-");
             return true;
         } catch (IOException | RuntimeException e) {
             QwerteStashPlugin.LOG.error("Qwerte Stash: couldn't back up the stash file {}", path.getFileName(), e);
@@ -440,6 +433,13 @@ public class Stash {
         return true;
     }
     private transient boolean dirty;
+    /**
+     * Set when the file on disk could not be read and could not be copied aside yet (see {@link #loadFrom}): this stash is an empty one that must not
+     * be written over it until a copy of it exists. {@link #save} then keeps the stash dirty and tries again, with a growing wait.
+     */
+    private transient volatile boolean protectsFile;
+    private transient volatile long protectRetryAt;
+    private transient volatile int protectFailures;
 
     public Stash(String name, String server) {
         this.name = name;
@@ -548,8 +548,11 @@ public class Stash {
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().serializeNulls().create();
 
+    /** Where the stash files are; tests point it at a temporary folder. */
+    static volatile Path stashFolder = Path.of("plugins", "qwerte-stash", "stashes");
+
     private static Path folder() {
-        return Path.of("plugins", "qwerte-stash", "stashes");
+        return stashFolder;
     }
 
     private static Path file(String name, String server) {
@@ -574,11 +577,33 @@ public class Stash {
         return Files.exists(file(name, currentServer()));
     }
 
-    public static void delete(String name) {
+    /**
+     * Deletes the saved stash and its readable index, and drops any index write still queued for it. Recovery copies ({@code .bak-}, {@code .prune-bak-})
+     * are kept. Both files are tried even when the first fails.
+     * @throws IOException when a file could not be deleted (the first problem; the other is added as suppressed)
+     */
+    public static void delete(String name) throws IOException {
+        delete(name, currentServer());
+    }
+
+    static void delete(String name, String server) throws IOException {
+        Path data = file(name, server);
+        IOException failure = null;
         try {
-            Files.deleteIfExists(file(name, currentServer()));
+            // Index first: its queued write is invalidated before the files go, so it can not bring the index back afterwards
+            StashIndex.forget(folder().resolve(baseName(name, server) + ".index.txt"));
         } catch (IOException e) {
-            QwerteStashPlugin.LOG.error("Couldn't delete stash {}", name, e);
+            failure = e;
+        }
+        try {
+            Files.deleteIfExists(data);
+        } catch (IOException e) {
+            if (failure == null) failure = e;
+            else failure.addSuppressed(e);
+        }
+        if (failure != null) {
+            logError("Couldn't delete stash {}", name, failure);
+            throw failure;
         }
     }
 
@@ -608,26 +633,148 @@ public class Stash {
     }
 
     public void save() {
+        save(false);
+    }
+
+    /**
+     * @param force a stash that holds back from replacing an unreadable file tries to release it now, whatever the wait since its last try (the last
+     *              save before a disconnect must not be lost to the backoff)
+     */
+    public void save(boolean force) {
         try {
-            Files.createDirectories(folder());
+            if (protectsFile) {
+                Release release = releaseProtection(force);
+                if (release != Release.FREE) return; // still held (dirty, tried again later), or the file was taken over and there is nothing new to write
+            }
             Supplier<Map<Integer, String>> source = heldSource;
             if (source != null) held = new HashMap<>(source.get());
-            // Written beside the file and moved over it, so a crash or a stop in the middle never leaves half a stash
+            // Staged under a name of its own and moved over the file, so a crash or a stop in the middle never leaves half a stash, and a failure leaves no temp file
             Path target = file(name, server);
-            Path temp = target.resolveSibling(target.getFileName() + ".tmp");
-            Files.writeString(temp, GSON.toJson(this), StandardCharsets.UTF_8);
+            SnapshotFiles.write(target, GSON.toJson(this));
             // The file holds positions and the order journal: readable by its owner alone where the system can say so (best effort, as the pearl journal)
-            com.porter.qwertestash.pearl.PearlJournal.ownerOnly(temp);
-            try {
-                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-            }
             com.porter.qwertestash.pearl.PearlJournal.ownerOnly(target);
             dirty = false;
             StashIndex.touch(this);
         } catch (IOException e) {
-            QwerteStashPlugin.LOG.error("Couldn't save stash {}", name, e);
+            logError("Couldn't save stash {}", name, e);
+        }
+    }
+
+    /** Marks this (new, empty) stash as not allowed to replace the file on disk until that file has been read again or copied aside. */
+    void protectExistingFile() {
+        protectsFile = true;
+        dirty = true;
+    }
+
+    /** True while this stash holds back from replacing the file on disk (see {@link #protectExistingFile}). */
+    boolean protectsFile() {
+        return protectsFile;
+    }
+
+    private enum Release { HELD, ADOPTED, FREE }
+
+    /**
+     * The file is read again first (it may have been only briefly unreadable):
+     * <ul>
+     *   <li>it parses now: its content is taken over (boxes this stash scanned meanwhile are merged in), nothing is overwritten
+     *       ({@link Release#ADOPTED}, or {@link Release#FREE} when merged boxes are to be written);</li>
+     *   <li>it is invalid: {@link #loadFrom} copied it aside, and the stash may replace it ({@link Release#FREE});</li>
+     *   <li>it still can not be read or copied: {@link Release#HELD}, logged once, retried no sooner than a wait that doubles from 2 seconds to a minute.</li>
+     * </ul>
+     */
+    private synchronized Release releaseProtection(boolean force) {
+        long now = System.currentTimeMillis();
+        if (!force && now < protectRetryAt) return Release.HELD;
+        Path path = file(name, server);
+        Loaded loaded = loadFrom(path, name, server, protectFailures == 0);
+        Stash disk = loaded.stash();
+        if (disk != null) {
+            int mine = boxes.size();
+            adopt(disk);
+            mergeBoxes(disk);
+            protectsFile = false;
+            protectFailures = 0;
+            logError("Qwerte Stash: {} could be read again and was taken over{}.", path.getFileName(), mine > 0 ? " (" + mine + " containers scanned meanwhile kept)" : "");
+            // Anything this stash did meanwhile is newer than the file: it is written merged. Otherwise the file is exactly what is held
+            dirty = mine > 0;
+            return mine > 0 ? Release.FREE : Release.ADOPTED;
+        }
+        if (!loaded.protect()) {
+            protectsFile = false;
+            protectFailures = 0;
+            return Release.FREE;
+        }
+        if (protectFailures++ == 0) {
+            logError("Qwerte Stash: {} could not be read or copied aside, so it is not overwritten; trying again in the background.", path.getFileName());
+        }
+        protectRetryAt = now + Math.min(60_000L, 2_000L << Math.min(5, protectFailures - 1));
+        return Release.HELD;
+    }
+
+    /**
+     * Takes over the saved fields of a stash read from disk, without overwriting anything this stash set meanwhile: a field is taken from the file only
+     * while this stash still holds its default (null, empty, zero, false); otherwise the in-memory value stays and the field name is logged (never the
+     * value). Lists ({@code orphans}, {@code deliveryStorage}) are merged into the existing list object. Boxes are merged by {@link #mergeBoxes}.
+     */
+    private void adopt(Stash disk) {
+        for (java.lang.reflect.Field field : Stash.class.getDeclaredFields()) {
+            int m = field.getModifiers();
+            if (java.lang.reflect.Modifier.isStatic(m) || java.lang.reflect.Modifier.isTransient(m) || java.lang.reflect.Modifier.isFinal(m)) continue;
+            String fieldName = field.getName();
+            if (fieldName.equals("name") || fieldName.equals("server") || fieldName.equals("boxes")) continue;
+            try {
+                field.setAccessible(true);
+                Object mine = field.get(this), theirs = field.get(disk);
+                if ((fieldName.equals("orphans") || fieldName.equals("deliveryStorage")) && mine instanceof List<?> list && theirs instanceof List<?> other) {
+                    @SuppressWarnings("unchecked")
+                    List<Object> into = (List<Object>) list;
+                    for (Object o : other) {
+                        // No equals on these records: the same entry is told by its saved form
+                        String saved = GSON.toJson(o);
+                        if (into.stream().noneMatch(x -> GSON.toJson(x).equals(saved))) into.add(o);
+                    }
+                }
+                else if (isDefault(mine)) field.set(this, theirs);
+                else if (!isDefault(theirs)) logError("Qwerte Stash: {} was set while the file could not be read; the value in memory is kept, not the saved one.", fieldName);
+            } catch (IllegalAccessException | RuntimeException e) {
+                logError("Qwerte Stash: couldn't take over {}: {}", fieldName, e.toString());
+            }
+        }
+    }
+
+    private static boolean isDefault(@Nullable Object value) {
+        if (value == null) return true;
+        if (value instanceof Number n) return n.doubleValue() == 0;
+        if (value instanceof Boolean b) return !b;
+        if (value instanceof java.util.Collection<?> c) return c.isEmpty();
+        if (value instanceof Map<?, ?> map) return map.isEmpty();
+        if (value.getClass().isArray()) return java.lang.reflect.Array.getLength(value) == 0;
+        return false;
+    }
+
+    /**
+     * Containers of the file this stash does not have are added. For one at the same position the contents this stash read meanwhile are newer and stay,
+     * but the marks the user set (excluded, drop-off, no-compact) and the labels are carried over from the file. ({@code stale} is not saved, so there is
+     * nothing of it to carry.)
+     */
+    private void mergeBoxes(Stash disk) {
+        for (Box d : disk.boxes) {
+            if (d == null || d.pos == null) continue;
+            Box mine = null;
+            for (Box x : boxes) {
+                if (x != null && d.pos.equals(x.pos)) {
+                    mine = x;
+                    break;
+                }
+            }
+            if (mine == null) {
+                boxes.add(d);
+                continue;
+            }
+            mine.excluded |= d.excluded;
+            mine.dropOff |= d.dropOff;
+            mine.noCompact |= d.noCompact;
+            if (mine.labels == null || mine.labels.isEmpty()) mine.labels = d.labels;
         }
     }
 
@@ -653,22 +800,53 @@ public class Stash {
         }
     }
 
-    /**
-     * The stash called {@code name} on this server, or null if there isn't one saved.
-     */
-    public static @Nullable Stash load(String name) {
-        Path path = file(name, currentServer());
-        if (!Files.exists(path)) return null;
+    /** What reading a stash file gave: the stash, or none; {@code protect} when none was read although there is a file that must not be lost. */
+    record Loaded(@Nullable Stash stash, boolean protect) {
+    }
 
+    /**
+     * The stash in {@code path}. Never throws (it runs on the tick path):
+     * <ul>
+     *   <li>no file: no stash;</li>
+     *   <li>a file that is not a stash (invalid content): a copy is made first ({@code .bak-}), then no stash, so a new empty one may replace it;</li>
+     *   <li>a file that could not be read (I/O error), or whose copy failed: no stash and {@code protect}, so the new empty stash leaves the file untouched
+     *       and stays dirty until a copy of it can be made.</li>
+     * </ul>
+     */
+    static Loaded loadFrom(Path path, String name, String server) {
+        return loadFrom(path, name, server, true);
+    }
+
+    /** @param verbose false for a retry: what went wrong was logged on the first try */
+    static Loaded loadFrom(Path path, String name, String server, boolean verbose) {
         try {
             // A generous bound: a stash file this big is not one of ours and is never read whole into memory. It is renamed aside (never overwritten by a
             // later save) and the stash starts fresh
             if (Files.size(path) > MAX_FILE_BYTES) {
-                setAsideIfOversized(path, MAX_FILE_BYTES);
-                return null; // not read, whether or not the rename worked
+                Path aside = setAsideIfOversized(path, MAX_FILE_BYTES);
+                return new Loaded(null, aside == null); // not read; if it could not be renamed it is left alone, not overwritten
             }
-            Stash stash = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Stash.class);
-            if (stash == null) return null;
+        } catch (NoSuchFileException e) {
+            return new Loaded(null, false);
+        } catch (IOException | RuntimeException e) {
+            if (verbose) logError("Qwerte Stash: couldn't look at the stash file {}: {}", path.getFileName(), e.toString());
+            return new Loaded(null, true);
+        }
+        String text;
+        try {
+            text = Files.readString(path, StandardCharsets.UTF_8);
+        } catch (NoSuchFileException e) {
+            return new Loaded(null, false);
+        } catch (MalformedInputException e) {
+            if (verbose) logError("Qwerte Stash: the stash file {} is not valid text: {}", path.getFileName(), e.toString());
+            return new Loaded(null, !keepCopy(path));
+        } catch (IOException | RuntimeException e) {
+            if (verbose) logError("Qwerte Stash: couldn't read the stash file {}: {}", path.getFileName(), e.toString());
+            return new Loaded(null, true);
+        }
+        try {
+            Stash stash = GSON.fromJson(text, Stash.class);
+            if (stash == null) throw new JsonParseException("empty stash document");
             if (stash.orphans == null) stash.orphans = new ArrayList<>();
             stash.deliveryStorage = stash.deliveryStorage == null ? new CopyOnWriteArrayList<>() : new CopyOnWriteArrayList<>(stash.deliveryStorage);
             if (stash.held == null) stash.held = new HashMap<>();
@@ -687,34 +865,35 @@ public class Stash {
                     }
                 }
             }
-            return stash;
-        } catch (IOException | RuntimeException e) {
-            QwerteStashPlugin.LOG.error("Couldn't load stash {}", name, e);
-            backUpBroken(path);
-            return null;
+            return new Loaded(stash, false);
+        } catch (RuntimeException e) {
+            if (verbose) logError("Qwerte Stash: the stash file {} is not a valid stash: {}", path.getFileName(), e.toString());
+            return new Loaded(null, !keepCopy(path));
         }
     }
 
-    /**
-     * A stash file that could not be read is copied beside itself before anything can save a new, empty stash over it
-     * (a failed load starts a new stash, which is written over the file the next time it is saved). The newest three
-     * copies are kept.
-     */
-    private static void backUpBroken(Path path) {
-        try {
-            String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-            Path copy = path.resolveSibling(path.getFileName() + ".bak-" + stamp);
-            Files.copy(path, copy, StandardCopyOption.REPLACE_EXISTING);
-            QwerteStashPlugin.LOG.error("Qwerte Stash: {} could not be read, a copy was saved as {}. A new empty stash replaces it the next time it is saved; restore the copy to get the old one back.", path.getFileName(), copy.getFileName());
+    /** The stash called {@code name} on this server; see {@link #loadFrom}. */
+    static Loaded load(String name) {
+        String server = currentServer();
+        Path path = file(name, server);
+        // Staging files a crash left behind (older than an hour: none is being written that long)
+        SnapshotFiles.sweepStale(path.toAbsolutePath().getParent(), 60L * 60 * 1000);
+        return loadFrom(path, name, server);
+    }
 
-            List<Path> copies = new ArrayList<>();
-            try (var files = Files.list(path.getParent())) {
-                files.filter(p -> p.getFileName().toString().startsWith(path.getFileName() + ".bak-")).forEach(copies::add);
-            }
-            copies.sort(Comparator.comparing((Path p) -> p.getFileName().toString()).reversed());
-            for (int i = 3; i < copies.size(); i++) Files.deleteIfExists(copies.get(i));
+    /**
+     * A stash file that could not be understood is copied beside itself before anything can save a new, empty stash over it. The newest three copies
+     * are kept.
+     * @return false when no copy could be made: the file must then not be overwritten
+     */
+    private static boolean keepCopy(Path path) {
+        try {
+            Path copy = SnapshotFiles.backup(path, ".bak-");
+            logError("Qwerte Stash: {} could not be read, a copy was saved as {}. A new empty stash replaces it the next time it is saved; restore the copy to get the old one back.", path.getFileName(), copy.getFileName());
+            return true;
         } catch (IOException | RuntimeException e) {
-            QwerteStashPlugin.LOG.error("Qwerte Stash: couldn't back up the unreadable stash file {}", path.getFileName(), e);
+            logError("Qwerte Stash: couldn't back up the unreadable stash file {}: {}", path.getFileName(), e.toString());
+            return false;
         }
     }
 }

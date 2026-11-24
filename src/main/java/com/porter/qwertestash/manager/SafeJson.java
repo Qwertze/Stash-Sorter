@@ -3,6 +3,12 @@ package com.porter.qwertestash.manager;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+
+import java.io.IOException;
+import java.io.StringReader;
 
 /**
  * Parses JSON that came from the network. Text nested deeper than 32 levels is refused before it is parsed (a cheap scan
@@ -17,13 +23,36 @@ public final class SafeJson {
 
     /** @throws JsonParseException when the text is not JSON, is nested too deep, or could not be parsed safely */
     public static JsonElement parse(String text) {
+        if (text == null || text.isBlank()) throw new JsonParseException("empty JSON");
         if (tooDeep(text)) throw new JsonParseException("nested too deeply");
-        try {
-            return JsonParser.parseString(text);
+        try (JsonReader reader = new JsonReader(new StringReader(text))) {
+            // Strict: no comments, single quotes, unquoted names or trailing commas, and nothing after the one value
+            reader.setStrictness(Strictness.STRICT);
+            JsonElement value = JsonParser.parseReader(reader);
+            if (reader.peek() != JsonToken.END_DOCUMENT) throw new JsonParseException("trailing JSON");
+            return value;
         } catch (JsonParseException e) {
             throw e;
-        } catch (RuntimeException | StackOverflowError | OutOfMemoryError e) {
+        } catch (IOException | RuntimeException | StackOverflowError | OutOfMemoryError e) {
             throw new JsonParseException("couldn't parse: " + e.getClass().getSimpleName());
+        }
+    }
+
+    /** As {@link #parse(String)}, for the text a reader holds (at most 64 MiB of it). */
+    public static JsonElement parse(java.io.Reader reader) {
+        try {
+            java.io.StringWriter out = new java.io.StringWriter();
+            char[] buf = new char[8192];
+            int n;
+            long total = 0;
+            while ((n = reader.read(buf)) > 0) {
+                total += n;
+                if (total > (64L << 20)) throw new JsonParseException("too large");
+                out.write(buf, 0, n);
+            }
+            return parse(out.toString());
+        } catch (IOException e) {
+            throw new JsonParseException("couldn't read: " + e.getClass().getSimpleName());
         }
     }
 

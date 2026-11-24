@@ -97,7 +97,7 @@ public final class KitStore {
         if (!Files.isRegularFile(file)) return;
         try {
             if (Files.size(file) > MAX_FILE_BYTES) throw new IOException("file too big");
-            JsonElement root = com.google.gson.JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+            JsonElement root = com.porter.qwertestash.manager.SafeJson.parse(Files.readString(file, StandardCharsets.UTF_8));
             if (!root.isJsonObject() || !root.getAsJsonObject().has("stashes") || !root.getAsJsonObject().get("stashes").isJsonArray()) throw new IOException("not a kit settings file");
             int dropped = 0;
             for (JsonElement e : root.getAsJsonObject().getAsJsonArray("stashes")) {

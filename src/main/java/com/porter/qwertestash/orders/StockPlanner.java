@@ -134,6 +134,9 @@ public final class StockPlanner {
             if (usable <= 0) continue;
 
             int max = Math.max(1, survey.maxStack().getOrDefault(l.key(), 64));
+            // The room left before this line is allocated: more than that can never fit in MAX_BINS shulkers, so no loads are made for it
+            long slotsLeft = ((long) (Order.MAX_BINS - shulkerUnits.size() - emptyUnits.size()) * Order.SLOTS - stacks) * max;
+            if (usable > slotsLeft) return new Plan(List.of(), notes, "too big: that is more than " + Order.MAX_BINS + " shulkers");
             // Loose stacks first; what they can't give is taken out of shulkers
             List<Order.Lot> mine = new ArrayList<>(allocate(l.key(), fromLoose, max, survey.variants().getOrDefault(l.key(), List.of()), used));
             if (usable > fromLoose) mine.addAll(allocate(l.key(), usable - fromLoose, max, survey.shulkerVariants().getOrDefault(l.key(), List.of()), used));
@@ -234,6 +237,7 @@ public final class StockPlanner {
 
     /** Slot loads for a line of {@code total} items: one stack at a time, each from the best fitting variant. */
     public static List<Order.Lot> allocate(String key, long total, int max, List<Var> variants, Map<Var, Long> used) {
+        if (max < 1) throw new IllegalArgumentException("max stack size must be positive");
         List<Order.Lot> out = new ArrayList<>();
         long remaining = total;
         while (remaining > 0) {

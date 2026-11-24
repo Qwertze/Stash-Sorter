@@ -657,7 +657,7 @@ public class Farmer extends Module {
         try {
             Path f = DIR.resolve("registry.json");
             if (!java.nio.file.Files.exists(f)) return;
-            JsonObject o = com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(f)).getAsJsonObject();
+            JsonObject o = com.porter.qwertestash.manager.SafeJson.parse(java.nio.file.Files.readString(f)).getAsJsonObject();
             registryRev = o.get("rev").getAsInt();
             for (var e : o.getAsJsonArray("farms")) {
                 JsonObject x = e.getAsJsonObject();

@@ -16,8 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static com.porter.qwertestash.QwerteStashPlugin.LOG;
@@ -44,6 +43,8 @@ public final class DashboardLink {
     public static final String PLUGIN_SCOPE = "plugin";
     private static final long WATCHED_MS = 3_000, IDLE_MS = 60_000, RATE_LIMITED_MS = 3_000;
     private static final long BACKOFF_MIN_MS = 5_000, BACKOFF_MAX_MS = 60_000;
+    /** Jobs that may wait for the apply thread. */
+    static final int MAX_PENDING_JOBS = 32;
     private static final int MAX_COMMAND = 500;
     /** A scope whose schema and values together are bigger than this is logged (the server takes at most 8 MiB). */
     private static final int BIG_STATE = 2 * 1024 * 1024;
@@ -93,11 +94,15 @@ public final class DashboardLink {
     private final Host host;
     private volatile boolean running;
     private volatile Thread poller, pusher;
-    private final ThreadPoolExecutor apply = new ThreadPoolExecutor(1, 1, 10, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
-        Thread t = new Thread(r, "dashboard-apply");
-        t.setDaemon(true);
-        return t;
-    });
+    /**
+     * The jobs the server sent, waiting for the "dashboard-apply" thread: a bounded FIFO (at most {@link #MAX_PENDING_JOBS}), so a flood of jobs can not
+     * pile up without limit. When it is full the poll thread waits for room (the jobs keep their order and none is lost) instead of reading more.
+     */
+    private final ArrayBlockingQueue<JsonObject> jobs = new ArrayBlockingQueue<>(MAX_PENDING_JOBS);
+    /** The one thread that runs the jobs, one after another; replaced on every start. */
+    private volatile Thread worker;
+    /** What a queued job runs; only tests replace it. */
+    volatile java.util.function.Consumer<JsonObject> jobRunner = this::runJob;
     private volatile HttpURLConnection pollConn;
     /** The live viewer (its thread runs only while a browser watches). */
     private volatile @Nullable ViewerFeed viewer;
@@ -143,7 +148,6 @@ public final class DashboardLink {
 
     public DashboardLink(Host host) {
         this.host = host;
-        apply.allowCoreThreadTimeOut(true);
         ViewerFeed.Game game = host.viewerGame();
         if (game != null && com.porter.qwertestash.farm.FarmerGuard.allowViewerFeed()) viewer = new ViewerFeed(game, this::postViewer, host.botId(), () -> viewerWanted = null);
     }
@@ -218,8 +222,25 @@ public final class DashboardLink {
         pusher = new Thread(this::stateLoop, "dashboard-state");
         poller.setDaemon(true);
         pusher.setDaemon(true);
+        jobs.clear();
+        Thread w = new Thread(this::workLoop, "dashboard-apply");
+        w.setDaemon(true);
+        worker = w;
         poller.start();
         pusher.start();
+        w.start();
+    }
+
+    /** Runs the queued jobs in order, on the "dashboard-apply" thread; ends when the link stops or a newer worker has taken over. */
+    private void workLoop() {
+        try {
+            while (running && Thread.currentThread() == worker) {
+                JsonObject job = jobs.poll(1, TimeUnit.SECONDS);
+                if (job != null && running && Thread.currentThread() == worker) jobRunner.accept(job);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** Stops the threads: the poll in progress is cut off, jobs still waiting are dropped. Does not wait long. */
@@ -241,8 +262,10 @@ public final class DashboardLink {
         if (pusher != null) pusher.interrupt();
         // Stopped by a job of its own (turning the dashboard or the manager off from the website): that thread finishes the job
         // and posts its result, so it is neither cut short nor waited for
-        if (Thread.currentThread().getName().equals("dashboard-apply")) return;
-        apply.shutdownNow();
+        jobs.clear();
+        Thread w = worker;
+        if (w == Thread.currentThread()) return;
+        if (w != null) w.interrupt();
         try {
             if (poller != null) poller.join(1000);
             if (pusher != null) pusher.join(1000);
@@ -437,8 +460,11 @@ public final class DashboardLink {
         while (alive() && System.currentTimeMillis() < end) Thread.sleep(Math.min(250, Math.max(1, end - System.currentTimeMillis())));
     }
 
-    /** A 200 reply from bot/next: what the server wants to know, whether a browser is watching, and the jobs. */
-    private void take(String body) {
+    /**
+     * A 200 reply from bot/next: what the server wants to know, whether a browser is watching, and the jobs. Runs on the poll thread; throws
+     * InterruptedException only from waiting for room in the job queue, which the poll loop turns into leaving the loop.
+     */
+    void take(String body) throws InterruptedException {
         JsonObject o;
         try {
             JsonElement e = SafeJson.parse(body);
@@ -460,10 +486,9 @@ public final class DashboardLink {
         for (JsonElement j : o.getAsJsonArray("jobs")) {
             if (!j.isJsonObject()) continue;
             JsonObject job = j.getAsJsonObject();
-            try {
-                apply.execute(() -> runJob(job));
-            } catch (RuntimeException rejected) {
-                // Stopping: the job is dropped, the server expires it
+            // A full queue holds the poll thread back until there is room; stopping drops the job (the server expires it)
+            while (alive()) {
+                if (jobs.offer(job, 250, TimeUnit.MILLISECONDS)) break;
             }
         }
     }
