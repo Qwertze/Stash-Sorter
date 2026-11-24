@@ -144,6 +144,8 @@ public final class EnchantTrip {
     private final Port port;
     private final McData data;
     private final String itemKey;
+    /** The plain id of the line's item: the base (and the finished item) must be this, not just have its spec. */
+    private final String baseId;
     private final EnchantOrder.ItemPlan plan;
     private final int mat;
 
@@ -168,6 +170,7 @@ public final class EnchantTrip {
         this.port = port;
         this.data = McData.load(mc);
         this.itemKey = McData.norm(itemKey);
+        this.baseId = EnchantItems.idOf(itemKey);
         this.plan = plan;
         this.mat = plan.materials().size();
         this.step = Math.max(0, Math.min(stepsDone, plan.steps().size()));
@@ -237,8 +240,12 @@ public final class EnchantTrip {
         return specOf(plan.steps().isEmpty() ? 0 : mat + plan.steps().size() - 1);
     }
 
+    /**
+     * The carried stack a spec describes: spec and plain item id. Without the id the first stack in slot order that has no enchantments (a stack of bottles, a
+     * spare anvil) would be taken for a fresh base.
+     */
     private EnchantItems.@Nullable Held find(EnchantItems.Spec spec, int not) {
-        for (EnchantItems.Held h : port.carried()) if (h.slot() != not && spec.matches(h)) return h;
+        for (EnchantItems.Held h : port.carried()) if (h.slot() != not && spec.matches(h, baseId)) return h;
         return null;
     }
 
@@ -553,7 +560,8 @@ public final class EnchantTrip {
                 return;
             }
         }
-        if (!EnchantItems.Spec.of(specOf(mat + step).stack()).matches(result)) {
+        // The spec AND the id: the anvil result is the base kind (or a book) the plan says
+        if (!EnchantItems.Spec.of(specOf(mat + step).stack()).matches(result, baseId)) {
             pendingShort = Codes.WRONG_RESULT;
             goTo(Stage.Retrieve);
             return;

@@ -47,9 +47,37 @@ public final class EnchantItems {
             return new Spec(s.book(), s.enchants(), s.repairCost());
         }
 
-        public boolean matches(Held h) {
+        /** The spec alone (no item id): package-private on purpose, a caller that picks a stack uses {@link #matches(Held, String)}. */
+        boolean matches(Held h) {
             return h.book() == book && h.rc() == rc && h.ench().equals(ench);
         }
+
+        /**
+         * The spec AND the plain item id: a book must be {@code enchanted_book}, anything else must be {@code baseId}. The spec alone is not enough: a stack of
+         * bottles or a spare anvil (no enchantments, repair cost 0, not a book) has the same spec as a fresh base. A null {@code baseId} skips the id check of a non-book.
+         */
+        public boolean matches(Held h, @org.jspecify.annotations.Nullable String baseId) {
+            if (!matches(h)) return false;
+            String id = com.porter.qwerte.core.enchant.McData.norm(h.id());
+            return book ? BOOK_ID.equals(id) : baseId == null || com.porter.qwerte.core.enchant.McData.norm(baseId).equals(id);
+        }
+    }
+
+    /** The plain item id of an index key ({@code minecraft:diamond_sword#ab12} as {@code diamond_sword}). */
+    public static String idOf(String key) {
+        int hash = key.indexOf('#');
+        return com.porter.qwerte.core.enchant.McData.norm(hash >= 0 ? key.substring(0, hash) : key);
+    }
+
+    /**
+     * The finished item among the carried stacks: the last one that has the spec and the line's item id and is not a kept slot (a finished item waiting for its
+     * bin), or null. Pure: the caller maps the slot back to its inventory item.
+     */
+    public static @org.jspecify.annotations.Nullable Held finished(java.util.List<Held> carried, Spec spec, String lineKey, java.util.Set<Integer> keptSlots) {
+        String id = idOf(lineKey);
+        Held got = null;
+        for (Held h : carried) if (spec.matches(h, id) && !keptSlots.contains(h.slot())) got = h;
+        return got;
     }
 
     /** The plain id of an enchanted book. */

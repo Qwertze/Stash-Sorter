@@ -42,6 +42,7 @@ import com.porter.qwertestash.orders.BaseSlots;
 import com.porter.qwertestash.orders.BinTracker;
 import com.porter.qwertestash.orders.ClickPlanner;
 import com.porter.qwertestash.orders.FireworkSpecs;
+import com.porter.qwertestash.orders.GenerationPref;
 import com.porter.qwertestash.orders.VariantSpecs;
 import com.porter.qwertestash.orders.Variants;
 import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
@@ -11308,7 +11309,27 @@ public class StashSorter extends AbstractFieldModule {
         BinTracker.Need need = needOf(bin);
         if (need == null) return null;
         String variant = need.topUpSlot() >= 0 && inventoryItem(need.topUpSlot()) != null ? inventoryItem(need.topUpSlot()).variant : null;
-        return nearest(stash.boxes.stream().filter(b -> binSource(b) && hasStackFor(b, need.lot().key(), variant)).toList());
+        return nearest(preferOriginalBoxes(need.lot().key(), stash.boxes.stream().filter(b -> binSource(b) && hasStackFor(b, need.lot().key(), variant)).toList()));
+    }
+
+    /** B4: whether the key is a written book the order copies (the stack taken for it should be an original). */
+    private boolean isBookSourceKey(String key) {
+        CraftLedger l = orders.flow.craftLedger();
+        return l != null && l.isBookSource(key);
+    }
+
+    /** The generation of a written book stack as the stash saved it (0 an original), -1 for anything else or when it was not kept. */
+    private static int generationOfStack(Item it) {
+        return it.id.equals("written_book") ? Variants.generationOf(it.fw) : -1;
+    }
+
+    /** B4: of the boxes with a stack of a copied book, those with an original when any has one, else all. */
+    private List<Box> preferOriginalBoxes(String key, List<Box> boxes) {
+        if (!isBookSourceKey(key)) return boxes;
+        return GenerationPref.prefer(boxes, b -> {
+            for (Item it : b.contents) if (looseStack(it) && it.indexKey().equals(key) && !GenerationPref.isCopy(generationOfStack(it))) return true;
+            return false;
+        });
     }
 
     private static boolean hasStackFor(Box box, String key, @Nullable String variant) {
@@ -11364,12 +11385,14 @@ public class StashSorter extends AbstractFieldModule {
         int bestSlot = -1;
         Item best = null;
         long bestScore = Long.MAX_VALUE;
+        // B4: a book that is copied is taken as an original (generation 0) before a copy of it
+        boolean bookSource = isBookSourceKey(lot.key());
         for (int i = 0; i < Stashes.slots(c); i++) {
             Item it = Item.of(c.getItemStack(i));
             if (!looseStack(it) || !it.indexKey().equals(lot.key())) continue;
             if (partial != null && !Objects.equals(partial.variant, it.variant)) continue;
             boolean same = lot.variant() == null || lot.variant().equals(it.variant);
-            long score = (same ? 0 : 1_000_000L) + (it.count >= want ? it.count - want : 10_000L + (it.maxStack - it.count));
+            long score = GenerationPref.score(bookSource, generationOfStack(it), same, it.count, want, it.maxStack);
             if (score < bestScore) {
                 bestScore = score;
                 best = it;
@@ -11514,6 +11537,7 @@ public class StashSorter extends AbstractFieldModule {
         Set<String> reserved = orders.reservedShulkerKeys();
         List<SourcePicker.Cand> cands = new ArrayList<>();
         List<Found> found = new ArrayList<>();
+        boolean bookSource = isBookSourceKey(key);
         for (Box box : stash.boxes) {
             if (SourceRules.unpack(box, sourceLive) != null) continue;
             for (int i = 0; i < box.contents.length; i++) {
@@ -11527,6 +11551,8 @@ public class StashSorter extends AbstractFieldModule {
                 boolean same = false;
                 for (Item in : s.contents) {
                     if (!looseStack(in) || !in.indexKey().equals(key)) continue;
+                    // B4: a shulker with only copies of a copied book counts as another variant: one with an original is taken first
+                    if (GenerationPref.penalty(bookSource, generationOfStack(in)) > 0) continue;
                     count = Math.max(count, in.count);
                     if (need.lot().variant() == null || need.lot().variant().equals(in.variant)) same = true;
                 }
@@ -12863,8 +12889,8 @@ public class StashSorter extends AbstractFieldModule {
         debug(() -> "Enchant trip over: " + o.kind() + ", " + o.stepsDone() + " steps done, " + used + " bottles used.");
         switch (o.kind()) {
             case FINISHED -> {
-                EnchantItems.Held got = null;
-                if (o.spec() != null) for (EnchantItems.Held h : enchantCarriedStacks()) if (o.spec().matches(h) && !enchantKeptSlots().contains(h.slot())) got = h;
+                EnchantItems.Held got = o.spec() == null ? null
+                    : EnchantItems.finished(enchantCarriedStacks(), o.spec(), ledger.block().items().get(r.n).key(), enchantKeptSlots());
                 Item it = got == null ? null : inventoryItem(got.slot());
                 if (it == null) {
                     enchantEndShort(r, Codes.WRONG_RESULT, "the finished item is not in the inventory");
@@ -14822,7 +14848,7 @@ public class StashSorter extends AbstractFieldModule {
         BinTracker.Need need = needOf(bin);
         if (need == null) return null;
         String variant = need.topUpSlot() >= 0 && inventoryItem(need.topUpSlot()) != null ? inventoryItem(need.topUpSlot()).variant : null;
-        return nearest(stash.boxes.stream().filter(b -> binSource(b) && hasStackFor(b, need.lot().key(), variant)).toList());
+        return nearest(preferOriginalBoxes(need.lot().key(), stash.boxes.stream().filter(b -> binSource(b) && hasStackFor(b, need.lot().key(), variant)).toList()));
     }
 
     /** Takes the next load of the craft out of a shulker: one already carried, else one fetched from the stash. */

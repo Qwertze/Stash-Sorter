@@ -103,6 +103,7 @@ public final class EnchantReplan {
             EnchantItems.Spec spec = new EnchantItems.Spec(book, m.enchants(), m.repairCost());
             String key = "";
             for (int i = 0; i < pool.size(); i++) {
+                // The pool is filtered by key upstream (the gathered bases are stacks of the line's key, the books are enchanted books), so the spec alone is enough here
                 if (spec.matches(pool.get(i))) {
                     key = pool.remove(i).key();
                     break;

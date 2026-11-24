@@ -272,6 +272,12 @@ public final class CraftLedger {
         return copies.get(product);
     }
 
+    /** Whether {@code key} is the index key of a written book this block copies (the original is taken from the stash; B4). */
+    public boolean isBookSource(String key) {
+        for (VariantSpecs.CopyFamily f : copies.values()) if (f.kind() == VariantSpecs.CopyKind.BOOK && f.key().equals(key)) return true;
+        return false;
+    }
+
     /**
      * Whether making {@code n} of the line {@code ref} leaves more of the same line to make after it (B4): the made stacks are loads of at most a stack, so
      * a map copy needs to keep one map for the next load's crafts (its source is used up).

@@ -477,4 +477,107 @@ class EnchantTripTest {
         assertEquals(-1, t.specOf(4).rc());
         assertEquals(-1, t.specOf(500).rc());
     }
+
+    private static EnchantItems.Held plain(int slot, String id, int count) {
+        return new EnchantItems.Held(slot, "minecraft:" + id, id, count, false, Map.of(), 0, false);
+    }
+
+    @Test
+    void aStackOfBottlesInALowerSlotIsNotTakenForTheBase() {
+        EnchantKit.Case c = EnchantKit.sharpnessV();
+        EnchantSim sim = world(c, c.ref().plan().bottles() + 40, 0);
+        // no enchantments, repair cost 0, not a book: the base's spec, in a slot before the base
+        sim.give(List.of(plain(3, "experience_bottle", 64)));
+        EnchantTrip t = trip(sim, c, 0);
+        sim.run(t, LIMIT);
+        assertEquals(EnchantTrip.Kind.FINISHED, t.outcome().kind(), sim.log.toString());
+        EnchantItems.Held bottles = sim.inv.get(3);
+        assertNotNull(bottles, "the bottles were never touched: " + sim.stacks());
+        assertEquals("experience_bottle", bottles.id());
+        long sword = sim.stacks().stream().filter(h -> h.id().equals("diamond_sword")).count();
+        assertEquals(1, sword, sim.stacks().toString());
+        assertEquals(Map.of("sharpness", 5), sim.stacks().stream().filter(h -> h.id().equals("diamond_sword")).findFirst().orElseThrow().ench());
+    }
+
+    @Test
+    void aSpareAnvilNextToTheBaseIsNotTakenForTheBase() {
+        EnchantKit.Case c = EnchantKit.sharpnessV();
+        EnchantSim sim = world(c, c.ref().plan().bottles() + 40, 0);
+        sim.give(List.of(plain(8, "anvil", 1)));
+        EnchantTrip t = trip(sim, c, 0);
+        sim.run(t, LIMIT);
+        assertEquals(EnchantTrip.Kind.FINISHED, t.outcome().kind(), sim.log.toString());
+        assertNotNull(sim.inv.get(8));
+        assertEquals("anvil", sim.inv.get(8).id());
+        assertTrue(sim.stacks().stream().anyMatch(h -> h.id().equals("diamond_sword") && h.ench().equals(Map.of("sharpness", 5))), sim.stacks().toString());
+    }
+
+    @Test
+    void anotherLinesPickaxeInALowerSlotIsLeftAloneWhileTheSwordGetsUnbreaking() {
+        EnchantKit.Case c = EnchantKit.order(EnchantKit.SWORD, EnchantKit.ench("unbreaking", 3), List.of(new EnchantKit.Bk(EnchantKit.ench("unbreaking", 3), 0)), 2);
+        EnchantSim sim = world(c, c.ref().plan().bottles() + 40, 0);
+        // a fresh pickaxe takes Unbreaking too: by spec alone it is the base
+        sim.give(List.of(plain(2, "diamond_pickaxe", 1)));
+        EnchantTrip t = trip(sim, c, 0);
+        sim.run(t, LIMIT);
+        assertEquals(EnchantTrip.Kind.FINISHED, t.outcome().kind(), sim.log.toString());
+        EnchantItems.Held pick = sim.inv.get(2);
+        assertNotNull(pick);
+        assertEquals("diamond_pickaxe", pick.id());
+        assertEquals(Map.of(), pick.ench());
+        assertTrue(sim.stacks().stream().anyMatch(h -> h.id().equals("diamond_sword") && h.ench().equals(Map.of("unbreaking", 3))), sim.stacks().toString());
+    }
+
+    @Test
+    void aResumeFromAJournalStepWithABottleStackInFrontFinishesTheRightItem() {
+        EnchantKit.Case c = EnchantKit.sharpnessV();
+        EnchantSim sim = world(c, 600, 0);
+        sim.give(List.of(plain(2, "experience_bottle", 64)));
+        sim.breakOnTake = true;
+        EnchantTrip t = trip(sim, c, 0);
+        sim.run(t, LIMIT);
+        EnchantTrip.Outcome o = t.outcome();
+        assertEquals(EnchantTrip.Kind.NEED_ANVIL, o.kind(), sim.log.toString());
+        assertTrue(o.stepsDone() > 0);
+        sim.anvilBlock = true;
+        sim.arrived = false;
+        sim.walkTicks = 0;
+        EnchantTrip again = trip(sim, c, o.stepsDone());
+        sim.run(again, LIMIT);
+        assertEquals(EnchantTrip.Kind.FINISHED, again.outcome().kind(), sim.log.toString());
+        assertEquals("experience_bottle", sim.inv.get(2).id());
+        assertTrue(sim.stacks().stream().anyMatch(h -> h.id().equals("diamond_sword") && h.ench().equals(Map.of("sharpness", 5))), sim.stacks().toString());
+    }
+
+    @Test
+    void theFinishedPickTakesTheStackWithTheLinesIdNotAnotherWithTheSameSpec() {
+        EnchantItems.Spec spec = new EnchantItems.Spec(false, Map.of("unbreaking", 3), 1);
+        EnchantItems.Held pick = new EnchantItems.Held(3, "minecraft:diamond_pickaxe#a", "diamond_pickaxe", 1, false, Map.of("unbreaking", 3), 1, false);
+        EnchantItems.Held sword = new EnchantItems.Held(9, "minecraft:diamond_sword#b", "diamond_sword", 1, false, Map.of("unbreaking", 3), 1, false);
+        // the pickaxe comes first and the sword last: either way the line's item wins
+        assertEquals(9, EnchantItems.finished(List.of(pick, sword), spec, "minecraft:diamond_sword", java.util.Set.of()).slot());
+        assertEquals(9, EnchantItems.finished(List.of(sword, pick), spec, "minecraft:diamond_sword", java.util.Set.of()).slot());
+        assertEquals(3, EnchantItems.finished(List.of(sword, pick), spec, "minecraft:diamond_pickaxe#zz", java.util.Set.of()).slot());
+        // a kept slot (a finished item of an earlier line waiting for its bin) is not it
+        assertNull(EnchantItems.finished(List.of(pick, sword), spec, "minecraft:diamond_sword", java.util.Set.of(9)));
+        assertNull(EnchantItems.finished(List.of(pick), spec, "minecraft:diamond_sword", java.util.Set.of()));
+    }
+
+    @Test
+    void theIdIsPartOfTheMatch() {
+        EnchantItems.Spec fresh = new EnchantItems.Spec(false, Map.of(), 0);
+        assertTrue(fresh.matches(plain(1, "diamond_sword", 1), "minecraft:diamond_sword"));
+        assertFalse(fresh.matches(plain(1, "experience_bottle", 1), "minecraft:diamond_sword"));
+        assertFalse(fresh.matches(plain(1, "anvil", 1), "diamond_sword"));
+        // a book is matched by the book id, whatever the base is
+        EnchantItems.Spec book = new EnchantItems.Spec(true, Map.of("sharpness", 4), 0);
+        assertTrue(book.matches(new EnchantItems.Held(1, "minecraft:enchanted_book#a", "enchanted_book", 1, true, Map.of("sharpness", 4), 0, false), "diamond_sword"));
+        // a resumed trip finds an unfinished base by id too: the trip with a bottle stack in front still catches up from the journal
+        EnchantKit.Case c = EnchantKit.sharpnessV();
+        EnchantSim sim = world(c, c.ref().plan().bottles() + 40, 0);
+        sim.give(List.of(plain(2, "experience_bottle", 64)));
+        EnchantTrip t = trip(sim, c, 0);
+        sim.run(t, LIMIT);
+        assertEquals(EnchantTrip.Kind.FINISHED, t.outcome().kind(), sim.log.toString());
+    }
 }
