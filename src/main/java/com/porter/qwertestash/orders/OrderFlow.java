@@ -102,6 +102,11 @@ public final class OrderFlow {
             return null;
         }
 
+        /** The tables of milestone B4 of the extras this bot holds (which special kinds the server lists, the stew flowers), or null: tipped arrows, stew, copies and shields of a block are then refused. */
+        default VariantSpecs.@Nullable Tables craftSpecials() {
+            return null;
+        }
+
         /** The most items one craft order may smelt ({@code craftOrders.maxSmelt} of the heartbeat, B2), 0 when this bot doesn't smelt. */
         default int craftMaxSmelt() {
             return 0;
@@ -1014,7 +1019,7 @@ public final class OrderFlow {
             return CraftLedger.refused(lines, Recipes.empty(), 0, CraftOrder.RECIPE_MISMATCH);
         }
         Smelting smelting = host.craftSmelting();
-        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan(), smelting, host.craftMaxSmelt(), host.craftFireworks());
+        String bad = CraftOrder.check(o.craft, table, host.craftMaxFills(), host.craftExtrasHash(), host.craftCan(), smelting, host.craftMaxSmelt(), host.craftFireworks(), host.craftSpecials());
         if (bad != null) {
             host.say("The order's craft lines are not crafted: " + bad + ".");
             return CraftLedger.refused(lines, table, host.craftMaxFills(), CraftOrder.RECIPE_MISMATCH);

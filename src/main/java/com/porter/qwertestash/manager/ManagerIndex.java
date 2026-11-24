@@ -8,6 +8,8 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.porter.qwertestash.orders.FireworkSpecs;
+import com.porter.qwertestash.orders.VariantSpecs;
+import com.porter.qwertestash.orders.Variants;
 import com.porter.qwertestash.stash.AreaRules;
 import com.porter.qwertestash.stash.CraftSettings;
 import com.porter.qwertestash.stash.Item;
@@ -103,11 +105,11 @@ public final class ManagerIndex {
      */
     public static Built build(Stash stash, boolean includeExcluded, String player, String mcVersion, @Nullable String dimension,
                               Function<String, @Nullable String> englishName, @Nullable Function<Item, @Nullable String> completeKit) {
-        return build(stash, includeExcluded, player, mcVersion, dimension, englishName, completeKit, null);
+        return build(stash, includeExcluded, player, mcVersion, dimension, englishName, completeKit, (FireworkSpecs.Tables) null);
     }
 
-    /** The firework tables the index in the making is built with (B3), set by the builder thread for the length of one build; null: no {@code spec} is written. */
-    private static final ThreadLocal<FireworkSpecs.@Nullable Tables> FIREWORKS = new ThreadLocal<>();
+    /** The kinds of spec the index in the making is built with (B3, B4), set by the builder thread for the length of one build; null: no {@code spec} is written. */
+    private static final ThreadLocal<Variants.@Nullable Kinds> KINDS = new ThreadLocal<>();
 
     /**
      * As above, with {@code items[].spec} (CRAFT-CONTRACT-v1.2.md 4, B3): a rocket or star whose components have a spec in the grammar of section 3 carries it.
@@ -117,11 +119,21 @@ public final class ManagerIndex {
      */
     public static Built build(Stash stash, boolean includeExcluded, String player, String mcVersion, @Nullable String dimension,
                               Function<String, @Nullable String> englishName, @Nullable Function<Item, @Nullable String> completeKit, FireworkSpecs.@Nullable Tables fireworks) {
-        FIREWORKS.set(player == null || player.isBlank() ? null : fireworks);
+        return buildKinds(stash, includeExcluded, player, mcVersion, dimension, englishName, completeKit, Variants.Kinds.fireworks(fireworks));
+    }
+
+    /**
+     * As above, with the specs of B4 too: {@code tipped:<potion>} on tipped arrows and lingering potions and {@code stew:<effect>/<ticks>} on suspicious stew
+     * (CRAFT-CONTRACT-v1.2.md 3, 4 and the B4 clarifications), each kind only when the bot's {@code can} says it. Copies and shields have no index spec.
+     * Owner-gated like the others: with no player nothing is written.
+     */
+    public static Built buildKinds(Stash stash, boolean includeExcluded, String player, String mcVersion, @Nullable String dimension,
+                              Function<String, @Nullable String> englishName, @Nullable Function<Item, @Nullable String> completeKit, Variants.@Nullable Kinds kinds) {
+        KINDS.set(player == null || player.isBlank() || kinds == null || !kinds.any() ? null : kinds);
         try {
             return buildNow(stash, includeExcluded, player, mcVersion, dimension, englishName, completeKit);
         } finally {
-            FIREWORKS.remove();
+            KINDS.remove();
         }
     }
 
@@ -411,10 +423,34 @@ public final class ManagerIndex {
      * {@code special} (rocket and star), {@code dyes} (with firework colours) and {@code starItems} tables.
      */
     public static List<String> craftCan(@Nullable Extras extras, boolean smeltOn, boolean fireworkOn) {
+        return craftCan(extras, smeltOn, fireworkOn, false, false, false);
+    }
+
+    /**
+     * As above, and {@code tipped}, {@code stew} and {@code copy} (B4, CRAFT-CONTRACT-v1.2.md 2.1 and 13.3) when their settings are on and the extras say so:
+     * {@code tipped} when the server lists the tipped recipe, {@code stew} when it lists the stew recipe and gives the flower table, {@code copy} when it
+     * lists all of {@code banner_copy}, {@code map_copy}, {@code book_copy} and {@code shield}. In this order: smelt, firework, tipped, stew, copy.
+     */
+    public static List<String> craftCan(@Nullable Extras extras, boolean smeltOn, boolean fireworkOn, boolean tippedOn, boolean stewOn, boolean copyOn) {
         List<String> out = new ArrayList<>();
         if (smeltOn && com.porter.qwertestash.orders.Smelting.of(extras) != null) out.add("smelt");
         if (fireworkOn && FireworkSpecs.Tables.of(extras) != null) out.add("firework");
+        VariantSpecs.Tables t = VariantSpecs.Tables.of(extras);
+        if (t != null) {
+            if (tippedOn && t.canTipped()) out.add("tipped");
+            if (stewOn && t.canStew()) out.add("stew");
+            if (copyOn && t.canCopy()) out.add("copy");
+        }
         return out;
+    }
+
+    /**
+     * The kinds of index spec the bot writes (B3, B4): the firework tables when it says {@code firework}, and the tipped and stew kinds when it says them.
+     * Null kinds ({@link Variants.Kinds#NONE}) when none.
+     */
+    public static Variants.Kinds specKinds(@Nullable Extras extras, boolean fireworkOn, boolean tippedOn, boolean stewOn) {
+        VariantSpecs.Tables t = VariantSpecs.Tables.of(extras);
+        return new Variants.Kinds(fireworkTables(extras, fireworkOn), tippedOn && t != null && t.canTipped(), stewOn && t != null && t.canStew());
     }
 
     /** The most items one order may smelt, as {@code craftOrders.maxSmelt} says it: 1 to 256 (the setting, clamped). */
@@ -969,11 +1005,11 @@ public final class ManagerIndex {
         return info;
     }
 
-    /** The spec of a rocket or star, when this build is made with firework tables; null for everything else. */
+    /** The spec of a rocket, star, tipped arrow, lingering potion or suspicious stew, when this build is made with the kinds that say it; null for everything else. */
     private static @Nullable String specOf(Item item) {
-        FireworkSpecs.Tables t = FIREWORKS.get();
-        if (t == null || item.fw == null) return null;
-        String spec = FireworkSpecs.specOf(item.fw, t);
+        Variants.Kinds k = KINDS.get();
+        if (k == null || item.fw == null) return null;
+        String spec = Variants.indexSpec(item.fw, k);
         return spec == null ? null : clamp(spec, FireworkSpecs.MAX_SPEC);
     }
 

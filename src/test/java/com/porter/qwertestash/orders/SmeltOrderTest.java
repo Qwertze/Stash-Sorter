@@ -125,18 +125,19 @@ class SmeltOrderTest {
     }
 
     @Test
-    void aStationThatIsNeitherIsUnreadableAndLaterFieldsStayReserved() {
+    void aStationThatIsNeitherIsUnreadableAndLaterFieldsAreReadNotReserved() {
         JsonObject b = blockJson();
         b.getAsJsonArray("steps").get(0).getAsJsonObject().addProperty("station", "stonecutter");
         assertTrue(Order.parseCraft(b).malformed());
         JsonObject spec = blockJson();
         spec.getAsJsonArray("steps").get(0).getAsJsonObject().addProperty("spec", "rocket:1");
-        // B3 reads a spec on a step; the check refuses it for a bot that doesn't say firework. B4's remainder is still reserved
+        // B3 reads a spec on a step; the check refuses it for a bot that doesn't say firework. B4 reads a remainder too (judged by the check)
         assertNull(Order.parseCraft(spec).reserved());
         assertTrue(Order.parseCraft(spec).usesSpecs());
         JsonObject remainder = blockJson();
         remainder.getAsJsonArray("steps").get(0).getAsJsonObject().add("remainder", com.google.gson.JsonParser.parseString("[ { \"id\": \"minecraft:bowl\", \"count\": 1 } ]"));
-        assertNotNull(Order.parseCraft(remainder).reserved());
+        assertNull(Order.parseCraft(remainder).reserved());
+        assertEquals(1, Order.parseCraft(remainder).steps().get(0).remainder().size());
         JsonObject neg = blockJson();
         neg.addProperty("smelt", -1);
         assertTrue(Order.parseCraft(neg).malformed());

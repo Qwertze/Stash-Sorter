@@ -84,12 +84,20 @@ public final class CraftPool {
      * stock first, loose stacks before what lies in shulkers, cut into stacks. Short when the pool is.
      */
     public static List<Order.Lot> lots(Stock s, Map<String, Long> needByBase, List<Unit> others) {
+        return lots(s, needByBase, others, false);
+    }
+
+    /**
+     * As above; {@code plainKeysOnly}: only the stacks with no component patch (an order's craft takes plain items by their id and patterned ones, a rocket,
+     * a banner to copy, by the exact key its take names: a patterned banner is never taken as a blank one).
+     */
+    public static List<Order.Lot> lots(Stock s, Map<String, Long> needByBase, List<Unit> others, boolean plainKeysOnly) {
         Map<String, Long> reserved = reserved(others);
         List<Order.Lot> out = new ArrayList<>();
         for (var need : needByBase.entrySet()) {
             long want = need.getValue();
             List<String> keys = new ArrayList<>();
-            for (String key : keys(s)) if (base(s, key).equals(Recipes.ns(need.getKey()))) keys.add(key);
+            for (String key : keys(s)) if (base(s, key).equals(Recipes.ns(need.getKey())) && !(plainKeysOnly && key.indexOf('#') >= 0)) keys.add(key);
             keys.sort((a, b) -> {
                 long la = left(s, a, reserved)[0], lb = left(s, b, reserved)[0];
                 return la != lb ? Long.compare(lb, la) : a.compareTo(b);

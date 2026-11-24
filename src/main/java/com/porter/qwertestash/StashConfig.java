@@ -293,6 +293,12 @@ public class StashConfig {
     public boolean craftSmelt = true;
     /** Make firework rockets and stars in craft orders (B3, CRAFT-CONTRACT-v1.2.md 15): the heartbeat says {@code can: [..., "firework"]} and the index carries {@code items[].spec} when this is on and the extras hold the firework tables. */
     public boolean craftFirework = true;
+    /** Make tipped arrows in craft orders (B4, CRAFT-CONTRACT-v1.2.md 15): {@code can: [..., "tipped"]} and index specs {@code tipped:<potion>} on tipped arrows and lingering potions when this is on and the extras list {@code tipped}. */
+    public boolean craftTipped = true;
+    /** Make suspicious stew in craft orders (B4): {@code can: [..., "stew"]} and index specs {@code stew:<effect>/<ticks>} when this is on and the extras hold the stew table. */
+    public boolean craftStew = true;
+    /** Copy banners, maps and written books and decorate shields in craft orders (B4): {@code can: [..., "copy"]} when this is on and the extras list the four copy kinds. */
+    public boolean craftCopy = true;
     /** Items one craft order may smelt (the {@code maxSmelt} the heartbeat says; the contract's cap is 256). */
     public int craftOrderMaxSmelt = 256;
     /** The furnace smelting uses (B2): the one found standing in the stash area, or put down from the stash or crafted; never shown on the website. Blank dimension: none. */

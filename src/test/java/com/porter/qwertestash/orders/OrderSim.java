@@ -307,6 +307,14 @@ final class OrderSim implements OrderFlow.Host {
         return fireworks;
     }
 
+    /** The tables of milestone B4 of the bot's extras (which special kinds, the stew flowers), or null. */
+    VariantSpecs.@Nullable Tables specials;
+
+    @Override
+    public VariantSpecs.@Nullable Tables craftSpecials() {
+        return specials;
+    }
+
     /** What the stash holds per key: loose stacks, what lies in shulkers and the plain stock craft orders take from. */
     @Override
     public @Nullable Map<String, Long> preflightStock() {

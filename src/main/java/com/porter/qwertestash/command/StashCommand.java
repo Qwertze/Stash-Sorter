@@ -146,6 +146,9 @@ public class StashCommand extends Command {
                 "craftorders maxperhour <n>",
                 "craftorders smelt on/off",
                 "craftorders firework on/off",
+                "craftorders tipped on/off",
+                "craftorders stew on/off",
+                "craftorders copy on/off",
                 "craftorders maxsmelt <n>",
                 "craftorders",
                 "craftingtable here",
@@ -745,6 +748,27 @@ public class StashCommand extends Command {
                             ? "Craft orders for firework rockets and stars are taken when the server's extras hold the firework tables."
                             : "Craft orders for firework rockets and stars are not taken: the server will not give this bot one.").primaryColor();
                 })))
+                .then(literal("tipped").then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.craftTipped = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Craft Order Tipped Arrows " + toggleStrCaps(CONFIG.craftTipped))
+                        .description(CONFIG.craftTipped
+                            ? "Craft orders for tipped arrows are taken when the server's extras list them."
+                            : "Craft orders for tipped arrows are not taken: the server will not give this bot one.").primaryColor();
+                })))
+                .then(literal("stew").then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.craftStew = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Craft Order Suspicious Stew " + toggleStrCaps(CONFIG.craftStew))
+                        .description(CONFIG.craftStew
+                            ? "Craft orders for suspicious stew are taken when the server's extras hold the stew table."
+                            : "Craft orders for suspicious stew are not taken: the server will not give this bot one.").primaryColor();
+                })))
+                .then(literal("copy").then(argument("toggle", toggle()).executes(c -> {
+                    CONFIG.craftCopy = getToggle(c, "toggle");
+                    c.getSource().getEmbed().title("Craft Order Copies " + toggleStrCaps(CONFIG.craftCopy))
+                        .description(CONFIG.craftCopy
+                            ? "Craft orders that copy banners, maps and written books, or put a banner on a shield, are taken when the server's extras list them."
+                            : "Craft orders that copy banners, maps and written books, or decorate shields, are not taken: the server will not give this bot one.").primaryColor();
+                })))
                 .then(literal("maxsmelt").then(argument("items", integer(1, 256)).executes(c -> {
                     CONFIG.craftOrderMaxSmelt = getInteger(c, "items");
                     c.getSource().getEmbed().title("Craft Order Smelting Cap").description("One craft order may smelt at most " + CONFIG.craftOrderMaxSmelt + " items.").primaryColor();
@@ -1252,6 +1276,7 @@ public class StashCommand extends Command {
             .addField("Bot's Own Table", MODULE.get(StashSorter.class).botTable() == null ? "none in use" : MODULE.get(StashSorter.class).botTable().source() + " (position hidden)")
             .addField("Smelting", MODULE.get(StashSorter.class).craftSmeltLine())
             .addField("Fireworks", MODULE.get(StashSorter.class).craftFireworkLine())
+            .addField("Tipped, Stew, Copies", MODULE.get(StashSorter.class).craftSpecialLine())
             .addField("Caps", CONFIG.craftOrderMaxFills + " grid fills per order, " + CONFIG.craftOrderMaxPerHour + " per hour (" + MODULE.get(StashSorter.class).craftOrderFillsLastHour() + " used this hour)")
             .addField("What", "items the website's planner says the stash can make; crafted at the crafting table set on the website (not `stash craftingtable`)");
     }

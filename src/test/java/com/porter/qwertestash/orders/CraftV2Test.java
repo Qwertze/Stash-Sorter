@@ -188,13 +188,15 @@ class CraftV2Test {
 
     @Test
     void everyReservedFieldMakesTheBlockFailItsCheck() {
-        // B4's remainder is still reserved. B3's fields (specs, keys, grids) are carried out by a bot that says firework: for any other bot the check
-        // refuses them, as it did while they were reserved
+        // B3's and B4's fields (specs, keys, grids, remainders) are carried out by a bot that says so: for any other bot, and on a step that is no special
+        // one, the check refuses them, as it did while they were reserved
         JsonObject rem = blockJson();
         rem.getAsJsonArray("steps").get(0).getAsJsonObject().add("remainder", JsonParser.parseString("[ { \"id\": \"minecraft:bowl\", \"count\": 1 } ]"));
         Order.Craft remainder = Order.parseCraft(rem);
-        assertNotNull(remainder.reserved(), "step remainder");
+        assertNull(remainder.reserved(), "a step remainder is read (B4)");
+        assertTrue(remainder.usesSpecs(), "step remainder");
         assertNotNull(CraftOrder.check(remainder, R, 2048, null, Set.of()), "step remainder");
+        assertNotNull(CraftOrder.check(remainder, R, 2048, null, Set.of("firework", "tipped", "stew", "copy")), "a plain step has no remainder");
         String[][] cases = {
             {"spec", "\"rocket:1\""}, {"grid", "[null,null,null,null,null,null,null,null,null]"}};
         for (String[] f : cases) {

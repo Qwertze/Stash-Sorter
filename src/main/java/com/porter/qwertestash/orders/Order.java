@@ -161,12 +161,20 @@ public final class Order {
         public String ref() {
             return Pseudo.of(id, spec);
         }
+
+        /**
+         * The planner's name for it as something taken, used or handed back (a take, input or remainder entry; B4): as {@link #ref}, except that a written
+         * book with a copy spec is the original that is copied ({@code written_book@src:<key>}), never the copies it makes.
+         */
+        public String stockRef() {
+            return VariantSpecs.sourceRef(id, spec);
+        }
     }
 
-    /** One cell of a special step's grid (B3): an item id and, for a star, its spec. */
+    /** One cell of a special step's grid (B3): an item id and, for a star, its spec; a written book with a copy spec is the original (B4, see {@link Qty#stockRef}). */
     public record Cell(String id, @Nullable String spec) {
         public String ref() {
-            return Pseudo.of(id, spec);
+            return VariantSpecs.sourceRef(id, spec);
         }
     }
 
@@ -175,14 +183,20 @@ public final class Order {
      * ({@code station: "furnace"}, B2) names an extras smelt recipe; its {@code fills} are the items smelted and {@code fuel} what burns for them.
      */
     public record CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs, boolean furnace, List<Qty> fuel, @Nullable String spec,
-                            @Nullable List<@Nullable Cell> grid) {
+                            @Nullable List<@Nullable Cell> grid, List<Qty> remainder) {
         /** A step at the crafting table (CRAFT-CONTRACT-v1.2.md 9: no {@code station} means {@code table}). */
         public CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs) {
-            this(recipe, result, count, fills, inputs, false, List.of(), null, null);
+            this(recipe, result, count, fills, inputs, false, List.of(), null, null, List.of());
         }
 
         public CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs, boolean furnace, List<Qty> fuel) {
-            this(recipe, result, count, fills, inputs, furnace, fuel, null, null);
+            this(recipe, result, count, fills, inputs, furnace, fuel, null, null, List.of());
+        }
+
+        /** A special step of milestone B3: no remainder. */
+        public CraftStep(String recipe, String result, int count, int fills, List<Qty> inputs, boolean furnace, List<Qty> fuel, @Nullable String spec,
+                         @Nullable List<@Nullable Cell> grid) {
+            this(recipe, result, count, fills, inputs, furnace, fuel, spec, grid, List.of());
         }
 
         /** A special step (B3): it makes a variant of {@code result}, from the exact nine-cell {@code grid}. */
@@ -256,9 +270,48 @@ public final class Order {
             for (Qty q : take) if (q.spec() != null || q.key() != null) return true;
             for (Qty q : leftovers) if (q.spec() != null) return true;
             for (CraftStep s : steps) {
-                if (s.spec() != null || s.grid() != null) return true;
+                if (s.spec() != null || s.grid() != null || !s.remainder().isEmpty()) return true;
                 for (Qty q : s.inputs()) if (q.spec() != null || q.key() != null) return true;
             }
+            return false;
+        }
+
+        /**
+         * The features of the bot the block's specs need (B3, B4): {@code firework} for a rocket or star, {@code tipped}, {@code stew}, {@code copy} (a copy or a
+         * shield). A spec of no known kind is left out ({@link CraftOrder#check} refuses it). A block that uses specs, keys or grids with none of these is a
+         * B3 block (it needs {@code firework}).
+         */
+        public java.util.Set<String> features() {
+            java.util.Set<String> out = new java.util.TreeSet<>();
+            for (Qty q : lines) add(out, q.spec());
+            for (Qty q : take) add(out, q.spec());
+            for (Qty q : leftovers) add(out, q.spec());
+            for (CraftStep s : steps) {
+                add(out, s.spec());
+                for (Qty q : s.inputs()) add(out, q.spec());
+                for (Qty q : s.remainder()) add(out, q.spec());
+                if (s.grid() != null) for (Cell c : s.grid()) if (c != null) add(out, c.spec());
+            }
+            return out;
+        }
+
+        private static void add(java.util.Set<String> out, @Nullable String spec) {
+            String f = VariantSpecs.featureOf(spec);
+            if (f != null) out.add(f);
+        }
+
+        /** The block has a copy of a banner, map or book (B4). */
+        public boolean hasCopies() {
+            for (CraftStep s : steps) if (VariantSpecs.isCopy(s.recipe())) return true;
+            return false;
+        }
+
+        /**
+         * The block has a step of milestone B4 (tipped arrows, stew, a copy or a shield): its steps' inputs are checked against the take and what earlier crafts
+         * made. A block of B1 to B3 is judged as it always was.
+         */
+        public boolean hasB4Steps() {
+            for (CraftStep s : steps) if (VariantSpecs.isRecipe(s.recipe())) return true;
             return false;
         }
     }
@@ -477,12 +530,18 @@ public final class Order {
                 // B3: the variant a special step makes and its exact nine-cell grid (a v2 block only)
                 String stepSpec = null;
                 List<Cell> grid = null;
+                // B4: what a copy leaves in the grid and hands back (the source banner or book), once per craft (a v2 block only; absent or null: none)
+                List<Qty> remainder = List.of();
                 if (v == 2) {
                     stepSpec = optionalString(so.get("spec"));
                     grid = grid(so.get("grid"));
+                    JsonElement rem = so.get("remainder");
+                    if (rem != null && !rem.isJsonNull()) remainder = qtys(rem, "id", 8, true);
                 }
+                // A recipe or result id of a server is an id: its length is bounded before it is kept (it reaches logs)
+                if (so.get("recipe").getAsString().length() > 160 || so.get("result").getAsString().length() > 160) return Craft.unreadable();
                 steps.add(new CraftStep(so.get("recipe").getAsString(), so.get("result").getAsString(), so.get("count").getAsInt(), so.get("fills").getAsInt(),
-                    qtys(so.get("inputs"), "id", 64, v == 2), furnace, fuel, stepSpec, grid));
+                    qtys(so.get("inputs"), "id", 64, v == 2), furnace, fuel, stepSpec, grid, remainder));
             }
             int fills = c.get("fills").getAsInt();
             // v 2 (CRAFT-CONTRACT-v1.2.md 9): the depth, the extras hash and the features the plan needs are required; anything this bot does not carry out (a
@@ -542,9 +601,8 @@ public final class Order {
      * ({@link Craft#usesSpecs}) and judged by {@link CraftOrder#check}, which refuses them for a bot that doesn't say {@code firework}.
      */
     static @Nullable String reservedField(JsonObject c) {
-        for (JsonElement s : arrayOf(c, "steps")) {
-            if (set(s, "remainder")) return "steps[].remainder";
-        }
+        // B4 carries out the remainder of a copy ({@link CraftStep#remainder}): nothing is reserved any more. B5's fields (dyed specs) are not read by any
+        // milestone yet: CraftOrder#check refuses a spec of a kind it doesn't know.
         return null;
     }
 

@@ -218,7 +218,10 @@ public final class Recipes {
 
     /** "minecraft:oak_log" as "Oak Log"; a variant (B3, {@link Pseudo}) as "Firework Star (star, large ball, red)". */
     public static String pretty(String id) {
-        if (Pseudo.is(id)) return pretty(Pseudo.base(id)) + " (" + FireworkSpecs.describe(Pseudo.spec(id)) + ")";
+        if (Pseudo.is(id)) {
+            String spec = Pseudo.spec(id);
+            return pretty(Pseudo.base(id)) + " (" + (VariantSpecs.parse(spec) != null || spec.startsWith("src:") ? VariantSpecs.describe(spec) : FireworkSpecs.describe(spec)) + ")";
+        }
         String bare = id.startsWith("minecraft:") ? id.substring("minecraft:".length()) : id;
         return com.porter.qwertestash.stash.Item.prettyName(bare);
     }

@@ -88,6 +88,7 @@ Settings are saved in `plugins/config/qwerte-stash.json`, stashes in `plugins/qw
 | `stash autoLabel on/off` | Signs mode: when an item has no sign, put up a sign for a new category on an empty unsigned chest next to the signed ones (on) |
 | `stash unsignedOverflow on/off` | Signs mode: stacks with no room in their own chest go to `Misc`/`Other`/`Overflow` chests, then unsigned chests (on) |
 | `stash craftorders on/off` | Take orders with craft lines (on; needs `stash crafting on` and a recipe table from the server). `stash craftorders` shows the recipe table, the website's crafting table state and the caps |
+| `stash craftorders tipped\|stew\|copy on/off` | Take craft orders for tipped arrows, suspicious stew, and copies of banners, maps and written books (originals only) or shields with a banner, when the server's extras list them (on) |
 | `stash craftorders maxfills <n>` / `maxperhour <n>` | Grid fills one craft order may make (2048) and craft orders may make in an hour (4096) |
 | `stash kitSorting on/off` | Kit sorting (on): shulkers that score as kits go to the chests picked on the Stash Manager website. Off: kits sort like any shulker and nothing about kits is sent. The saved rules are kept. See Kit sorting |
 | `stash enchantorders on/off` | Take orders with enchant lines (off). Set in game or in the proxy terminal only. `stash enchantorders` shows the state. See Enchant orders below |
@@ -394,6 +395,8 @@ ingredients the order's plan names, crafts them with the plan's recipes (never m
 Whatever is left over (a few items of the last fill, the steps between) is carried to the next shulker and goes back to the stash when the order ends.
 What can not be made is left out with a reason, and the order says "<n> item(s) not crafted: <reasons>"; crafting never fails an order by itself.
 Caps: `craftOrderMaxFills` grid fills per order (2048) and `craftOrderMaxPerHour` an hour (4096); the shulker box caps below are separate.
+
+**Tipped arrows, suspicious stew, copies and shields (1.22.0, pre-release).** With the server's extras the bot also makes tipped arrows (8 arrows around a lingering potion of the potion), suspicious stew (a bowl, both mushrooms and a flower), copies of banners, filled maps and written books, and shields with a banner (`stash craftorders tipped|stew|copy on|off`, all on). Its index then says which tipped arrow, lingering potion and stew each stack is (`items[].spec`). A **banner or book copy keeps its source** (it stays in the crafting grid, comes back, is never put in a shulker and goes back to the stash with the leftovers, and `result.craft.used` and `returned` both list it); a **map copy uses its source up** and the next craft takes a map from the last one's result; a **book is copied only from an original** (generation 0): a copy of a copy fails the step with `recipe_mismatch` before anything is taken. A banner on a shield is consumed. Not tried in game yet.
 
 ## Crafting shulker boxes
 New in 1.8.0, off by default. Since 1.15.0 it also needs the recipe table (above). When an order needs an empty shulker (to build a shulker in, or for an empty-shulker line)

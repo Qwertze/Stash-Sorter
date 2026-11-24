@@ -102,8 +102,10 @@ public final class CraftGrid {
                                         java.util.function.Function<String, String> specOf) {
         int[] at = slots(r, width);
         List<List<String>> cells = r.ingredients();
+        // B4: the cells of a tipped arrow, stew, copy or shield that are plain items take plain stacks only (a patterned banner is no blank banner)
+        boolean strict = VariantSpecs.isB4(r.id());
         for (int k = Math.min(fills, maxPerSlot); k >= 1; k--) {
-            String[] item = assign(cells, at, carried, k, specOf);
+            String[] item = assign(cells, at, carried, k, specOf, strict);
             if (item == null) continue;
             boolean fits = true;
             for (int i = 1; i <= 9 && fits; i++) if (item[i] != null && k > stackOf.applyAsInt(item[i])) fits = false;
@@ -113,16 +115,17 @@ public final class CraftGrid {
     }
 
     /** The carried kind fits the cell: its item is one the cell takes, and for a variant cell ({@link Pseudo}) the kind has that spec. */
-    private static boolean fits(List<String> cell, String kind, java.util.function.Function<String, String> specOf) {
+    private static boolean fits(List<String> cell, String kind, java.util.function.Function<String, String> specOf, boolean strict) {
         String base = CraftSlots.baseOf(kind);
-        if (cell.contains(base)) return true;
+        if (cell.contains(base)) return !strict || base.equals(kind);
         for (String alt : cell) {
             if (Pseudo.is(alt) && Pseudo.base(alt).equals(base) && Pseudo.spec(alt).equals(specOf.apply(kind))) return true;
         }
         return false;
     }
 
-    private static @Nullable String[] assign(List<List<String>> cells, int[] at, Map<String, Integer> carried, int k, java.util.function.Function<String, String> specOf) {
+    private static @Nullable String[] assign(List<List<String>> cells, int[] at, Map<String, Integer> carried, int k, java.util.function.Function<String, String> specOf,
+                                             boolean strict) {
         Map<String, Integer> left = new HashMap<>(carried);
         String[] item = new String[10];
         for (int i = 0; i < cells.size(); i++) {
@@ -132,7 +135,7 @@ public final class CraftGrid {
             // since stacks that differ in a component can't share it (1.8.1)
             List<String> cell = cells.get(i);
             for (String kind : new java.util.TreeSet<>(left.keySet())) {
-                if (!fits(cell, kind, specOf)) continue;
+                if (!fits(cell, kind, specOf, strict)) continue;
                 int n = left.getOrDefault(kind, 0);
                 if (n >= k && (best == null || n > bestLeft || (n == bestLeft && kind.compareTo(best) < 0))) {
                     best = kind;

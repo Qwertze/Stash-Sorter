@@ -69,8 +69,10 @@ public final class Item {
     public @Nullable String typeData;
     /**
      * For a firework rocket or star with no component outside the grammar of CRAFT-CONTRACT-v1.2.md 3 (B3): its flight and explosions as the game stores them
-     * ({@link FireworkItems}), from which its spec is derived against the extras' colour table. Null for everything else, for a rocket or star with another
-     * component (a custom name, lore, ...), and for stacks saved before this existed (it is set when their container is read again).
+     * ({@link FireworkItems}), from which its spec is derived against the extras' colour table. B4 ({@link VariantItems}): {@code T|<potion>} of a tipped
+     * arrow or lingering potion, {@code W|<effect>|<ticks>} of a suspicious stew, {@code G<generation>} of a written book, {@code C} of a patterned banner, a
+     * filled map or a decorated shield. Null for everything else, for a stack with another component (a custom name, lore, ...), and for stacks saved before
+     * this existed (it is set when their container is read again).
      */
     public @Nullable String fw;
     /** What's inside, for shulkers. Empty for everything else, and for empty shulkers. */
@@ -171,7 +173,7 @@ public final class Item {
         if (potion != null && potion.getPotionId() >= 0 && potion.getPotionId() < POTIONS.length) item.potion = POTIONS[potion.getPotionId()];
 
         item.typeData = typeDataOf(data.name(), components);
-        item.fw = FireworkItems.dataOf(data.name(), components, data.components());
+        item.fw = VariantItems.dataOf(data.name(), components, data.components());
 
         if (item.bundle) {
             List<ItemStack> packed = components.get(DataComponentTypes.BUNDLE_CONTENTS);
@@ -372,6 +374,11 @@ public final class Item {
     /** The potion names, for telling what words a sign can use. */
     static List<String> potionNames() {
         return List.of(POTIONS);
+    }
+
+    /** The registry name of a potion ({@code long_poison}) by its id in Minecraft 1.21.4's registry, or null when the id is not one of them. */
+    public static @Nullable String potionName(int id) {
+        return id >= 0 && id < POTIONS.length ? POTIONS[id] : null;
     }
 
     /** Potions in registry order, for Minecraft 1.21.4. */

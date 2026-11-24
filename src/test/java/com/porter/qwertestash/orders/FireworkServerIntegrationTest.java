@@ -263,7 +263,8 @@ class FireworkServerIntegrationTest {
     @org.junit.jupiter.api.Order(1)
     void theServersExtrasBodyIsTheOneThePluginHashesAndTheTablesAreTheFireworkTables() throws Exception {
         fetchRecipes();
-        assertEquals(FireworkFixtures.SERVER_HASH, extras.hash(), "the live server's extras hash is the hash of HandRecipes in 1d99fa1");
+        // The B3 server (1d99fa1) and the B4 server (ac87d80, which adds the B4 kinds and the stew table) both serve the firework tables: either hash is a live server's
+        assertTrue(extras.hash().equals(FireworkFixtures.SERVER_HASH) || extras.hash().equals(SpecialFixtures.SERVER_HASH), "the live server's extras hash is the hash of HandRecipes in 1d99fa1 or ac87d80: " + extras.hash());
         assertNotNull(FireworkSpecs.Tables.of(extras));
         assertEquals(List.of("smelt", "firework"), ManagerIndex.craftCan(extras, true, true));
         // The ETag is tableHash + extrasHash

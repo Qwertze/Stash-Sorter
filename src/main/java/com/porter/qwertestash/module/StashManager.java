@@ -1092,7 +1092,7 @@ public class StashManager extends Module {
         if (table == null) return "-" + kit;
         StashSorter s = sorter();
         // The extras hash is part of it: new extras (or none) send a heartbeat of their own (CRAFT-CONTRACT-v1.2.md 2.1)
-        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/x" + Extras.currentHash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + "/s" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt) + CONFIG.craftOrderMaxSmelt + s.botFurnace() + "/f" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework) + kit;
+        return (CONFIG.craftOrders && CONFIG.enableCrafting) + "/" + table.hash() + "/x" + Extras.currentHash() + "/" + s.craftTableStatus() + "/" + s.craftTableWhy() + "/" + s.botTable() + "/" + CONFIG.craftOrderMaxFills + "/s" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt) + CONFIG.craftOrderMaxSmelt + s.botFurnace() + "/f" + ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy) + kit;
     }
 
     /**
@@ -1115,7 +1115,8 @@ public class StashManager extends Module {
         ManagerIndex.CraftOrders orders = new ManagerIndex.CraftOrders(on, table.hash(), mcVersion(), status, Math.max(1, CONFIG.craftOrderMaxFills), craftSeen, s.craftTableWhy(), s.botTable());
         // v 2 with the extras hash and the features (none in B1); an older server that refused the newer fields gets the 1.15.0 shape
         // B2: smelt in can when the setting is on and the extras hold the smelt and fuel tables; then maxSmelt, and the bot's own furnace in use
-        orders = orders.withV2(Extras.currentHash(), ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework));
+        // B3, B4: firework, tipped, stew and copy in can when their settings are on and the extras say so
+        orders = orders.withV2(Extras.currentHash(), ManagerIndex.craftCan(Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy));
         orders = orders.withSmelt(ManagerIndex.clampMaxSmelt(CONFIG.craftOrderMaxSmelt), s.botFurnace());
         if (craftLegacy) orders = orders.asLegacy();
         return new ManagerIndex.Craft(orders, cached == null ? null : cached.hash());
@@ -1499,11 +1500,14 @@ public class StashManager extends Module {
         return CONFIG.kitSorting ? "on" + KitStore.shared().version() : "off";
     }
 
-    /** The firework tables the index is built with (B3), or null: the bot sends craft orders at all and says firework in its can. Tick thread. */
-    private static com.porter.qwertestash.orders.FireworkSpecs.@org.jspecify.annotations.Nullable Tables fireworkTables() {
+    /**
+     * The kinds of spec the index is built with (B3, B4): the bot sends craft orders at all and says firework, tipped or stew in its can (the firework tables
+     * when it does, and the flags for tipped arrows and stew). Nothing when it doesn't. Tick thread.
+     */
+    private static com.porter.qwertestash.orders.Variants.Kinds specKinds() {
         Recipes table = Recipes.current();
-        if (!com.porter.qwertestash.stash.CraftTableState.sendOrders(CONFIG.enableCrafting, CONFIG.craftOrders, table != null)) return null;
-        return ManagerIndex.fireworkTables(Extras.current(), CONFIG.craftFirework);
+        if (!com.porter.qwertestash.stash.CraftTableState.sendOrders(CONFIG.enableCrafting, CONFIG.craftOrders, table != null)) return com.porter.qwertestash.orders.Variants.Kinds.NONE;
+        return ManagerIndex.specKinds(Extras.current(), CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew);
     }
 
     private void scan(Stash stash, String player) {
@@ -1524,8 +1528,9 @@ public class StashManager extends Module {
         String kitStampNow = kitStamp();
         fp = fp * 31 + kitStampNow.hashCode();
         // B3: the index carries items[].spec while the bot says firework in its can (the setting, and the extras' firework tables): a change of either rebuilds it
-        com.porter.qwertestash.orders.FireworkSpecs.Tables fireworks = fireworkTables();
-        fp = fp * 31 + (fireworks == null ? 0 : 1 + Extras.currentHash().hashCode());
+        // B4: the same for tipped arrows, lingering potions and suspicious stew (their kinds are part of what is rebuilt)
+        com.porter.qwertestash.orders.Variants.Kinds kinds = specKinds();
+        fp = fp * 31 + (kinds.any() ? 1 + Extras.currentHash().hashCode() + (kinds.fireworks() != null ? 2 : 0) + (kinds.tipped() ? 4 : 0) + (kinds.stew() ? 8 : 0) : 0);
         if (current != null && fp == fingerprint && now - lastBuild < REBUILD_MS) return;
 
         int gen = generation;
@@ -1541,7 +1546,7 @@ public class StashManager extends Module {
                 ManagerIndex.Built built = null;
                 Throwable failure = null;
                 try {
-                    built = ManagerIndex.build(stash, include, player, mcVersion, dimension, id -> null, kitLookup, fireworks);
+                    built = ManagerIndex.buildKinds(stash, include, player, mcVersion, dimension, id -> null, kitLookup, kinds);
                 } catch (Throwable t) {
                     failure = t;
                 }

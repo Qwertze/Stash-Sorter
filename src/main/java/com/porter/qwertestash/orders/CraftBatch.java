@@ -93,18 +93,22 @@ public final class CraftBatch {
         CraftSub.Session session = ledger.session();
         // Surplus of the item itself is not used for its own load: the load must come out as one stack of its own
         session.dropSurplus(key);
+        // B4: more of this line follows (another load): a map copy keeps one map more for the next load's first craft (its source is used up)
+        session.keepCopySource = ledger.copyOf(key) != null && ledger.moreAfter(key, n);
         CraftSub.Outcome o = session.plan(key, n);
         if (!o.ok()) return new Try(false, null, CraftOrder.INGREDIENTS_SHORT, o.plan().refusal());
         CraftPlanner.Plan plan = o.plan();
         // The product of the final step must fit one stack: a recipe that makes 3 for 64 wanted is 21 fills (63), not 22 (66)
         long made = 0;
-        for (CraftPlanner.Step s : plan.steps()) if (s.recipe().result().equals(key)) made += s.made();
-        if (made > stack) return new Try(false, null, CraftOrder.INVENTORY_FULL, "one stack of " + Recipes.pretty(key) + " would be " + made);
+        for (CraftPlanner.Step s : plan.steps()) if (s.recipe().result().equals(key)) made += (long) s.fills() * VariantSpecs.netCount(s.recipe().id(), s.recipe().count());
+        if (made > stack + (session.keepCopySource ? 1 : 0)) return new Try(false, null, CraftOrder.INVENTORY_FULL, "one stack of " + Recipes.pretty(key) + " would be " + made);
         if (plan.fills() > fillsLeft) return new Try(false, null, CraftOrder.CAP, plan.fills() + " grid fills are more than the " + Math.max(0, fillsLeft) + " left");
         // B2: the items the furnace steps smelt count against the order's smelt cap (items, not grid fills)
         int smelt = CraftPlanner.smeltItems(plan.steps());
         if (smelt > ledger.smeltLeft()) return new Try(false, null, CraftOrder.CAP, smelt + " items to smelt are more than the " + ledger.smeltLeft() + " left");
         int need = room(plan, stashLoads.applyAsInt(plan.fromStock()), key, stackOf);
+        // B4: a copy keeps a source (or a map one more) apart from the load: splitting it off the stack takes a slot
+        if (ledger.copyOf(key) != null && !plan.steps().isEmpty()) need++;
         if (need > freeSlots) return new Try(false, null, CraftOrder.INVENTORY_FULL, need + " carry slots wanted, " + freeSlots + " free");
         return new Try(true, plan, null, null);
     }

@@ -42,6 +42,8 @@ public final class CraftLedger {
      * the index keys it is taken by and how many each (the take's entries, in the server's key order); how many of each key were taken so far.
      */
     private final Map<String, Recipes.Recipe> special = new LinkedHashMap<>();
+    /** B4: the block's copies of banners, maps and written books by the product's pseudo id: the sub-plan makes their crafts itself (see {@link CraftSub.Session}). */
+    private final Map<String, VariantSpecs.CopyFamily> copies = new LinkedHashMap<>();
     private final Map<String, LinkedHashMap<String, Long>> keyCap = new LinkedHashMap<>();
     private final Map<String, Long> keyUsed = new LinkedHashMap<>();
     private final Map<String, String> keySpec = new LinkedHashMap<>();
@@ -83,8 +85,10 @@ public final class CraftLedger {
         }
         else this.allowed = null;
         special.putAll(FireworkSpecs.recipesOf(craft));
+        copies.putAll(VariantSpecs.families(craft));
         for (Order.Qty t : craft.take()) {
-            String ref = Pseudo.of(Recipes.ns(t.id()), t.spec());
+            // B4: a written book with a copy spec is the original that is copied (written_book@src:<key>), never the copies it makes
+            String ref = VariantSpecs.sourceRef(Recipes.ns(t.id()), t.spec());
             take.merge(ref, (long) t.count(), Long::sum);
             budget.merge(ref, (long) t.count(), Long::sum);
             if (t.spec() != null && t.key() != null) {
@@ -250,17 +254,30 @@ public final class CraftLedger {
 
     /** A new sub-plan session from the budget left and the surplus carried. */
     public CraftSub.Session session() {
-        return new CraftSub.Session(table, allowed, take, budget, surplus, limits, smelting, special);
+        return new CraftSub.Session(table, allowed, take, budget, surplus, limits, smelting, special, copies);
     }
 
     /** As {@link #session()} from this pool and surplus (a chunk planned again from what is carried): the order's recipes only, its special steps too. */
     public CraftSub.Session sessionWith(Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus) {
-        return new CraftSub.Session(table, allowed, estPool, pool, surplus, limits, smelting, special);
+        return new CraftSub.Session(table, allowed, estPool, pool, surplus, limits, smelting, special, copies);
     }
 
-    /** The block has a step or a take of a rocket or star (B3). */
+    /** The block has a step or a take of a rocket, star, tipped arrow, stew, copy or shield (B3, B4). */
     public boolean hasSpecs() {
         return !special.isEmpty() || !keyCap.isEmpty();
+    }
+
+    /** The copy of this product (a pseudo id) the block makes, or null (B4). */
+    public VariantSpecs.@Nullable CopyFamily copyOf(String product) {
+        return copies.get(product);
+    }
+
+    /**
+     * Whether making {@code n} of the line {@code ref} leaves more of the same line to make after it (B4): the made stacks are loads of at most a stack, so
+     * a map copy needs to keep one map for the next load's crafts (its source is used up).
+     */
+    public boolean moreAfter(String ref, long n) {
+        return wanted.getOrDefault(ref, 0L) - made.getOrDefault(ref, 0L) - shortCount.getOrDefault(ref, 0L) - n > 0;
     }
 
     /** The item ids (namespaced) the order's take is of, spec'd entries under their item id: what the stash is surveyed for. */
@@ -500,7 +517,11 @@ public final class CraftLedger {
     /** The item id under {@code name}, and for a variant (B3) its {@code spec} beside it (CRAFT-CONTRACT-v1.2.md 12: {@code made[].spec}, {@code short[].spec}). */
     private static void ref(JsonObject x, String name, String ref) {
         x.addProperty(name, cut(Pseudo.base(ref)));
-        if (Pseudo.is(ref)) x.addProperty("spec", Pseudo.spec(ref));
+        // A written book held as the source of copies is written_book@src:<key> here; on the wire it is the copy spec of its key
+        if (Pseudo.is(ref)) {
+            String spec = Pseudo.spec(ref);
+            x.addProperty("spec", spec.startsWith("src:") ? "copy:" + spec.substring("src:".length()) : spec);
+        }
     }
 
     private static JsonArray qtys(Map<String, Long> m) {

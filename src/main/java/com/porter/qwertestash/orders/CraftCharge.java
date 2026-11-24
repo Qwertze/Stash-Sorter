@@ -42,6 +42,19 @@ public final class CraftCharge {
      * The charge: all that was gathered once at least one grid fill was made (what the crafts did not use stays carried as surplus), less
      * what was put back to the stash; nothing when no fill was made (everything goes back, the budget is untouched).
      */
+    /**
+     * As {@link #charge}, for a chunk of a variant (B3, B4): with no grid fill made, what was gathered of the line's own item ({@code ownRef}, stock that went
+     * into the load) is charged when the load was made, and nothing else (the ingredients are put back); with fills it is as {@link #charge}.
+     */
+    public static Map<String, Long> charge(Map<String, Long> gathered, long fillsMade, Map<String, Long> putBack, String ownRef, long made) {
+        if (fillsMade > 0) return charge(gathered, fillsMade, putBack);
+        Map<String, Long> out = new HashMap<>();
+        if (made <= 0) return out;
+        long n = gathered.getOrDefault(ownRef, 0L) - Math.max(0, putBack.getOrDefault(ownRef, 0L));
+        if (n > 0) out.put(ownRef, n);
+        return out;
+    }
+
     public static Map<String, Long> charge(Map<String, Long> gathered, long fillsMade, Map<String, Long> putBack) {
         Map<String, Long> out = new HashMap<>();
         if (fillsMade <= 0) return out;

@@ -59,7 +59,7 @@ public final class CraftOrder {
             case FURNACE_BLOCKED -> "the furnace could not be reached or opened";
             case FURNACE_BUSY -> "the furnace is in use by something else";
             case SMELT_TIMEOUT -> "smelting took too long";
-            default -> reason;
+            default -> safe(reason);
         };
     }
 
@@ -111,6 +111,41 @@ public final class CraftOrder {
      */
     public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
                                          int maxSmelt, FireworkSpecs.@Nullable Tables firework) {
+        return check(craft, table, maxFills, extrasHash, can, smelting, maxSmelt, firework, null);
+    }
+
+    /**
+     * As above, for a bot that can also make tipped arrows, suspicious stew, copies of banners, maps and written books, and shields with a banner (B4,
+     * CRAFT-CONTRACT-v1.2.md 3, 9, 11.1 and 15). A block that uses a spec of one of these kinds passes only when the bot's {@code can} has the kind's feature
+     * ({@code tipped}, {@code stew} or {@code copy}), {@code special} (its tables from its own extras) is not null, {@code needs} lists the feature and the block
+     * names the bot's extras; then every B4 step's grid is the one the bot builds itself from the step's spec ({@link VariantSpecs#checkStep}, the remainder
+     * included), every spec on a line, take, leftover or remainder is a canonical spec of its item, and, for a block with a step of B4, every step's inputs are in
+     * hand when it is made: what the take holds, what the steps before it made, and (for a copy) what its own earlier crafts made, less what earlier steps used.
+     * @param special the bot's B4 tables (from its extras), or null when it holds none
+     */
+    public static @Nullable String check(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
+                                         int maxSmelt, FireworkSpecs.@Nullable Tables firework, VariantSpecs.@Nullable Tables special) {
+        String bad = checkRaw(craft, table, maxFills, extrasHash, can, smelting, maxSmelt, firework, special);
+        // The words of a refusal are logged and said: they carry strings of the server's block, so they are cut to printable ASCII and a short length
+        return bad == null ? null : safe(bad);
+    }
+
+    /** At most this many characters of a server's string are said or logged. */
+    public static final int MAX_SAID = 80;
+
+    /** The text with anything but printable ASCII turned into {@code ?} and cut to {@link #MAX_SAID} characters (server strings reach logs and chat). */
+    public static String safe(@Nullable String text) {
+        if (text == null) return "";
+        StringBuilder sb = new StringBuilder(Math.min(text.length(), MAX_SAID + 3));
+        for (int i = 0; i < text.length() && sb.length() < MAX_SAID; i++) {
+            char c = text.charAt(i);
+            sb.append(c >= 0x20 && c < 0x7f ? c : '?');
+        }
+        return text.length() > MAX_SAID ? sb + "..." : sb.toString();
+    }
+
+    private static @Nullable String checkRaw(Order.@Nullable Craft craft, Recipes table, int maxFills, @Nullable String extrasHash, Set<String> can, @Nullable Smelting smelting,
+                                             int maxSmelt, FireworkSpecs.@Nullable Tables firework, VariantSpecs.@Nullable Tables special) {
         if (craft == null) return "the order has craft lines but no craft block";
         if (craft.malformed()) return "the craft block can't be read";
         if (craft.v() != 1 && craft.v() != 2) return "craft version " + craft.v() + " is not 1 or 2";
@@ -121,8 +156,19 @@ public final class CraftOrder {
             if (!craft.needs().isEmpty() && craft.extras() == null) return "the order needs extras it doesn't name";
             if (craft.reserved() != null) return "the craft block uses " + craft.reserved() + ", which this bot doesn't carry out";
             if (craft.usesSpecs()) {
-                if (!can.contains("firework") || firework == null) return "the order uses rockets or stars, which this bot can't make";
-                if (!craft.needs().contains("firework")) return "the order uses rockets or stars but doesn't say it needs fireworks";
+                // The kinds the block's specs are of; a spec, key or grid of no known kind is B3's (it needs firework, as it always did)
+                java.util.Set<String> used = craft.features();
+                if (used.isEmpty()) used = java.util.Set.of("firework");
+                for (String f : used) {
+                    if (f.equals("firework")) {
+                        if (!can.contains("firework") || firework == null) return "the order uses rockets or stars, which this bot can't make";
+                        if (!craft.needs().contains("firework")) return "the order uses rockets or stars but doesn't say it needs fireworks";
+                    }
+                    else {
+                        if (!can.contains(f) || special == null) return "the order uses " + describeFeature(f) + ", which this bot can't make";
+                        if (!craft.needs().contains(f)) return "the order uses " + describeFeature(f) + " but doesn't say it needs " + f;
+                    }
+                }
                 if (craft.extras() == null) return "the order needs extras it doesn't name";
             }
         }
@@ -131,13 +177,17 @@ public final class CraftOrder {
         long fills = 0, smelted = 0;
         for (Order.CraftStep s : craft.steps()) {
             if (s.special()) {
-                // B3: a special step carries the exact grid of a rocket, star or fade; the bot builds it again from the spec and its own extras
-                String bad = FireworkSpecs.checkStep(s, firework);
+                // B3: a special step carries the exact grid of a rocket, star or fade; B4: of tipped arrows, stew, a copy or a shield; the bot builds it
+                // again from the spec and its own extras
+                boolean b4 = VariantSpecs.isRecipe(s.recipe());
+                String bad = b4 ? VariantSpecs.checkStep(s, special, can) : FireworkSpecs.checkStep(s, firework);
                 if (bad != null) return bad;
+                if (!b4 && !s.remainder().isEmpty()) return "recipe " + s.recipe() + " has a remainder, which it doesn't leave";
                 fills += s.fills();
                 continue;
             }
             if (s.spec() != null) return "recipe " + s.recipe() + " has a spec but no grid";
+            if (!s.remainder().isEmpty()) return "recipe " + s.recipe() + " has a remainder but no grid";
             if (s.furnace()) {
                 // Only a v2 block has furnace steps (parseCraft reads the station of a v2 block only)
                 String bad = checkFurnaceStep(s, can, smelting);
@@ -167,15 +217,29 @@ public final class CraftOrder {
             if (bad != null) return bad;
             if (t.spec() != null && !keyOf(t.id(), t.key())) return "a take of " + t.id() + " with a spec has no index key of that item";
             if (t.spec() == null && t.key() != null) return "a take of " + t.id() + " names a key but no spec";
+            // B4: a banner, map or book taken to be copied (or a banner for a shield) is taken by the exact key its spec names
+            VariantSpecs.Spec v = VariantSpecs.parse(t.spec());
+            if (v != null && v.kind().equals("copy") && !v.key().equals(t.key())) return "a take of " + t.id() + " names a key other than its copy spec's";
         }
         for (Order.Qty l : craft.leftovers()) {
             String bad = checkSpecified(l.id(), l.spec(), "leftover");
             if (bad != null) return bad;
         }
+        for (Order.CraftStep s : craft.steps()) {
+            for (Order.Qty q : s.remainder()) {
+                String bad = checkSpecified(q.id(), q.spec(), "remainder");
+                if (bad != null) return bad;
+            }
+        }
+        if (craft.hasB4Steps()) {
+            String bad = checkInputsInHand(craft);
+            if (bad == null) bad = checkTakeBound(craft);
+            if (bad != null) return bad;
+        }
         long total = 0;
         java.util.Map<String, Long> made = new java.util.HashMap<>(), taken = new java.util.HashMap<>();
         for (Order.CraftStep s : craft.steps()) made.merge(s.resultRef(), (long) s.count() * s.fills(), Long::sum);
-        for (Order.Qty t : craft.take()) taken.merge(t.ref(), (long) t.count(), Long::sum);
+        for (Order.Qty t : craft.take()) taken.merge(t.stockRef(), (long) t.count(), Long::sum);
         for (Order.Qty l : craft.lines()) {
             if (l.count() < 1 || !plain(l.id())) return "a craft line key is not a plain item id";
             String bad = checkSpecified(l.id(), l.spec(), "craft line");
@@ -196,12 +260,91 @@ public final class CraftOrder {
         return null;
     }
 
-    /** A spec on a line, take or leftover (B3) is a canonical rocket or star spec of the item it sits on; null when there is none or it is fine. */
+    /**
+     * A spec on a line, take, leftover or remainder (B3, B4) is a canonical spec of a kind the bot knows (rocket, star, tipped, stew, copy or shield) that fits the
+     * item it sits on: a line is of the variant itself, a take, leftover or remainder may also be a lingering potion with a tipped spec or a banner, map or book
+     * with the copy spec of its own key. Null when there is none or it is fine.
+     */
     private static @Nullable String checkSpecified(String id, @Nullable String spec, String what) {
         if (spec == null) return null;
-        FireworkSpecs.Parsed p = FireworkSpecs.parse(spec);
-        if (p == null) return "a " + what + " has a spec that is not a canonical rocket or star spec";
-        if (!id.equals(p.rocket() ? FireworkSpecs.ROCKET : FireworkSpecs.STAR)) return "a " + what + " of " + id + " has the spec of another item";
+        if (spec.startsWith("rocket:") || spec.startsWith("star:")) {
+            FireworkSpecs.Parsed p = FireworkSpecs.parse(spec);
+            if (p == null) return "a " + what + " has a spec that is not a canonical rocket or star spec";
+            if (!id.equals(p.rocket() ? FireworkSpecs.ROCKET : FireworkSpecs.STAR)) return "a " + what + " of " + id + " has the spec of another item";
+            return null;
+        }
+        VariantSpecs.Spec v = VariantSpecs.parse(spec);
+        if (v == null) return "a " + what + " has a spec that is not a canonical rocket, star, tipped, stew, copy or shield spec";
+        boolean fits = what.equals("craft line") ? VariantSpecs.fitsItem(v, id) : VariantSpecs.fitsEntry(v, id);
+        return fits ? null : "a " + what + " of " + id + " has the spec of another item";
+    }
+
+    private static String describeFeature(String feature) {
+        return switch (feature) {
+            case "tipped" -> "tipped arrows";
+            case "stew" -> "suspicious stew";
+            case "copy" -> "copies of banners, maps or books, or shields";
+            default -> feature;
+        };
+    }
+
+    /**
+     * A block with a step of B4 takes nothing from the stash that its steps and lines can't use (T3 of the B4 review): of each item (by key for a spec'd one) the
+     * take is at most what the steps use (inputs and fuel), what the craft lines ask for and what the block says is left over. Judged for B4 blocks only: B1 to
+     * B3 blocks keep the rules they always had.
+     */
+    static @Nullable String checkTakeBound(Order.Craft craft) {
+        java.util.Map<String, Long> use = new java.util.HashMap<>(), take = new java.util.LinkedHashMap<>();
+        for (Order.CraftStep s : craft.steps()) {
+            for (Order.Qty q : s.inputs()) use.merge(q.stockRef(), (long) q.count(), Long::sum);
+            for (Order.Qty q : s.fuel()) use.merge(q.stockRef(), (long) q.count(), Long::sum);
+        }
+        for (Order.Qty l : craft.lines()) use.merge(l.ref(), (long) l.count(), Long::sum);
+        for (Order.Qty l : craft.leftovers()) {
+            use.merge(l.ref(), (long) l.count(), Long::sum);
+            if (!l.stockRef().equals(l.ref())) use.merge(l.stockRef(), (long) l.count(), Long::sum);
+        }
+        for (Order.Qty f : craft.forEnchant()) use.merge(f.ref(), (long) f.count(), Long::sum);
+        for (Order.Qty t : craft.take()) take.merge(t.stockRef(), (long) t.count(), Long::sum);
+        for (var e : take.entrySet()) {
+            if (e.getValue() > use.getOrDefault(e.getKey(), 0L)) return "the block takes " + e.getValue() + " " + e.getKey() + " from the stash and uses at most " + use.getOrDefault(e.getKey(), 0L);
+        }
+        return null;
+    }
+
+    /**
+     * The inputs of a block with a step of B4 are in hand when each step is made (CRAFT-CONTRACT-v1.2.md B4, "Chained map crafts"): the balance starts as the take, a
+     * step's crafts are made one after the other, each takes its inputs (the step's inputs over its fills) from the balance, hands back its remainder (the
+     * source banner or book) and adds what it makes (a map copy's source is a result of an earlier craft, of this step or of an earlier one). A craft that
+     * finds an input missing makes the block unusable. Pure; the steps are in the order they are made.
+     * @return null when every craft has what it needs, else why not
+     */
+    static @Nullable String checkInputsInHand(Order.Craft craft) {
+        java.util.Map<String, Long> bal = new java.util.HashMap<>();
+        for (Order.Qty t : craft.take()) bal.merge(t.stockRef(), (long) t.count(), Long::sum);
+        int n = 0;
+        for (Order.CraftStep s : craft.steps()) {
+            n++;
+            boolean copy = VariantSpecs.isCopy(s.recipe());
+            int crafts = copy ? Math.max(1, s.fills()) : 1;
+            long result = copy ? s.count() : (long) s.count() * s.fills();
+            java.util.Map<String, Long> in = new java.util.LinkedHashMap<>(), back = new java.util.LinkedHashMap<>();
+            for (Order.Qty q : s.inputs()) in.merge(q.stockRef(), (long) q.count(), Long::sum);
+            for (Order.Qty q : s.fuel()) in.merge(q.stockRef(), (long) q.count(), Long::sum);
+            for (Order.Qty q : s.remainder()) back.merge(q.stockRef(), (long) q.count(), Long::sum);
+            for (var e : in.entrySet()) if (e.getValue() % crafts != 0) return "step " + n + " (" + s.recipe() + ") has " + e.getValue() + " " + e.getKey() + " for " + crafts + " crafts";
+            for (var e : back.entrySet()) if (e.getValue() % crafts != 0) return "step " + n + " (" + s.recipe() + ") hands back " + e.getValue() + " " + e.getKey() + " from " + crafts + " crafts";
+            for (int i = 0; i < crafts; i++) {
+                for (var e : in.entrySet()) {
+                    long need = e.getValue() / crafts;
+                    long have = bal.getOrDefault(e.getKey(), 0L);
+                    if (have < need) return "step " + n + " (" + s.recipe() + ") has no " + e.getKey() + " for " + (copy ? "craft " + (i + 1) : "its crafts") + " (" + need + " wanted, " + have + " in hand)";
+                    bal.put(e.getKey(), have - need);
+                }
+                for (var e : back.entrySet()) bal.merge(e.getKey(), e.getValue() / crafts, Long::sum);
+                bal.merge(s.resultRef(), result, Long::sum);
+            }
+        }
         return null;
     }
 

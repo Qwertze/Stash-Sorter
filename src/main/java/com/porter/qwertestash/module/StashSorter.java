@@ -42,6 +42,9 @@ import com.porter.qwertestash.orders.BaseSlots;
 import com.porter.qwertestash.orders.BinTracker;
 import com.porter.qwertestash.orders.ClickPlanner;
 import com.porter.qwertestash.orders.FireworkSpecs;
+import com.porter.qwertestash.orders.VariantSpecs;
+import com.porter.qwertestash.orders.Variants;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentTypes;
 import com.porter.qwertestash.orders.CraftBatch;
 import com.porter.qwertestash.orders.CraftCharge;
 import com.porter.qwertestash.orders.CraftResume;
@@ -14191,7 +14194,7 @@ public class StashSorter extends AbstractFieldModule {
     private List<Order.Lot> gatherFor(CraftLedger ledger, CraftPool.Stock stock, Map<String, Long> fromStock, List<Unit> others) {
         Map<String, Long> plain = new LinkedHashMap<>();
         for (var e : fromStock.entrySet()) if (!Pseudo.is(e.getKey())) plain.put(e.getKey(), e.getValue());
-        List<Order.Lot> out = new ArrayList<>(CraftPool.lots(stock, plain, others));
+        List<Order.Lot> out = new ArrayList<>(CraftPool.lots(stock, plain, others, true));
         out.addAll(CraftPool.lotsByKey(stock, ledger.keysFor(fromStock), others));
         return out;
     }
@@ -14288,6 +14291,16 @@ public class StashSorter extends AbstractFieldModule {
                 flow.craftAbandon(CraftOrder.TABLE_BLOCKED);
                 return false;
             }
+        }
+
+        // B4: a book is copied only from an original (generation 0): the stash is looked at before anything is taken, and a book that is itself a copy fails the
+        // step with recipe_mismatch (the whole line, since the rest would only fail the same way)
+        VariantSpecs.CopyFamily family = ledger.copyOf(key);
+        if (family != null && family.kind() == VariantSpecs.CopyKind.BOOK && bookGenerationInStash(family.key()) > 0) {
+            step(here + ": " + lot.count() + " " + Recipes.pretty(key) + " can't be copied: the written book to copy is not an original (it is itself a copy).");
+            flow.craftLotShort(u, idx, CraftOrder.RECIPE_MISMATCH);
+            flow.craftShortRef(key, CraftOrder.RECIPE_MISMATCH);
+            return false;
         }
 
         // What a chunk makes: as much of the load as the budget, the caps and the free carry slots allow
@@ -14392,7 +14405,7 @@ public class StashSorter extends AbstractFieldModule {
         int slot = -1;
         for (int s : oc.resultSlots) {
             Item it = inventoryItem(s);
-            if (it == null || !it.id.equals(oc.id()) || !hasSpec(it, oc.spec())) continue;
+            if (it == null || !it.id.equals(oc.id()) || !inLoad(it, oc.spec())) continue;
             if (slot < 0 || it.count > inventoryItem(slot).count) slot = s;
         }
         Item result = slot < 0 ? null : inventoryItem(slot);
@@ -14427,6 +14440,8 @@ public class StashSorter extends AbstractFieldModule {
         oc.made = have;
         oc.lotSlot = result == null ? -1 : slot;
         oc.settled = true;
+        // A stack that is the load is no longer surplus (maps carried over, B4)
+        if (oc.lotSlot >= 0) orderCraftSurplus.remove(oc.lotSlot);
         // Kept: the load's stack until its bin is built, and (when anything was crafted) every other stack of the craft as surplus
         if (oc.lotSlot >= 0) orderCraftLots.put(oc.lotSlot, oc.id());
         // A rocket or star of a spec (B3) is known by the index key of its own components from here on
@@ -14445,6 +14460,51 @@ public class StashSorter extends AbstractFieldModule {
             orders.flow.craftLedgerChanged();
         }
         return false;
+    }
+
+    /** The generation of the written book of this key in the stash as it was read (0 an original, 1 or more a copy), or -1 when none is known. */
+    private int bookGenerationInStash(String key) {
+        Stash st = orders.st();
+        if (st == null) return -1;
+        List<Item> all = new ArrayList<>();
+        for (Box box : st.boxes) if (box.contents != null) all.addAll(java.util.Arrays.asList(box.contents));
+        return com.porter.qwertestash.stash.VariantItems.generationOfKey(all, key);
+    }
+
+    /**
+     * The chunk's inputs are in hand and its first trip is about to start (B4). A written book to copy that turns out not to be an original (the stash was read
+     * before its generation was kept) ends the chunk with recipe_mismatch and everything is put back. A load of a variant (rocket, star, tipped arrow, stew, copy,
+     * shield) takes in the stacks of its own kind that were gathered or carried over: the table's results merge into them, so the load is one stack of the size
+     * asked for (what stock the plan took of the item itself is part of it, and a source banner that stays in the grid is put back into it).
+     * @return why the chunk can't go on, or null
+     */
+    private @Nullable String sealOrderChunk(CraftRun r) {
+        OrderChunk oc = r.oc;
+        if (oc == null) return null;
+        CraftLedger ledger = orders.flow.craftLedger();
+        VariantSpecs.CopyFamily f = ledger == null ? null : ledger.copyOf(oc.key);
+        for (int slot : r.owned) {
+            Item it = inventoryItem(slot);
+            if (it == null) continue;
+            if (f != null && f.kind() == VariantSpecs.CopyKind.BOOK && it.id.equals("written_book") && it.indexKey().equals(f.key()) && Variants.generationOf(it.fw) > 0) {
+                return "the written book to copy is not an original (it is itself a copy)";
+            }
+        }
+        if (oc.spec() != null && !(f != null && f.kind() == VariantSpecs.CopyKind.BOOK)) {
+            // Only what was gathered for this chunk: a stack carried over from an earlier chunk (a source banner, a map) stays apart as surplus
+            for (int slot : craftHeldSlots(r)) {
+                Item it = inventoryItem(slot);
+                if (it != null && it.id.equals(oc.id()) && hasSpec(it, oc.spec())) oc.resultSlots.add(slot);
+            }
+            // Maps carried over that are the whole load (nothing to make, nothing gathered): they are the load
+            if (f != null && f.kind() == VariantSpecs.CopyKind.MAP && oc.resultSlots.isEmpty() && r.plan.steps().isEmpty()) {
+                for (int slot : orderCraftSurplus.keySet()) {
+                    Item it = inventoryItem(slot);
+                    if (it != null && it.id.equals(oc.id()) && hasSpec(it, oc.spec())) oc.resultSlots.add(slot);
+                }
+            }
+        }
+        return null;
     }
 
     /** The chunk is over (and put back): what it made and used is reported to the order, and the next round or the next bin goes on. */
@@ -14487,7 +14547,10 @@ public class StashSorter extends AbstractFieldModule {
         }
         // Charged from what was gathered, whatever a replan after an interrupted trip says it takes
         // (a smelt counts like a grid fill: what the furnace took was gathered from the stash and is gone)
-        Map<String, Long> charged = CraftCharge.charge(oc.gathered, oc.fillsMade + smeltedNow, Map.of());
+        // (a load of a variant made wholly from stock of its own item, B3 and B4, has no fill but is made: only what was gathered of that item is charged;
+        // the ingredients gathered with it are put back)
+        Map<String, Long> charged = oc.spec() != null ? CraftCharge.charge(oc.gathered, oc.fillsMade + smeltedNow, Map.of(), oc.key, oc.made)
+            : CraftCharge.charge(oc.gathered, oc.fillsMade + smeltedNow, Map.of());
         if (r.stuck && smeltLedger != null && smeltLedger.journal().isOpen()) {
             // The journal stays open: what went into the furnace is charged when it is taken up, so not here too
             charged = new HashMap<>(charged);
@@ -14616,6 +14679,15 @@ public class StashSorter extends AbstractFieldModule {
                 if (++r.jobs > 12 + 4 * Math.max(1, r.bin.lots.size())) return craftGaveUp(r, "it took too many trips", true);
                 BinTracker.Need need = needOf(r.bin);
                 if (need == null) {
+                    String refuse = sealOrderChunk(r);
+                    if (refuse != null) {
+                        r.failure = refuse;
+                        r.code = CraftOrder.RECIPE_MISMATCH;
+                        r.retry = false;
+                        r.phase = CraftPhase.PutBack;
+                        step("crafting: " + refuse + "; next: put back what was gathered.");
+                        return continueCraft();
+                    }
                     r.phase = CraftPhase.Craft;
                     return startCraftTrip(r);
                 }
@@ -15177,14 +15249,18 @@ public class StashSorter extends AbstractFieldModule {
         return fireworkTablesNow;
     }
 
-    /** The rocket or star spec of a stack from its components (as read when the stack was seen), or null when it has none. */
+    /**
+     * The spec of a stack from its components (as read when the stack was seen), or null when it has none: a rocket's or star's (B3), a tipped arrow's or
+     * lingering potion's, a suspicious stew's, a patterned banner's or filled map's own copy spec {@code copy:<its key>}, an original book's source spec
+     * {@code src:<its key>} (B4).
+     */
     private static @Nullable String specOfItem(@Nullable Item it) {
-        return it == null ? null : FireworkSpecs.specOf(it.fw, fireworkTables());
+        return it == null ? null : Variants.specOf(it.id, it.fw, it.indexKey(), fireworkTables());
     }
 
     /** What the sub-plan calls this stack: its pseudo id when it has a spec, else its namespaced item id. */
     private static String refOfItem(Item it) {
-        return com.porter.qwertestash.stash.FireworkItems.refOf(it, fireworkTables());
+        return Variants.refOf(it.id, it.fw, it.indexKey(), fireworkTables());
     }
 
     /** What the sub-plan calls a carried kind: its pseudo id when a stack of the kind has a spec, else its item id. */
@@ -15194,7 +15270,61 @@ public class StashSorter extends AbstractFieldModule {
 
     /** The stack is of the spec the load asks for: any stack when it asks for none. */
     private static boolean hasSpec(Item it, @Nullable String spec) {
-        return spec == null || spec.equals(specOfItem(it));
+        if (spec == null) return true;
+        // B4: a copy of a written book and a decorated shield are known only against what was in the grid when they were made (resultSpecOf): never by the stack alone
+        if (isGridSpec(it, spec)) return false;
+        return spec.equals(specOfItem(it));
+    }
+
+    private static boolean isGridSpec(Item it, String spec) {
+        return spec.startsWith("shield:") || (spec.startsWith("copy:") && it.id.equals("written_book"));
+    }
+
+    /** The stack taken from the result slot is what the load asks for: judged against the grid it came from for a book copy or a shield (B4), else by its own spec. */
+    private boolean resultMatches(Item what, @Nullable String spec) {
+        if (spec == null) return true;
+        if (isGridSpec(what, spec)) return spec.equals(resultSpecOf(what));
+        return hasSpec(what, spec);
+    }
+
+    /** A stack in the chunk's result slots (each was verified when taken) is part of the load: any decorated shield or generation 1 book there is. */
+    private static boolean inLoad(Item it, @Nullable String spec) {
+        if (spec == null) return true;
+        if (spec.startsWith("shield:")) return it.id.equals("shield") && it.fw != null;
+        if (spec.startsWith("copy:") && it.id.equals("written_book")) return Variants.generationOf(it.fw) >= 1;
+        return hasSpec(it, spec);
+    }
+
+    /**
+     * The spec of the stack in the table's result slot, with the grid it comes from in view (B4): what the result is a copy of or the shield of. A copy of a
+     * banner or map is its source's key; a copy of a written book (generation 1) names the original in the grid whose title, author and pages it has; a
+     * shield names the banner in the grid whose patterns and colour it has. Null when it is none of these (the caller then asks the stack alone).
+     */
+    private @Nullable String resultSpecOf(Item result) {
+        if (result.id.equals("written_book") && Variants.generationOf(result.fw) >= 1) {
+            var copy = result.raw == null ? null : result.raw.getDataComponentsOrEmpty().get(DataComponentTypes.WRITTEN_BOOK_CONTENT);
+            for (int slot = 1; copy != null && slot <= 9; slot++) {
+                Item in = Item.of(gridStack(slot));
+                if (in == null || !in.id.equals("written_book") || Variants.generationOf(in.fw) != 0 || in.raw == null) continue;
+                var orig = in.raw.getDataComponentsOrEmpty().get(DataComponentTypes.WRITTEN_BOOK_CONTENT);
+                if (orig != null && java.util.Objects.equals(orig.getTitle(), copy.getTitle()) && java.util.Objects.equals(orig.getAuthor(), copy.getAuthor())
+                    && java.util.Objects.equals(orig.getPages(), copy.getPages())) return "copy:" + in.indexKey();
+            }
+            return null;
+        }
+        if (result.id.equals("shield") && result.fw != null && result.raw != null) {
+            var made = result.raw.getDataComponentsOrEmpty();
+            for (int slot = 1; slot <= 9; slot++) {
+                Item in = Item.of(gridStack(slot));
+                if (in == null || VariantSpecs.bannerColor(in.id) < 0 || in.fw == null || in.raw == null) continue;
+                var patterns = in.raw.getDataComponentsOrEmpty().get(DataComponentTypes.BANNER_PATTERNS);
+                if (patterns != null && patterns.equals(made.get(DataComponentTypes.BANNER_PATTERNS)) && java.util.Objects.equals(made.get(DataComponentTypes.BASE_COLOR), VariantSpecs.bannerColor(in.id))) {
+                    return "shield:" + in.indexKey();
+                }
+            }
+            return null;
+        }
+        return null;
     }
 
     // Items left in the crafting table's grid with no room for them: the table is kept open and nothing else is done
@@ -15442,7 +15572,13 @@ public class StashSorter extends AbstractFieldModule {
 
         @Override
         public @Nullable String specAt(int slot) {
-            return specOfItem(Item.of(gridStack(slot)));
+            Item it = Item.of(gridStack(slot));
+            if (it == null) return null;
+            if (slot == CraftGrid.RESULT) {
+                String made = resultSpecOf(it);
+                if (made != null || it.id.equals("shield") || it.id.equals("written_book")) return made;
+            }
+            return specOfItem(it);
         }
 
         @Override
@@ -15495,7 +15631,7 @@ public class StashSorter extends AbstractFieldModule {
             if (r != null) {
                 r.owned.add(into);
                 if (tableSlot == CraftGrid.RESULT && what.id.equals("shulker_box")) r.resultSlots.add(into);
-                if (tableSlot == CraftGrid.RESULT && r.oc != null && what.id.equals(r.oc.id()) && hasSpec(what, r.oc.spec())) r.oc.resultSlots.add(into);
+                if (tableSlot == CraftGrid.RESULT && r.oc != null && what.id.equals(r.oc.id()) && resultMatches(what, r.oc.spec())) r.oc.resultSlots.add(into);
                 if (tableSlot == CraftGrid.RESULT && r.forTable && what.id.equals("crafting_table")) r.tableSlot = into;
                 if (tableSlot == CraftGrid.RESULT && r.forFurnace && what.id.equals("furnace")) r.tableSlot = into;
             }
@@ -16617,6 +16753,16 @@ public class StashSorter extends AbstractFieldModule {
         Stash st = orders.st();
         if (st == null || CraftBounds.areaWhy(effectiveDimension(st), stashArea(st), new CraftSettings.Table(spot.x(), spot.y(), spot.z(), spot.dimension()), 64) != null) return null;
         return new ManagerIndex.BotTable(spot.x() + "," + spot.y() + "," + spot.z(), FurnaceSpot.source());
+    }
+
+    /** What `stash craftorders` says about tipped arrows, suspicious stew, copies and shields (B4). */
+    public String craftSpecialLine() {
+        VariantSpecs.Tables t = VariantSpecs.Tables.of(com.porter.qwertestash.manager.Extras.current());
+        List<String> parts = new ArrayList<>();
+        parts.add("tipped arrows " + (!CONFIG.craftTipped ? "off (`stash craftorders tipped on`)" : t != null && t.canTipped() ? "on" : "on, but the server's extras don't list them"));
+        parts.add("stew " + (!CONFIG.craftStew ? "off (`stash craftorders stew on`)" : t != null && t.canStew() ? "on (" + t.stew().size() + " flowers)" : "on, but the server's extras have no stew table"));
+        parts.add("copies and shields " + (!CONFIG.craftCopy ? "off (`stash craftorders copy on`)" : t != null && t.canCopy() ? "on: banners, maps and written books (originals only) are copied, the source is always put back" : "on, but the server's extras don't list them"));
+        return String.join("; ", parts);
     }
 
     /** What `stash craftorders` says about rockets and stars (B3). */
@@ -18576,7 +18722,12 @@ public class StashSorter extends AbstractFieldModule {
 
         @Override
         public Set<String> craftCan() {
-            return Set.copyOf(ManagerIndex.craftCan(com.porter.qwertestash.manager.Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework));
+            return Set.copyOf(ManagerIndex.craftCan(com.porter.qwertestash.manager.Extras.current(), CONFIG.craftSmelt, CONFIG.craftFirework, CONFIG.craftTipped, CONFIG.craftStew, CONFIG.craftCopy));
+        }
+
+        @Override
+        public VariantSpecs.@Nullable Tables craftSpecials() {
+            return CONFIG.craftTipped || CONFIG.craftStew || CONFIG.craftCopy ? VariantSpecs.Tables.of(com.porter.qwertestash.manager.Extras.current()) : null;
         }
 
         @Override

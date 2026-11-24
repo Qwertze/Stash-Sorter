@@ -293,10 +293,11 @@ class CraftFireworkTest {
     }
 
     @Test
-    void b4FieldsStayReservedAndOlderBlocksRunAsBefore() {
+    void aRemainderIsReadNowAndASpecialStepOfB3LeavesNoneAndOlderBlocksRunAsBefore() {
         Order.Craft c = parse(changed(b -> b.getAsJsonArray("steps").get(0).getAsJsonObject().add("remainder", JsonParser.parseString("[ { \"id\": \"minecraft:bowl\", \"count\": 1 } ]"))));
-        assertEquals("steps[].remainder", c.reserved());
-        assertNotNull(check(c, CAN, HASH, FireworkFixtures.TABLES));
+        assertNull(c.reserved(), "B4 carries out the remainder: nothing is reserved any more");
+        assertEquals(1, c.steps().get(0).remainder().size());
+        assertNotNull(check(c, CAN, HASH, FireworkFixtures.TABLES), "a rocket step leaves no remainder");
         // A spec-free block with a firework-capable bot passes as it always did
         Order.Craft plain = parse(JsonParser.parseString("""
             { "v": 2, "mc": "1.21.4", "recipes": "%s", "extras": null, "maxDepth": 12, "needs": [],

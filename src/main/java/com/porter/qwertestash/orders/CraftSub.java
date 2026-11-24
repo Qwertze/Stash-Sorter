@@ -101,7 +101,7 @@ public final class CraftSub {
     }
 
     private static final class Snap {
-        final Map<String, Long> pool, surplus, taken;
+        final Map<String, Long> pool, surplus, taken, parked;
         final int steps;
         final Set<Lock> locks;
 
@@ -109,6 +109,7 @@ public final class CraftSub {
             pool = new HashMap<>(s.pool);
             surplus = new HashMap<>(s.surplus);
             taken = new LinkedHashMap<>(s.taken);
+            parked = new HashMap<>(s.parked);
             steps = s.steps.size();
             locks = new HashSet<>(s.locks);
         }
@@ -121,6 +122,15 @@ public final class CraftSub {
         final @Nullable Smelting smelting;
         /** The special steps of the block (B3: rockets, stars), as recipes by plan id: a rocket or star is a pseudo id (item id and spec, see {@link Pseudo}). */
         final Map<String, Recipes.Recipe> special;
+        /** The block's copies of banners, maps and written books by the product's pseudo id (B4): their crafts are made by {@link #needCopy}, not by the recipe search. */
+        final Map<String, VariantSpecs.CopyFamily> copies;
+        /**
+         * Carried items of a copy's product that the item's own load must not use as stock (the surplus of the target is dropped, see {@link #dropSurplus}) but
+         * that may be held as the source of a copy: the banner that stayed in the grid, a map left over from the chunk before. Per pseudo id.
+         */
+        Map<String, Long> parked = new HashMap<>();
+        /** The map copies of this plan make one map more than asked for: more of the same line follows, and its first craft needs a source map (B4). */
+        public boolean keepCopySource;
         Map<String, Long> pool, surplus, taken = new LinkedHashMap<>();
         final List<Raw> steps = new ArrayList<>();
         Set<Lock> locks = new HashSet<>();
@@ -158,8 +168,19 @@ public final class CraftSub {
          */
         public Session(Recipes table, @Nullable Set<String> allowed, Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus, Limits limits,
                        @Nullable Smelting smelting, Map<String, Recipes.Recipe> special) {
+            this(table, allowed, estPool, pool, surplus, limits, smelting, special, Map.of());
+        }
+
+        /**
+         * As above, with the block's copies of banners, maps and written books (B4, {@link VariantSpecs#families}): a copy of one key is made by a craft that
+         * holds its source (a banner or book that stays in the grid and is handed back, a map that is used up and made again by the craft) and takes one
+         * blank item (a banner of the same colour, an empty map, a writable book) for each copy, at most 8 blanks to a craft.
+         */
+        public Session(Recipes table, @Nullable Set<String> allowed, Map<String, Long> estPool, Map<String, Long> pool, Map<String, Long> surplus, Limits limits,
+                       @Nullable Smelting smelting, Map<String, Recipes.Recipe> special, Map<String, VariantSpecs.CopyFamily> copies) {
             this.limits = limits;
             this.special = special;
+            this.copies = copies;
             this.table = table;
             this.allowed = allowed;
             this.smelting = smelting;
@@ -276,7 +297,11 @@ public final class CraftSub {
 
         /** Forgets the carried surplus of one item (it is not used for a plan of the item itself). */
         public void dropSurplus(String id) {
-            surplus.remove(Recipes.ns(id));
+            String ref = Recipes.ns(id);
+            Long gone = surplus.remove(ref);
+            // A banner or map the chunk before left carried is no stock of this load, but it may be the source of a copy (B4)
+            VariantSpecs.CopyFamily f = copies.get(ref);
+            if (gone != null && gone > 0 && f != null && f.kind() != VariantSpecs.CopyKind.BOOK) parked.merge(ref, gone, Long::sum);
         }
 
         /** The carried surplus now. */
@@ -339,6 +364,7 @@ public final class CraftSub {
             pool = s.pool;
             surplus = s.surplus;
             taken = s.taken;
+            parked = s.parked;
             locks = s.locks;
             while (steps.size() > s.steps) steps.remove(steps.size() - 1);
         }
@@ -352,6 +378,8 @@ public final class CraftSub {
         /** Makes {@code qty} of {@code id} available: null when it can, else the reason it can't. */
         @Nullable String need(String id, long qty, int depth, List<String> path) {
             if (++nodes > limits.maxNodes()) return TOO_LARGE;
+            VariantSpecs.CopyFamily copy = copies.get(id);
+            if (copy != null) return needCopy(copy, qty, depth, path);
             long fromS = Math.min(inS(id), qty);
             if (fromS > 0) surplus.merge(id, -fromS, Long::sum);
             qty -= fromS;
@@ -377,6 +405,111 @@ public final class CraftSub {
                 if (nodes > limits.maxNodes()) return TOO_LARGE;
             }
             return first;
+        }
+
+        /** Takes {@code n} of an id from the surplus and then the pool, into the plan's take. */
+        private void takeStock(String id, long n) {
+            long fromS = Math.min(inS(id), n);
+            if (fromS > 0) surplus.merge(id, -fromS, Long::sum);
+            long fromP = Math.min(inP(id), n - fromS);
+            if (fromP > 0) {
+                pool.merge(id, -fromP, Long::sum);
+                taken.merge(id, fromP, Long::sum);
+            }
+        }
+
+        /**
+         * Makes {@code qty} of a copy's product available (B4, CRAFT-CONTRACT-v1.2.md 15 and its B4 clarifications): from the stock first. What the stock does
+         * not cover is made by crafts that hold the copy's source:
+         * <ul>
+         *     <li>a banner copy: the source banner stays in the grid and is handed back. It is never delivered, so one unit of the stock is kept as the source
+         *     (or the one carried from the chunk before is used), and the rest of the stock is delivered; one blank banner and one craft for each copy that is
+         *     still wanted;</li>
+         *     <li>a map copy: the source map is used up and made again by the craft (a craft with {@code k} blanks makes {@code k + 1} maps), so a craft is at most
+         *     8 blanks and the next one takes its source from the maps in hand: all the stock is delivered, and a blank map is one more map;</li>
+         *     <li>a book copy: only from an original ({@code written_book@src:<key>}, which stays in the grid and is handed back); the copies are not in any
+         *     stock; at most 8 writable books and that many copies to a craft.</li>
+         * </ul>
+         * A source that is not in hand (no stock, nothing carried) can't be bought: it is the shortage ({@code not enough ...}).
+         * @return null when it can, else why not
+         */
+        private @Nullable String needCopy(VariantSpecs.CopyFamily f, long qty, int depth, List<String> path) {
+            String r = f.product();
+            boolean book = f.kind() == VariantSpecs.CopyKind.BOOK, map = f.kind() == VariantSpecs.CopyKind.MAP;
+            long avail = inS(r) + inP(r);
+            boolean banner = f.kind() == VariantSpecs.CopyKind.BANNER;
+            // The server reserves one banner of the key as the source for the whole order (CraftService.stock): copies and loads come from the rest, so a later load
+            // still has its source. A carried source (kept from the load before) is the reserve already. A map's source is one of its stock: while another load
+            // follows, the stock is not all delivered (see below: one map more is made to carry on with)
+            long deliverable = banner && parked.getOrDefault(r, 0L) < 1 ? Math.max(0, avail - 1) : avail;
+            if (map ? avail >= qty && !keepCopySource : deliverable >= qty) {
+                takeStock(r, qty);
+                return null;
+            }
+            // Maps carried over from the chunk before are maps like any: they are delivered when that covers it (nothing is made; the host takes them into the load)
+            if (map && avail == 0 && parked.getOrDefault(r, 0L) >= qty) {
+                parked.merge(r, -qty, Long::sum);
+                return null;
+            }
+            if (depth >= limits.maxDepth()) return CraftPlanner.TOO_DEEP + " (" + Recipes.pretty(r) + ")";
+            if (path.contains(r)) return "a recipe loop (" + Recipes.pretty(r) + ")";
+            long deliver, crafts;
+            boolean srcFromStock = false, srcFromParked = false;
+            if (book) {
+                // The copies come from the surplus and the pool (none today), and the original is held, not used
+                deliver = avail;
+                crafts = qty - deliver;
+                if (inS(f.source()) + inP(f.source()) < 1) return "not enough " + Recipes.pretty(f.source()) + " (1 short)";
+            }
+            else if (map) {
+                // All the stock (up to the load) goes to the load (one of it is used as the source, and the craft makes it again)
+                if (avail >= 1) deliver = Math.min(avail, qty);
+                else if (parked.getOrDefault(r, 0L) >= 1) {
+                    // Only a map carried over from the chunk before: it is used up, and what the crafts make is the load (one more than their blanks)
+                    srcFromParked = true;
+                    deliver = 1;
+                }
+                else return "not enough " + Recipes.pretty(r) + " (1 short)";
+                crafts = qty - deliver;
+                if (crafts <= 0 && !keepCopySource) return "not enough " + Recipes.pretty(r) + " (" + (qty - avail) + " short)";
+            }
+            else {
+                // A banner: the carried source is kept, else one unit of the stock; the rest is delivered
+                if (parked.getOrDefault(r, 0L) >= 1) deliver = avail;
+                else if (avail >= 1) {
+                    deliver = avail - 1;
+                    srcFromStock = true;
+                }
+                else return "not enough " + Recipes.pretty(r) + " (1 short)";
+                crafts = qty - deliver;
+            }
+            // One blank for each copy (or each net map) still wanted, taken from the surplus and the pool or crafted
+            long blanks = crafts + (map && keepCopySource ? 1 : 0);
+            List<String> below = new ArrayList<>(path);
+            below.add(r);
+            Map<String, Long> uses = new LinkedHashMap<>();
+            List<String> craftedAlts = new ArrayList<>();
+            List<String> blank = neverUse(f.blank()) ? List.of() : List.of(f.blank());
+            if (blank.isEmpty()) return "not enough " + Recipes.pretty(f.blank()) + " (" + blanks + " short)";
+            String why = group(blank, blanks, r, depth, below, uses, craftedAlts);
+            if (why != null) return why;
+            // The stock is taken (the source with it, for a banner or book): what is handed back is carried again afterwards
+            if (map) {
+                takeStock(r, Math.min(deliver, avail));
+                if (srcFromParked) parked.merge(r, -1L, Long::sum);
+            }
+            else if (book) {
+                takeStock(r, deliver);
+                takeStock(f.source(), 1);
+            }
+            else takeStock(r, deliver + (srcFromStock ? 1 : 0));
+            // The crafts: banners one by one, maps and books in crafts of at most 8 blanks and one shorter
+            long per = f.kind() == VariantSpecs.CopyKind.BANNER ? 1 : VariantSpecs.COPY_BATCH;
+            long full = blanks / per, rest = blanks % per;
+            if (full > 0) steps.add(new Raw(f.recipeFor((int) per), (int) full, Map.of(f.blank(), per * full), null));
+            if (rest > 0) steps.add(new Raw(f.recipeFor((int) rest), 1, Map.of(f.blank(), rest), null));
+            for (String alt : craftedAlts) locks.add(new Lock(r, alt));
+            return null;
         }
 
         private String noRecipe(String id, long missing) {
@@ -407,53 +540,8 @@ public final class CraftSub {
             Map<String, Long> uses = new LinkedHashMap<>();
             List<String> craftedAlts = new ArrayList<>();
             for (var g : groups.entrySet()) {
-                long left = (long) g.getValue() * fills;
-                List<String> alts = new ArrayList<>(new java.util.LinkedHashSet<>(g.getKey()));
-                // Pass 1, stock: the most surplus + pool first, then by id
-                alts.sort((a, b) -> {
-                    int c = Long.compare(inS(b) + inP(b), inS(a) + inP(a));
-                    return c != 0 ? c : a.compareTo(b);
-                });
-                for (String alt : alts) {
-                    if (left <= 0) break;
-                    long k = Math.min(left, inS(alt) + inP(alt));
-                    if (k <= 0) continue;
-                    String why = need(alt, k, depth + 1, below);
-                    if (why != null) return why;
-                    uses.merge(alt, k, Long::sum);
-                    left -= k;
-                }
-                if (left <= 0) continue;
-                // Pass 2, craft: alternatives with a finite estimate, not locked against this item, cheapest first
-                List<String> crafty = new ArrayList<>();
-                for (String alt : alts) {
-                    if (Double.isInfinite(estOf(alt))) continue;
-                    if (locks.contains(new Lock(alt, id))) continue;
-                    crafty.add(alt);
-                }
-                crafty.sort((a, b) -> {
-                    double ea = estOf(a), eb = estOf(b);
-                    if (Math.abs(ea - eb) > EPS) return Double.compare(ea, eb);
-                    return a.compareTo(b);
-                });
-                String firstWhy = null;
-                for (String alt : crafty) {
-                    if (left <= 0) break;
-                    long k = largest(alt, left, depth + 1, below);
-                    // What could not be made of it says why (the first reason is the one given)
-                    if (k < left && firstWhy == null) firstWhy = whyNot(alt, left, depth + 1, below);
-                    if (k <= 0) continue;
-                    String why = need(alt, k, depth + 1, below);
-                    if (why != null) return why;
-                    uses.merge(alt, k, Long::sum);
-                    left -= k;
-                    craftedAlts.add(alt);
-                }
-                if (left > 0) {
-                    if (firstWhy != null) return firstWhy;
-                    String name = alts.size() == 1 ? Recipes.pretty(alts.get(0)) : CraftPlanner.label(alts);
-                    return "not enough " + name + " (" + left + " short)";
-                }
+                String why = group(g.getKey(), (long) g.getValue() * fills, id, depth, below, uses, craftedAlts);
+                if (why != null) return why;
             }
             // A smelt is one step per input kind and batch of at most 64 items (CRAFT-CONTRACT-v1.2.md, B2 review), each with the fuel of its own
             // (one kind, arithmetic per step); a table recipe is one step with no fuel
@@ -476,6 +564,62 @@ public final class CraftSub {
             long extra = (long) fills * r.count() - qty;
             if (extra > 0) surplus.merge(id, extra, Long::sum);
             for (String alt : craftedAlts) locks.add(new Lock(id, alt));
+            return null;
+        }
+
+        /**
+         * Gets {@code left} items of one group of alternatives for a recipe of {@code id}: from the surplus and the pool first (the most plentiful alternative
+         * first), then crafted, alternative by alternative (cheapest first), each as much as it can. What was used is added to {@code uses}, what was crafted to
+         * {@code craftedAlts}.
+         * @return null when the group is covered, else why not
+         */
+        private @Nullable String group(List<String> groupAlts, long left, String id, int depth, List<String> below, Map<String, Long> uses, List<String> craftedAlts) {
+            List<String> alts = new ArrayList<>(new java.util.LinkedHashSet<>(groupAlts));
+            // Pass 1, stock: the most surplus + pool first, then by id
+            alts.sort((a, b) -> {
+                int c = Long.compare(inS(b) + inP(b), inS(a) + inP(a));
+                return c != 0 ? c : a.compareTo(b);
+            });
+            for (String alt : alts) {
+                if (left <= 0) break;
+                long k = Math.min(left, inS(alt) + inP(alt));
+                if (k <= 0) continue;
+                String why = need(alt, k, depth + 1, below);
+                if (why != null) return why;
+                uses.merge(alt, k, Long::sum);
+                left -= k;
+            }
+            if (left <= 0) return null;
+            // Pass 2, craft: alternatives with a finite estimate, not locked against this item, cheapest first
+            List<String> crafty = new ArrayList<>();
+            for (String alt : alts) {
+                if (Double.isInfinite(estOf(alt))) continue;
+                if (locks.contains(new Lock(alt, id))) continue;
+                crafty.add(alt);
+            }
+            crafty.sort((a, b) -> {
+                double ea = estOf(a), eb = estOf(b);
+                if (Math.abs(ea - eb) > EPS) return Double.compare(ea, eb);
+                return a.compareTo(b);
+            });
+            String firstWhy = null;
+            for (String alt : crafty) {
+                if (left <= 0) break;
+                long k = largest(alt, left, depth + 1, below);
+                // What could not be made of it says why (the first reason is the one given)
+                if (k < left && firstWhy == null) firstWhy = whyNot(alt, left, depth + 1, below);
+                if (k <= 0) continue;
+                String why = need(alt, k, depth + 1, below);
+                if (why != null) return why;
+                uses.merge(alt, k, Long::sum);
+                left -= k;
+                craftedAlts.add(alt);
+            }
+            if (left > 0) {
+                if (firstWhy != null) return firstWhy;
+                String name = alts.size() == 1 ? Recipes.pretty(alts.get(0)) : CraftPlanner.label(alts);
+                return "not enough " + name + " (" + left + " short)";
+            }
             return null;
         }
 

@@ -435,8 +435,10 @@ public final class CraftTrip {
             case Taken -> {
                 if (port.busy() || sinceClick < SETTLE_TICKS) return;
                 CraftGrid.Batch b = batch;
-                // The server's update: the grid used up by one fill (until then the take may still be refused)
-                if (gridTotal() != gridBefore - b.cells()) {
+                CraftPlanner.Step now = steps.get(at);
+                // The server's update: the grid used up by one fill (until then the take may still be refused); a copy of a banner or book leaves its source in
+                // the grid (B4), so that stack stays
+                if (gridTotal() != gridBefore - b.cells() + VariantSpecs.remainderCells(now.recipe().id())) {
                     if (!port.tableOpen()) {
                         end(CLOSED, true, false);
                         return;
@@ -447,12 +449,19 @@ public final class CraftTrip {
                 took++;
                 taken++;
                 CraftPlanner.Step st = steps.get(at);
-                if (at == steps.size() - 1 && st.recipe().result().equals(item)) made += st.recipe().count();
+                // What a craft adds: a map copy makes its source again, so it adds one less than it makes (B4)
+                if (at == steps.size() - 1 && st.recipe().result().equals(item)) made += VariantSpecs.netCount(st.recipe().id(), st.recipe().count());
                 if (took < b.fills()) {
                     go(Step.Result);
                     return;
                 }
                 fillsLeft -= b.fills();
+                // The source of a copy stays in the grid (B4): it is taken back out before the next batch is placed, and the trip goes on from there
+                if (VariantSpecs.remainderCells(st.recipe().id()) > 0 && !gridEmpty()) {
+                    pending = null;
+                    go(Step.Retrieve);
+                    return;
+                }
                 go(Step.Prepare);
             }
             case Retrieve -> {
